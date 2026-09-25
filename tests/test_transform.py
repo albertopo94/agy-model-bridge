@@ -1,0 +1,929 @@
+import unittest
+import json
+from bridge.transform import (
+    openai_to_cloudcode_request,
+    parse_cloudcode_sse_event,
+    extract_text_delta,
+    extract_finish_reason,
+    extract_usage,
+    build_openai_chunk,
+    build_openai_completion,
+    build_openai_model_list,
+    build_openai_error_response,
+    check_sse_error,
+)
+from bridge.client import (
+    BridgeError,
+    RateLimitError,
+    CapacityExhaustedError,
+    AuthenticationError,
+    ForbiddenError,
+)
+
+
+class TestOpenAIToCloudCodeRequest(unittest.TestCase):
+    def test_valid_request_with_system_and_user_messages(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": "Hello world"},
+            ],
+        }
+        model, contents, system_instruction, gen_config = openai_to_cloudcode_request(
+            payload, project="aicode-consumers"
+        )
+        self.assertEqual(model, "gemini-2.5-pro")
+        self.assertEqual(
+            system_instruction,
+            {"parts": [{"text": "You are a helpful assistant."}]},
+        )
+        self.assertEqual(
+            contents,
+            [{"role": "user", "parts": [{"text": "Hello world"}]}],
+        )
+        self.assertIsNone(gen_config)
+
+    def test_valid_request_multi_turn_conversation(self):
+        payload = {
+            "model": "gemini-2.5-flash",
+            "messages": [
+                {"role": "user", "content": "Hi"},
+                {"role": "assistant", "content": "Hello! How can I help you?"},
+                {"role": "user", "content": "Tell me a joke"},
+            ],
+        }
+        model, contents, system_instruction, gen_config = openai_to_cloudcode_request(
+            payload, project="test-project"
+        )
+        self.assertEqual(model, "gemini-2.5-flash")
+        self.assertIsNone(system_instruction)
+        self.assertEqual(
+            contents,
+            [
+                {"role": "user", "parts": [{"text": "Hi"}]},
+                {"role": "model", "parts": [{"text": "Hello! How can I help you?"}]},
+                {"role": "user", "parts": [{"text": "Tell me a joke"}]},
+            ],
+        )
+        self.assertIsNone(gen_config)
+
+    def test_multiple_system_messages_concatenated(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [
+                {"role": "system", "content": "Instruction 1."},
+                {"role": "system", "content": "Instruction 2."},
+                {"role": "user", "content": "Action"},
+            ],
+        }
+        _, _, system_instruction, _ = openai_to_cloudcode_request(
+            payload, project="test-project"
+        )
+        self.assertIsNotNone(system_instruction)
+        self.assertEqual(
+            system_instruction["parts"],
+            [{"text": "Instruction 1.\nInstruction 2."}],
+        )
+
+    def test_developer_role_treated_as_system(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [
+                {"role": "developer", "content": "Developer instructions."},
+                {"role": "user", "content": "Hello"},
+            ],
+        }
+        _, _, system_instruction, _ = openai_to_cloudcode_request(
+            payload, project="test-project"
+        )
+        self.assertIsNotNone(system_instruction)
+        self.assertEqual(
+            system_instruction["parts"],
+            [{"text": "Developer instructions."}],
+        )
+
+    def test_content_none_handled_safely(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [
+                {"role": "user", "content": None},
+            ],
+        }
+        _, contents, _, _ = openai_to_cloudcode_request(payload, project="test-project")
+        self.assertEqual(
+            contents,
+            [{"role": "user", "parts": [{"text": " "}]}],
+        )
+
+    def test_conversation_starting_with_model_prepends_hello_user_turn(self):
+        payload = {
+            "model": "gemini-2.5-flash",
+            "messages": [
+                {"role": "assistant", "content": "How can I help you today?"},
+                {"role": "user", "content": "Tell me a joke"},
+            ],
+        }
+        _, contents, _, _ = openai_to_cloudcode_request(payload, project="test-project")
+        self.assertEqual(
+            contents,
+            [
+                {"role": "user", "parts": [{"text": "Hello"}]},
+                {"role": "model", "parts": [{"text": "How can I help you today?"}]},
+                {"role": "user", "parts": [{"text": "Tell me a joke"}]},
+            ],
+        )
+
+    def test_single_assistant_message_prepends_hello_and_appends_continue(self):
+        payload = {
+            "model": "gemini-2.5-flash",
+            "messages": [
+                {"role": "assistant", "content": "How can I help you today?"},
+            ],
+        }
+        _, contents, _, _ = openai_to_cloudcode_request(payload, project="test-project")
+        self.assertEqual(
+            contents,
+            [
+                {"role": "user", "parts": [{"text": "Hello"}]},
+                {"role": "model", "parts": [{"text": "How can I help you today?"}]},
+                {"role": "user", "parts": [{"text": "Continue"}]},
+            ],
+        )
+
+    def test_empty_and_whitespace_content_prevented_in_parts(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [
+                {"role": "user", "content": ""},
+                {"role": "assistant", "content": "   "},
+                {"role": "user", "content": "\t\n "},
+            ],
+        }
+        _, contents, _, _ = openai_to_cloudcode_request(payload, project="test-project")
+        self.assertEqual(
+            contents,
+            [
+                {"role": "user", "parts": [{"text": " "}]},
+                {"role": "model", "parts": [{"text": " "}]},
+                {"role": "user", "parts": [{"text": " "}]},
+            ],
+        )
+
+    def test_missing_model_raises_value_error(self):
+        payload = {
+            "messages": [{"role": "user", "content": "Hello"}],
+        }
+        with self.assertRaises(ValueError) as ctx:
+            openai_to_cloudcode_request(payload, project="test-project")
+        self.assertIn("model", str(ctx.exception).lower())
+
+    def test_empty_or_missing_messages_raises_value_error(self):
+        with self.assertRaises(ValueError) as ctx1:
+            openai_to_cloudcode_request({"model": "test"}, project="test-project")
+        self.assertIn("messages", str(ctx1.exception).lower())
+
+        with self.assertRaises(ValueError) as ctx2:
+            openai_to_cloudcode_request(
+                {"model": "test", "messages": []}, project="test-project"
+            )
+        self.assertIn("messages", str(ctx2.exception).lower())
+
+    def test_invalid_role_raises_value_error(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [{"role": "unknown_role", "content": "Hello"}],
+        }
+        with self.assertRaises(ValueError) as ctx:
+            openai_to_cloudcode_request(payload, project="test-project")
+        self.assertIn("role", str(ctx.exception).lower())
+
+    def test_multimodal_content_list_text_extraction(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "Hello "},
+                        {"type": "text", "text": "world!"},
+                    ],
+                }
+            ],
+        }
+        _, contents, _, _ = openai_to_cloudcode_request(payload, project="test-project")
+        self.assertEqual(
+            contents,
+            [{"role": "user", "parts": [{"text": "Hello world!"}]}],
+        )
+
+    def test_multimodal_content_list_with_image_dropped_safely(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image_url", "image_url": {"url": "https://example.com/img.png"}},
+                        {"type": "text", "text": "Describe this image."},
+                    ],
+                }
+            ],
+        }
+        _, contents, _, _ = openai_to_cloudcode_request(payload, project="test-project")
+        self.assertEqual(
+            contents,
+            [{"role": "user", "parts": [{"text": "Describe this image."}]}],
+        )
+
+    def test_multimodal_content_dict_with_only_text_key(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [{"text": "Just text item"}],
+                }
+            ],
+        }
+        _, contents, _, _ = openai_to_cloudcode_request(payload, project="test-project")
+        self.assertEqual(
+            contents,
+            [{"role": "user", "parts": [{"text": "Just text item"}]}],
+        )
+
+    def test_multimodal_content_list_with_strings(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": ["First paragraph.\n", "Second paragraph."],
+                }
+            ],
+        }
+        _, contents, _, _ = openai_to_cloudcode_request(payload, project="test-project")
+        self.assertEqual(
+            contents,
+            [{"role": "user", "parts": [{"text": "First paragraph.\nSecond paragraph."}]}],
+        )
+
+    def test_assistant_tool_calls_extracted_when_content_empty(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [
+                {"role": "user", "content": "What is the weather?"},
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "call_123",
+                            "type": "function",
+                            "function": {"name": "get_weather", "arguments": '{"location": "Tokyo"}'},
+                        }
+                    ],
+                },
+            ],
+        }
+        _, contents, _, _ = openai_to_cloudcode_request(payload, project="test-project")
+        # Conversation ends with model, so helper appends a user "Continue" turn
+        self.assertEqual(contents[0]["role"], "user")
+        self.assertEqual(contents[1]["role"], "model")
+        self.assertIn("[Tool Call: get_weather({\"location\": \"Tokyo\"})]", contents[1]["parts"][0]["text"])
+
+    def test_only_system_messages_raises_value_error(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [{"role": "system", "content": "You are a helpful assistant."}],
+        }
+        with self.assertRaises(ValueError) as ctx:
+            openai_to_cloudcode_request(payload, project="test-project")
+        self.assertIn("at least one message is required", str(ctx.exception))
+
+    def test_only_developer_messages_raises_value_error(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [{"role": "developer", "content": "System prompt"}],
+        }
+        with self.assertRaises(ValueError) as ctx:
+            openai_to_cloudcode_request(payload, project="test-project")
+        self.assertIn("at least one message is required", str(ctx.exception))
+
+    def test_multimodal_content_list_with_none_text(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": None},
+                        {"type": "text", "text": "hello"},
+                    ],
+                }
+            ],
+        }
+        _, contents, _, _ = openai_to_cloudcode_request(payload, project="test-project")
+        self.assertEqual(contents, [{"role": "user", "parts": [{"text": "hello"}]}])
+
+    def test_empty_system_instruction_returns_none(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [
+                {"role": "system", "content": ""},
+                {"role": "user", "content": "hello"},
+            ],
+        }
+        _, _, system_instruction, _ = openai_to_cloudcode_request(payload, project="test-project")
+        self.assertIsNone(system_instruction)
+
+    def test_whitespace_system_instruction_returns_none(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [
+                {"role": "system", "content": "   \n\t  "},
+                {"role": "user", "content": "hello"},
+            ],
+        }
+        _, _, system_instruction, _ = openai_to_cloudcode_request(payload, project="test-project")
+        self.assertIsNone(system_instruction)
+
+    def test_generation_config_mapping_sampling_params(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [{"role": "user", "content": "hello"}],
+            "temperature": 0.7,
+            "max_tokens": 100,
+            "top_p": 0.95,
+            "stop": ["END", "STOP"],
+        }
+        _, _, _, gen_config = openai_to_cloudcode_request(payload, project="test-project")
+        self.assertEqual(
+            gen_config,
+            {
+                "temperature": 0.7,
+                "maxOutputTokens": 100,
+                "topP": 0.95,
+                "stopSequences": ["END", "STOP"],
+            },
+        )
+
+    def test_generation_config_max_completion_tokens_and_string_stop(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [{"role": "user", "content": "hello"}],
+            "max_completion_tokens": 256,
+            "stop": "STOP_TOKEN",
+        }
+        _, _, _, gen_config = openai_to_cloudcode_request(payload, project="test-project")
+        self.assertEqual(
+            gen_config,
+            {
+                "maxOutputTokens": 256,
+                "stopSequences": ["STOP_TOKEN"],
+            },
+        )
+
+    def test_generation_config_absent_returns_none(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [{"role": "user", "content": "hello"}],
+        }
+        _, _, _, gen_config = openai_to_cloudcode_request(payload, project="test-project")
+        self.assertIsNone(gen_config)
+
+    def test_generation_config_stop_empty_sequences_omitted(self):
+        for empty_stop in ("", [], ["", "   "]):
+            with self.subTest(empty_stop=empty_stop):
+                payload = {
+                    "model": "gemini-2.5-pro",
+                    "messages": [{"role": "user", "content": "hello"}],
+                    "stop": empty_stop,
+                }
+                _, _, _, gen_config = openai_to_cloudcode_request(payload, project="test-project")
+                self.assertIsNone(gen_config)
+
+    def test_generation_config_stop_filters_empty_strings(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [{"role": "user", "content": "hello"}],
+            "stop": ["", "STOP_TOKEN", "   ", "END"],
+        }
+        _, _, _, gen_config = openai_to_cloudcode_request(payload, project="test-project")
+        self.assertEqual(
+            gen_config,
+            {"stopSequences": ["STOP_TOKEN", "END"]},
+        )
+
+    def test_tool_and_function_roles_mapped_to_user_with_prefix(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [
+                {"role": "user", "content": "Call tool"},
+                {"role": "assistant", "content": "Calling tool..."},
+                {"role": "tool", "content": "Result from tool"},
+                {"role": "assistant", "content": "Calling function..."},
+                {"role": "function", "content": "Result from func"},
+            ],
+        }
+        _, contents, _, _ = openai_to_cloudcode_request(payload, project="test-project")
+        self.assertEqual(
+            contents,
+            [
+                {"role": "user", "parts": [{"text": "Call tool"}]},
+                {"role": "model", "parts": [{"text": "Calling tool..."}]},
+                {"role": "user", "parts": [{"text": "[Tool Result]: Result from tool"}]},
+                {"role": "model", "parts": [{"text": "Calling function..."}]},
+                {"role": "user", "parts": [{"text": "[Tool Result]: Result from func"}]},
+            ],
+        )
+
+    def test_consecutive_same_role_messages_merged(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [
+                {"role": "user", "content": "Question 1"},
+                {"role": "user", "content": "Question 2"},
+                {"role": "assistant", "content": "Answer 1"},
+                {"role": "assistant", "content": "Answer 2"},
+                {"role": "user", "content": "Followup"},
+                {"role": "tool", "content": "Tool output"},
+            ],
+        }
+        _, contents, _, _ = openai_to_cloudcode_request(payload, project="test-project")
+        self.assertEqual(
+            contents,
+            [
+                {"role": "user", "parts": [{"text": "Question 1"}, {"text": "Question 2"}]},
+                {"role": "model", "parts": [{"text": "Answer 1"}, {"text": "Answer 2"}]},
+                {"role": "user", "parts": [{"text": "Followup"}, {"text": "[Tool Result]: Tool output"}]},
+            ],
+        )
+
+    def test_conversation_ending_with_assistant_appends_continue_user_turn(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [
+                {"role": "user", "content": "Hello"},
+                {"role": "assistant", "content": "How can I help you?"},
+            ],
+        }
+        _, contents, _, _ = openai_to_cloudcode_request(payload, project="test-project")
+        self.assertEqual(
+            contents,
+            [
+                {"role": "user", "parts": [{"text": "Hello"}]},
+                {"role": "model", "parts": [{"text": "How can I help you?"}]},
+                {"role": "user", "parts": [{"text": "Continue"}]},
+            ],
+        )
+
+
+class TestParseCloudCodeSSEEvent(unittest.TestCase):
+    def test_parse_valid_sse_data_line(self):
+        line = 'data: {"candidates": [{"content": {"parts": [{"text": "hello"}]}}]}\n'
+        parsed = parse_cloudcode_sse_event(line)
+        self.assertIsInstance(parsed, dict)
+        self.assertIn("candidates", parsed)
+
+    def test_parse_done_returns_none(self):
+        self.assertIsNone(parse_cloudcode_sse_event("data: [DONE]"))
+        self.assertIsNone(parse_cloudcode_sse_event("data: [DONE]\n"))
+
+    def test_parse_empty_or_heartbeat_returns_none(self):
+        self.assertIsNone(parse_cloudcode_sse_event(""))
+        self.assertIsNone(parse_cloudcode_sse_event("\n"))
+        self.assertIsNone(parse_cloudcode_sse_event(":ping\n"))
+        self.assertIsNone(parse_cloudcode_sse_event("   "))
+
+    def test_parse_invalid_json_returns_none(self):
+        self.assertIsNone(parse_cloudcode_sse_event("data: {invalid json}"))
+
+
+class TestExtractTextDeltaAndFiltering(unittest.TestCase):
+    def test_extract_standard_text_delta(self):
+        event = {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [{"text": "Hello world!"}],
+                        "role": "model",
+                    }
+                }
+            ]
+        }
+        delta = extract_text_delta(event)
+        self.assertEqual(delta, "Hello world!")
+
+    def test_filter_thought_block(self):
+        event = {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {"thought": True, "text": "Let me think about this."},
+                        ],
+                        "role": "model",
+                    }
+                }
+            ]
+        }
+        delta = extract_text_delta(event)
+        self.assertIsNone(delta)
+
+    def test_filter_thought_signature(self):
+        event = {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {"thoughtSignature": "xyz123", "text": "Internal CoT"},
+                        ],
+                        "role": "model",
+                    }
+                }
+            ]
+        }
+        delta = extract_text_delta(event)
+        self.assertEqual(delta, "Internal CoT")
+
+    def test_extract_text_delta_with_response_wrapper(self):
+        event = {
+            "response": {
+                "candidates": [
+                    {
+                        "content": {
+                            "parts": [{"text": "Wrapped delta"}],
+                            "role": "model",
+                        }
+                    }
+                ]
+            }
+        }
+        delta = extract_text_delta(event)
+        self.assertEqual(delta, "Wrapped delta")
+
+    def test_mixed_parts_extracts_only_clean_text(self):
+        event = {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {"thought": True, "text": "Thinking..."},
+                            {"text": "The answer is 42."},
+                        ],
+                        "role": "model",
+                    }
+                }
+            ]
+        }
+        delta = extract_text_delta(event)
+        self.assertEqual(delta, "The answer is 42.")
+
+    def test_empty_candidates_or_parts_returns_none(self):
+        self.assertIsNone(extract_text_delta({}))
+        self.assertIsNone(extract_text_delta({"candidates": []}))
+        self.assertIsNone(extract_text_delta({"candidates": [{}]}))
+        self.assertIsNone(extract_text_delta({"candidates": [{"content": {}}]}))
+        self.assertIsNone(
+            extract_text_delta({"candidates": [{"content": {"parts": []}}]})
+        )
+
+
+class TestExtractFinishReasonAndUsage(unittest.TestCase):
+    def test_extract_finish_reason_stop(self):
+        event = {"candidates": [{"finishReason": "STOP"}]}
+        self.assertEqual(extract_finish_reason(event), "stop")
+
+    def test_extract_finish_reason_max_tokens(self):
+        event = {"candidates": [{"finishReason": "MAX_TOKENS"}]}
+        self.assertEqual(extract_finish_reason(event), "length")
+
+    def test_extract_finish_reason_safety(self):
+        event = {"candidates": [{"finishReason": "SAFETY"}]}
+        self.assertEqual(extract_finish_reason(event), "content_filter")
+
+    def test_extract_finish_reason_candidate_content_filter_types(self):
+        for reason in ("RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII"):
+            with self.subTest(reason=reason):
+                event = {"candidates": [{"finishReason": reason}]}
+                self.assertEqual(extract_finish_reason(event), "content_filter")
+
+    def test_extract_finish_reason_prompt_feedback_blocks(self):
+        for reason in ("SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII"):
+            with self.subTest(block_reason=reason):
+                event = {"promptFeedback": {"blockReason": reason}}
+                self.assertEqual(extract_finish_reason(event), "content_filter")
+
+    def test_extract_finish_reason_prompt_feedback_wrapped_in_response(self):
+        event = {"response": {"promptFeedback": {"blockReason": "SAFETY"}}}
+        self.assertEqual(extract_finish_reason(event), "content_filter")
+
+    def test_extract_finish_reason_default_to_stop(self):
+        event = {"candidates": [{"finishReason": "UNKNOWN_REASON"}]}
+        self.assertEqual(extract_finish_reason(event), "stop")
+
+    def test_extract_finish_reason_with_response_wrapper(self):
+        event = {"response": {"candidates": [{"finishReason": "STOP"}]}}
+        self.assertEqual(extract_finish_reason(event), "stop")
+
+    def test_extract_finish_reason_missing_returns_none(self):
+        self.assertIsNone(extract_finish_reason({}))
+        self.assertIsNone(extract_finish_reason({"candidates": [{}]}))
+
+    def test_extract_finish_reason_unspecified_returns_none(self):
+        for val in ("FINISH_REASON_UNSPECIFIED", "0", "UNSPECIFIED", "", "   "):
+            with self.subTest(val=val):
+                event = {"candidates": [{"finishReason": val}]}
+                self.assertIsNone(extract_finish_reason(event))
+
+    def test_extract_finish_reason_block_reason_unspecified_ignored(self):
+        for val in ("BLOCK_REASON_UNSPECIFIED", "0", "UNSPECIFIED"):
+            with self.subTest(val=val):
+                event = {
+                    "promptFeedback": {"blockReason": val},
+                    "candidates": [{"finishReason": "STOP"}],
+                }
+                self.assertEqual(extract_finish_reason(event), "stop")
+
+    def test_extract_finish_reason_malicious(self):
+        event = {"candidates": [{"finishReason": "MALICIOUS"}]}
+        self.assertEqual(extract_finish_reason(event), "content_filter")
+        feedback_event = {"promptFeedback": {"blockReason": "MALICIOUS"}}
+        self.assertEqual(extract_finish_reason(feedback_event), "content_filter")
+
+    def test_extract_finish_reason_numeric_enums(self):
+        # 1 -> stop
+        self.assertEqual(extract_finish_reason({"candidates": [{"finishReason": "1"}]}), "stop")
+        self.assertEqual(extract_finish_reason({"candidates": [{"finishReason": 1}]}), "stop")
+
+        # 2 -> length
+        self.assertEqual(extract_finish_reason({"candidates": [{"finishReason": "2"}]}), "length")
+        self.assertEqual(extract_finish_reason({"candidates": [{"finishReason": 2}]}), "length")
+
+        # 3..9 -> content_filter
+        for code in range(3, 10):
+            with self.subTest(code=code):
+                self.assertEqual(
+                    extract_finish_reason({"candidates": [{"finishReason": str(code)}]}),
+                    "content_filter",
+                )
+                self.assertEqual(
+                    extract_finish_reason({"candidates": [{"finishReason": code}]}),
+                    "content_filter",
+                )
+
+
+    def test_extract_usage_metadata(self):
+        event = {
+            "usageMetadata": {
+                "promptTokenCount": 15,
+                "candidatesTokenCount": 35,
+                "totalTokenCount": 50,
+            }
+        }
+        usage = extract_usage(event)
+        self.assertEqual(
+            usage,
+            {
+                "prompt_tokens": 15,
+                "completion_tokens": 35,
+                "total_tokens": 50,
+            },
+        )
+
+    def test_extract_usage_with_response_wrapper(self):
+        event = {
+            "response": {
+                "usageMetadata": {
+                    "promptTokenCount": 10,
+                    "candidatesTokenCount": 20,
+                    "totalTokenCount": 30,
+                }
+            }
+        }
+        usage = extract_usage(event)
+        self.assertEqual(
+            usage,
+            {
+                "prompt_tokens": 10,
+                "completion_tokens": 20,
+                "total_tokens": 30,
+            },
+        )
+
+    def test_extract_usage_missing_returns_none(self):
+        self.assertIsNone(extract_usage({}))
+        self.assertIsNone(extract_usage({"candidates": []}))
+
+    def test_extract_usage_null_token_counts(self):
+        event = {
+            "usageMetadata": {
+                "promptTokenCount": None,
+                "candidatesTokenCount": None,
+                "totalTokenCount": None,
+            }
+        }
+        usage = extract_usage(event)
+        self.assertEqual(
+            usage,
+            {
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0,
+            },
+        )
+
+
+class TestBuildOpenAIResponses(unittest.TestCase):
+    def test_build_openai_chunk_with_delta(self):
+        chunk_str = build_openai_chunk(
+            completion_id="chatcmpl-123",
+            model="gemini-2.5-pro",
+            delta_text="Hello",
+        )
+        self.assertTrue(chunk_str.startswith("data: "))
+        self.assertTrue(chunk_str.endswith("\n\n"))
+        chunk_json = json.loads(chunk_str[6:].strip())
+        self.assertEqual(chunk_json["id"], "chatcmpl-123")
+        self.assertEqual(chunk_json["object"], "chat.completion.chunk")
+        self.assertEqual(chunk_json["model"], "gemini-2.5-pro")
+        self.assertEqual(chunk_json["choices"][0]["delta"]["content"], "Hello")
+        self.assertIsNone(chunk_json["choices"][0]["finish_reason"])
+
+    def test_build_openai_chunk_with_finish_reason(self):
+        chunk_str = build_openai_chunk(
+            completion_id="chatcmpl-123",
+            model="gemini-2.5-pro",
+            finish_reason="stop",
+        )
+        chunk_json = json.loads(chunk_str[6:].strip())
+        self.assertEqual(chunk_json["choices"][0]["finish_reason"], "stop")
+        self.assertEqual(chunk_json["choices"][0]["delta"], {})
+
+    def test_build_openai_chunk_with_role(self):
+        chunk_str = build_openai_chunk(
+            completion_id="chatcmpl-123",
+            model="gemini-2.5-pro",
+            delta_text="Hello",
+            role="assistant",
+        )
+        chunk_json = json.loads(chunk_str[6:].strip())
+        self.assertEqual(chunk_json["choices"][0]["delta"]["role"], "assistant")
+        self.assertEqual(chunk_json["choices"][0]["delta"]["content"], "Hello")
+
+    def test_build_openai_chunk_with_role_only(self):
+        chunk_str = build_openai_chunk(
+            completion_id="chatcmpl-123",
+            model="gemini-2.5-pro",
+            role="assistant",
+        )
+        chunk_json = json.loads(chunk_str[6:].strip())
+        self.assertEqual(chunk_json["choices"][0]["delta"]["role"], "assistant")
+        self.assertNotIn("content", chunk_json["choices"][0]["delta"])
+
+    def test_build_openai_completion_non_streaming(self):
+        usage = {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30}
+        resp = build_openai_completion(
+            completion_id="chatcmpl-999",
+            model="gemini-2.5-pro",
+            full_text="Complete answer.",
+            usage=usage,
+            finish_reason="length",
+        )
+        self.assertEqual(resp["id"], "chatcmpl-999")
+        self.assertEqual(resp["object"], "chat.completion")
+        self.assertEqual(resp["model"], "gemini-2.5-pro")
+        self.assertEqual(resp["choices"][0]["message"]["role"], "assistant")
+        self.assertEqual(resp["choices"][0]["message"]["content"], "Complete answer.")
+        self.assertEqual(resp["choices"][0]["finish_reason"], "length")
+        self.assertEqual(resp["usage"], usage)
+
+    def test_build_openai_model_list(self):
+        upstream = [
+            {"name": "models/gemini-2.5-pro"},
+            {"id": "gemini-2.5-flash"},
+            "models/gemini-1.5-flash",
+            "gemini-ultra",
+        ]
+        result = build_openai_model_list(upstream)
+        self.assertEqual(result["object"], "list")
+        self.assertEqual(len(result["data"]), 4)
+        self.assertEqual(result["data"][0]["id"], "gemini-2.5-pro")
+        self.assertEqual(result["data"][0]["object"], "model")
+        self.assertEqual(result["data"][0]["owned_by"], "google")
+        self.assertEqual(result["data"][1]["id"], "gemini-2.5-flash")
+        self.assertEqual(result["data"][2]["id"], "gemini-1.5-flash")
+        self.assertEqual(result["data"][3]["id"], "gemini-ultra")
+
+    def test_build_openai_model_list_deduplicates_ids(self):
+        upstream = [
+            {"name": "models/gemini-2.5-pro"},
+            {"id": "gemini-2.5-pro"},
+            "gemini-2.5-pro",
+        ]
+        result = build_openai_model_list(upstream)
+        self.assertEqual(len(result["data"]), 1)
+        self.assertEqual(result["data"][0]["id"], "gemini-2.5-pro")
+
+    def test_build_openai_error_response(self):
+        status_code, err = build_openai_error_response(
+            status_code=400,
+            message="Invalid model specified",
+            error_type="invalid_request_error",
+        )
+        self.assertEqual(status_code, 400)
+        self.assertEqual(
+            err,
+            {
+                "error": {
+                    "message": "Invalid model specified",
+                    "type": "invalid_request_error",
+                    "code": 400,
+                }
+            },
+        )
+
+
+class TestCheckSSEError(unittest.TestCase):
+    def test_check_sse_error_none_when_no_error(self):
+        # Should not raise for normal events
+        check_sse_error({})
+        check_sse_error({"candidates": []})
+        check_sse_error({"response": {"candidates": []}})
+
+    def test_check_sse_error_rate_limit_429(self):
+        event = {
+            "error": {
+                "code": 429,
+                "message": "Resource exhausted: quota exceeded",
+                "status": "RESOURCE_EXHAUSTED",
+            }
+        }
+        with self.assertRaises(RateLimitError) as ctx:
+            check_sse_error(event)
+        self.assertIn("quota exceeded", str(ctx.exception))
+
+    def test_check_sse_error_capacity_exhausted_503(self):
+        event = {
+            "error": {
+                "code": 503,
+                "message": "Service temporarily unavailable",
+                "status": "UNAVAILABLE",
+            }
+        }
+        with self.assertRaises(CapacityExhaustedError) as ctx:
+            check_sse_error(event)
+        self.assertIn("unavailable", str(ctx.exception).lower())
+
+    def test_check_sse_error_auth_error_401(self):
+        event = {
+            "error": {
+                "code": 401,
+                "message": "Request had invalid authentication credentials",
+                "status": "UNAUTHENTICATED",
+            }
+        }
+        with self.assertRaises(AuthenticationError) as ctx:
+            check_sse_error(event)
+        self.assertIn("authentication", str(ctx.exception).lower())
+
+    def test_check_sse_error_forbidden_403(self):
+        event = {
+            "error": {
+                "code": 403,
+                "message": "The caller does not have permission",
+                "status": "PERMISSION_DENIED",
+            }
+        }
+        with self.assertRaises(ForbiddenError) as ctx:
+            check_sse_error(event)
+        self.assertIn("forbidden", str(ctx.exception).lower())
+
+    def test_check_sse_error_generic_bridge_error(self):
+        event = {
+            "error": {
+                "code": 500,
+                "message": "Internal server error occurred",
+            }
+        }
+        with self.assertRaises(BridgeError) as ctx:
+            check_sse_error(event)
+        self.assertIn("Internal server error", str(ctx.exception))
+
+    def test_check_sse_error_wrapped_in_response(self):
+        event = {
+            "response": {
+                "error": {
+                    "code": 429,
+                    "message": "Quota limit reached",
+                    "status": "RESOURCE_EXHAUSTED",
+                }
+            }
+        }
+        with self.assertRaises(RateLimitError):
+            check_sse_error(event)
+
+
+if __name__ == "__main__":
+    unittest.main()

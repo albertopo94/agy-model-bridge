@@ -1,0 +1,5 @@
+# Local AI runtime state
+.atl/
+__pycache__/
+*.py[cod]
+.DS_Store
