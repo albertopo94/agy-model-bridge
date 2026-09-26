@@ -11,6 +11,7 @@ from bridge.transform import (
     build_openai_model_list,
     build_openai_error_response,
     check_sse_error,
+    build_thinking_config,
 )
 from bridge.client import (
     BridgeError,
@@ -42,7 +43,7 @@ class TestOpenAIToCloudCodeRequest(unittest.TestCase):
             contents,
             [{"role": "user", "parts": [{"text": "Hello world"}]}],
         )
-        self.assertIsNone(gen_config)
+        self.assertEqual(gen_config, {"thinkingConfig": {"thinkingBudget": 0}})
 
     def test_valid_request_multi_turn_conversation(self):
         payload = {
@@ -66,7 +67,7 @@ class TestOpenAIToCloudCodeRequest(unittest.TestCase):
                 {"role": "user", "parts": [{"text": "Tell me a joke"}]},
             ],
         )
-        self.assertIsNone(gen_config)
+        self.assertEqual(gen_config, {"thinkingConfig": {"thinkingBudget": 0}})
 
     def test_multiple_system_messages_concatenated(self):
         payload = {
@@ -365,6 +366,7 @@ class TestOpenAIToCloudCodeRequest(unittest.TestCase):
                 "maxOutputTokens": 100,
                 "topP": 0.95,
                 "stopSequences": ["END", "STOP"],
+                "thinkingConfig": {"thinkingBudget": 0},
             },
         )
 
@@ -381,12 +383,13 @@ class TestOpenAIToCloudCodeRequest(unittest.TestCase):
             {
                 "maxOutputTokens": 256,
                 "stopSequences": ["STOP_TOKEN"],
+                "thinkingConfig": {"thinkingBudget": 0},
             },
         )
 
     def test_generation_config_absent_returns_none(self):
         payload = {
-            "model": "gemini-2.5-pro",
+            "model": "custom-model",
             "messages": [{"role": "user", "content": "hello"}],
         }
         _, _, _, gen_config = openai_to_cloudcode_request(payload, project="test-project")
@@ -396,7 +399,7 @@ class TestOpenAIToCloudCodeRequest(unittest.TestCase):
         for empty_stop in ("", [], ["", "   "]):
             with self.subTest(empty_stop=empty_stop):
                 payload = {
-                    "model": "gemini-2.5-pro",
+                    "model": "custom-model",
                     "messages": [{"role": "user", "content": "hello"}],
                     "stop": empty_stop,
                 }
@@ -412,7 +415,10 @@ class TestOpenAIToCloudCodeRequest(unittest.TestCase):
         _, _, _, gen_config = openai_to_cloudcode_request(payload, project="test-project")
         self.assertEqual(
             gen_config,
-            {"stopSequences": ["STOP_TOKEN", "END"]},
+            {
+                "stopSequences": ["STOP_TOKEN", "END"],
+                "thinkingConfig": {"thinkingBudget": 0},
+            },
         )
 
     def test_tool_and_function_roles_mapped_to_user_with_prefix(self):
@@ -923,6 +929,115 @@ class TestCheckSSEError(unittest.TestCase):
         }
         with self.assertRaises(RateLimitError):
             check_sse_error(event)
+
+
+class TestBuildThinkingConfig(unittest.TestCase):
+    def test_suffix_high_sets_thinking_level_high(self):
+        config = build_thinking_config("gemini-3.1-pro-high", {})
+        self.assertEqual(config, {"thinkingLevel": "HIGH"})
+
+    def test_suffix_medium_sets_thinking_level_medium(self):
+        config = build_thinking_config("gemini-3.1-pro-medium", {})
+        self.assertEqual(config, {"thinkingLevel": "MEDIUM"})
+
+    def test_suffix_low_sets_thinking_level_low(self):
+        config = build_thinking_config("gemini-3.1-pro-low", {})
+        self.assertEqual(config, {"thinkingLevel": "LOW"})
+
+    def test_suffix_thinking_sets_thinking_budget(self):
+        config = build_thinking_config("claude-opus-4-6-thinking", {})
+        self.assertEqual(config, {"thinkingBudget": 2048})
+
+    def test_standard_gemini_model_defaults_to_zero_budget(self):
+        for model in ("gemini-2.5-pro", "gemini-2.5-flash", "gemini-1.5-pro"):
+            with self.subTest(model=model):
+                config = build_thinking_config(model, {})
+                self.assertEqual(config, {"thinkingBudget": 0})
+
+    def test_payload_override_thinking_level(self):
+        payload = {"thinking": {"thinkingLevel": "LOW"}}
+        config = build_thinking_config("gemini-3.1-pro-high", payload)
+        self.assertEqual(config, {"thinkingLevel": "LOW"})
+
+    def test_payload_override_budget_tokens(self):
+        payload = {"thinking": {"budget_tokens": 4096}}
+        config = build_thinking_config("gemini-2.5-pro", payload)
+        self.assertEqual(config, {"thinkingBudget": 4096})
+
+    def test_payload_override_thinking_type_disabled(self):
+        payload = {"thinking": {"type": "disabled"}}
+        config = build_thinking_config("gemini-3.1-pro-high", payload)
+        self.assertEqual(config, {"thinkingBudget": 0})
+
+    def test_payload_override_thinking_type_enabled(self):
+        payload = {"thinking": {"type": "enabled", "budget_tokens": 1024}}
+        config = build_thinking_config("gemini-2.5-pro", payload)
+        self.assertEqual(config, {"thinkingBudget": 1024})
+
+    def test_payload_override_thinking_config_direct(self):
+        payload = {"thinkingConfig": {"thinkingBudget": 500}}
+        config = build_thinking_config("gemini-2.5-pro", payload)
+        self.assertEqual(config, {"thinkingBudget": 500})
+
+    def test_payload_override_reasoning_effort(self):
+        for effort, expected in (("low", "LOW"), ("medium", "MEDIUM"), ("high", "HIGH")):
+            with self.subTest(effort=effort):
+                payload = {"reasoning_effort": effort}
+                config = build_thinking_config("gemini-2.5-pro", payload)
+                self.assertEqual(config, {"thinkingLevel": expected})
+
+    def test_payload_override_reasoning_effort_disabled_or_none(self):
+        for effort in ("none", "disabled", "off"):
+            with self.subTest(effort=effort):
+                payload = {"reasoning_effort": effort}
+                config = build_thinking_config("gemini-3.1-pro-high", payload)
+                self.assertEqual(config, {"thinkingBudget": 0})
+
+    def test_default_thinking_budget_clamped_with_max_tokens(self):
+        # Default budget 2048 clamped to max(0, max_tokens - 128)
+        config1 = build_thinking_config("claude-opus-4-6-thinking", {"max_tokens": 256})
+        self.assertEqual(config1, {"thinkingBudget": 128})
+
+        config2 = build_thinking_config("claude-opus-4-6-thinking", {"max_tokens": 100})
+        self.assertEqual(config2, {"thinkingBudget": 0})
+
+        config3 = build_thinking_config("gemini-2.5-pro", {"thinking": {"type": "enabled"}, "max_tokens": 300})
+        self.assertEqual(config3, {"thinkingBudget": 172})
+
+        config4 = build_thinking_config("gemini-2.5-pro", {"thinking": True, "maxOutputTokens": 500})
+        self.assertEqual(config4, {"thinkingBudget": 372})
+
+        config5 = build_thinking_config("claude-opus-4-6-thinking", {"max_tokens": 4096})
+        self.assertEqual(config5, {"thinkingBudget": 2048})
+
+    def test_openai_to_cloudcode_request_wires_adaptive_thinking(self):
+        # Reasoning model sets thinkingLevel
+        payload_high = {
+            "model": "gemini-3.1-pro-high",
+            "messages": [{"role": "user", "content": "hello"}],
+        }
+        _, _, _, gen_config_high = openai_to_cloudcode_request(payload_high, "test-project")
+        self.assertIsNotNone(gen_config_high)
+        self.assertEqual(gen_config_high.get("thinkingConfig"), {"thinkingLevel": "HIGH"})
+
+        # Standard model sets thinkingBudget 0
+        payload_std = {
+            "model": "gemini-2.5-pro",
+            "messages": [{"role": "user", "content": "hello"}],
+        }
+        _, _, _, gen_config_std = openai_to_cloudcode_request(payload_std, "test-project")
+        self.assertIsNotNone(gen_config_std)
+        self.assertEqual(gen_config_std.get("thinkingConfig"), {"thinkingBudget": 0})
+
+        # Payload override takes precedence
+        payload_override = {
+            "model": "gemini-3.1-pro-high",
+            "messages": [{"role": "user", "content": "hello"}],
+            "thinking": {"thinkingBudget": 1024},
+        }
+        _, _, _, gen_config_ovr = openai_to_cloudcode_request(payload_override, "test-project")
+        self.assertIsNotNone(gen_config_ovr)
+        self.assertEqual(gen_config_ovr.get("thinkingConfig"), {"thinkingBudget": 1024})
 
 
 if __name__ == "__main__":

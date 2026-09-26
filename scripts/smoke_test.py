@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Standalone smoke test script for Antigravity Model Bridge."""
+"""Standalone multi-protocol smoke test script for Antigravity Model Bridge."""
 
 import argparse
 import json
@@ -9,7 +9,7 @@ import urllib.request
 
 
 def test_healthz(base_url: str) -> None:
-    print("[1/4] Verifying GET /healthz ... ", end="", flush=True)
+    print("[1/9] Verifying GET /healthz ... ", end="", flush=True)
     url = f"{base_url}/healthz"
     req = urllib.request.Request(url, method="GET")
     try:
@@ -27,7 +27,7 @@ def test_healthz(base_url: str) -> None:
 
 
 def test_models(base_url: str) -> str:
-    print("[2/4] Verifying GET /v1/models ... ", end="", flush=True)
+    print("[2/9] Verifying GET /v1/models ... ", end="", flush=True)
     url = f"{base_url}/v1/models"
     req = urllib.request.Request(url, method="GET")
     chosen_model = ""
@@ -52,8 +52,31 @@ def test_models(base_url: str) -> str:
     return chosen_model
 
 
+def test_dashboard(base_url: str) -> None:
+    print("[3/9] Verifying GET / (Gateway Dashboard) ... ", end="", flush=True)
+    url = f"{base_url}/"
+    req = urllib.request.Request(url, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=10.0) as resp:
+            if resp.status != 200:
+                raise AssertionError(f"Expected HTTP 200, got {resp.status}")
+            content_type = resp.headers.get_content_type()
+            if "text/html" not in content_type:
+                raise AssertionError(f"Expected text/html content type, got {content_type}")
+            html_body = resp.read().decode("utf-8")
+            if "AGY Model Bridge" not in html_body:
+                raise AssertionError("Missing 'AGY Model Bridge' title in dashboard HTML")
+            if "FreeLLMAPI" not in html_body or "Claude Code" not in html_body or "Codex" not in html_body:
+                raise AssertionError("Missing client configuration cards in dashboard HTML")
+    except Exception as e:
+        print("FAILED")
+        print(f"Error in dashboard retrieval: {e}", file=sys.stderr)
+        sys.exit(1)
+    print("OK")
+
+
 def test_chat_non_streaming(base_url: str, model: str) -> None:
-    print(f"[3/4] Verifying POST /v1/chat/completions (stream=False, model='{model}') ... ", end="", flush=True)
+    print(f"[4/9] Verifying POST /v1/chat/completions (stream=False, model='{model}') ... ", end="", flush=True)
     url = f"{base_url}/v1/chat/completions"
     payload = {
         "model": model,
@@ -88,7 +111,7 @@ def test_chat_non_streaming(base_url: str, model: str) -> None:
 
 
 def test_chat_streaming(base_url: str, model: str) -> None:
-    print(f"[4/4] Verifying POST /v1/chat/completions (stream=True, model='{model}') ... ", end="", flush=True)
+    print(f"[5/9] Verifying POST /v1/chat/completions (stream=True, model='{model}') ... ", end="", flush=True)
     url = f"{base_url}/v1/chat/completions"
     payload = {
         "model": model,
@@ -131,7 +154,7 @@ def test_chat_streaming(base_url: str, model: str) -> None:
             raise AssertionError("Stream completed without data: [DONE] terminator")
         full_text = "".join(received_chunks)
         if not full_text.strip():
-            raise AssertionError(f"Expected non-empty streaming text, got empty")
+            raise AssertionError("Expected non-empty streaming text, got empty")
     except Exception as e:
         print("FAILED")
         print(f"Error in streaming completion: {e}", file=sys.stderr)
@@ -139,22 +162,221 @@ def test_chat_streaming(base_url: str, model: str) -> None:
     print(f"OK (Streamed: {full_text.strip()!r})")
 
 
+def test_anthropic_non_streaming(base_url: str, model: str) -> None:
+    print(f"[6/9] Verifying POST /v1/messages (stream=False, model='{model}') ... ", end="", flush=True)
+    url = f"{base_url}/v1/messages"
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "user", "content": "Respond with the word 'ANTHROPIC' only."}
+        ],
+        "max_tokens": 100,
+        "stream": False,
+    }
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30.0) as resp:
+            if resp.status != 200:
+                raise AssertionError(f"Expected HTTP 200, got {resp.status}")
+            res = json.loads(resp.read().decode("utf-8"))
+            if res.get("type") != "message":
+                raise AssertionError(f"Expected type 'message', got {res.get('type')}")
+            if res.get("role") != "assistant":
+                raise AssertionError(f"Expected role 'assistant', got {res.get('role')}")
+            content = res.get("content", [])
+            if not content or not isinstance(content, list):
+                raise AssertionError(f"Expected non-empty content list, got: {res}")
+            text = content[0].get("text", "")
+            if not text or not text.strip():
+                raise AssertionError(f"Expected non-empty text in content, got: {text}")
+    except Exception as e:
+        print("FAILED")
+        print(f"Error in Anthropic non-streaming completion: {e}", file=sys.stderr)
+        sys.exit(1)
+    print(f"OK (Received: {text.strip()!r})")
+
+
+def test_anthropic_streaming(base_url: str, model: str) -> None:
+    print(f"[7/9] Verifying POST /v1/messages (stream=True, model='{model}') ... ", end="", flush=True)
+    url = f"{base_url}/v1/messages"
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "user", "content": "Respond with the word 'CLAUDE' only."}
+        ],
+        "max_tokens": 100,
+        "stream": True,
+    }
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    received_chunks: list[str] = []
+    saw_message_stop = False
+    try:
+        with urllib.request.urlopen(req, timeout=30.0) as resp:
+            if resp.status != 200:
+                raise AssertionError(f"Expected HTTP 200, got {resp.status}")
+            content_type = resp.headers.get_content_type()
+            if "text/event-stream" not in content_type:
+                raise AssertionError(f"Expected text/event-stream, got {content_type}")
+
+            current_event = None
+            for raw_line in resp:
+                line = raw_line.decode("utf-8").strip()
+                if not line:
+                    continue
+                if line.startswith("event: "):
+                    current_event = line[7:].strip()
+                    if current_event == "message_stop":
+                        saw_message_stop = True
+                elif line.startswith("data: "):
+                    data_obj = json.loads(line[6:])
+                    if current_event == "content_block_delta":
+                        delta_text = data_obj.get("delta", {}).get("text", "")
+                        if delta_text:
+                            received_chunks.append(delta_text)
+
+        if not saw_message_stop:
+            raise AssertionError("Stream completed without message_stop event")
+        full_text = "".join(received_chunks)
+        if not full_text.strip():
+            raise AssertionError("Expected non-empty streaming text, got empty")
+    except Exception as e:
+        print("FAILED")
+        print(f"Error in Anthropic streaming completion: {e}", file=sys.stderr)
+        sys.exit(1)
+    print(f"OK (Streamed: {full_text.strip()!r})")
+
+
+def test_responses_non_streaming(base_url: str, model: str) -> None:
+    print(f"[8/9] Verifying POST /v1/responses (stream=False, model='{model}') ... ", end="", flush=True)
+    url = f"{base_url}/v1/responses"
+    payload = {
+        "model": model,
+        "input": [
+            "Respond with the word 'RESPONSES' only."
+        ],
+        "stream": False,
+    }
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30.0) as resp:
+            if resp.status != 200:
+                raise AssertionError(f"Expected HTTP 200, got {resp.status}")
+            res = json.loads(resp.read().decode("utf-8"))
+            if res.get("object") != "response":
+                raise AssertionError(f"Expected object 'response', got {res.get('object')}")
+            if res.get("status") != "completed":
+                raise AssertionError(f"Expected status 'completed', got {res.get('status')}")
+            output = res.get("output", [])
+            if not output or not isinstance(output, list):
+                raise AssertionError(f"Expected non-empty output list, got: {res}")
+            item = output[0]
+            content = item.get("content", [])
+            if not content or not isinstance(content, list):
+                raise AssertionError(f"Expected non-empty content in output item, got: {item}")
+            text = content[0].get("text", "")
+            if not text or not text.strip():
+                raise AssertionError(f"Expected non-empty text in output content, got: {text}")
+    except Exception as e:
+        print("FAILED")
+        print(f"Error in Responses non-streaming completion: {e}", file=sys.stderr)
+        sys.exit(1)
+    print(f"OK (Received: {text.strip()!r})")
+
+
+def test_responses_streaming(base_url: str, model: str) -> None:
+    print(f"[9/9] Verifying POST /v1/responses (stream=True, model='{model}') ... ", end="", flush=True)
+    url = f"{base_url}/v1/responses"
+    payload = {
+        "model": model,
+        "input": [
+            "Respond with the word 'CODEX' only."
+        ],
+        "stream": True,
+    }
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    received_chunks: list[str] = []
+    saw_completed = False
+    try:
+        with urllib.request.urlopen(req, timeout=30.0) as resp:
+            if resp.status != 200:
+                raise AssertionError(f"Expected HTTP 200, got {resp.status}")
+            content_type = resp.headers.get_content_type()
+            if "text/event-stream" not in content_type:
+                raise AssertionError(f"Expected text/event-stream, got {content_type}")
+
+            current_event = None
+            for raw_line in resp:
+                line = raw_line.decode("utf-8").strip()
+                if not line:
+                    continue
+                if line.startswith("event: "):
+                    current_event = line[7:].strip()
+                    if current_event == "response.completed":
+                        saw_completed = True
+                elif line.startswith("data: "):
+                    data_obj = json.loads(line[6:])
+                    if current_event == "response.output_text.delta":
+                        delta_text = data_obj.get("delta", "")
+                        if delta_text:
+                            received_chunks.append(delta_text)
+
+        if not saw_completed:
+            raise AssertionError("Stream completed without response.completed event")
+        full_text = "".join(received_chunks)
+        if not full_text.strip():
+            raise AssertionError("Expected non-empty streaming text, got empty")
+    except Exception as e:
+        print("FAILED")
+        print(f"Error in Responses streaming completion: {e}", file=sys.stderr)
+        sys.exit(1)
+    print(f"OK (Streamed: {full_text.strip()!r})")
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Smoke test for Antigravity Model Bridge")
+    parser = argparse.ArgumentParser(description="Multi-protocol smoke test for Antigravity Model Bridge")
     parser.add_argument("--host", type=str, default="127.0.0.1", help="Bridge host (default: 127.0.0.1)")
     parser.add_argument("--port", type=int, default=8080, help="Bridge port (default: 8080)")
     parser.add_argument("--model", type=str, default=None, help="Model override")
     args = parser.parse_args()
 
     base_url = f"http://{args.host}:{args.port}"
-    print(f"Starting smoke test against {base_url} ...\n")
+    print(f"Starting 9-step multi-protocol smoke test against {base_url} ...\n")
 
     test_healthz(base_url)
     model = args.model if args.model else test_models(base_url)
+    test_dashboard(base_url)
     test_chat_non_streaming(base_url, model)
     test_chat_streaming(base_url, model)
+    test_anthropic_non_streaming(base_url, model)
+    test_anthropic_streaming(base_url, model)
+    test_responses_non_streaming(base_url, model)
+    test_responses_streaming(base_url, model)
 
-    print("\nAll smoke tests passed successfully! [100% OK]")
+    print("\nAll 9 multi-protocol smoke tests passed successfully! [100% OK]")
     sys.exit(0)
 
 

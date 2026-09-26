@@ -15,6 +15,93 @@ from bridge.client import (
 )
 
 
+def build_thinking_config(model: str, payload: dict[str, Any]) -> dict[str, Any] | None:
+    """Builds Cloud Code thinkingConfig based on model heuristics and payload overrides.
+
+    Args:
+        model: Model identifier string.
+        payload: Request payload dictionary which may contain client thinking overrides.
+
+    Returns:
+        A dict with thinkingConfig parameters, or None if no thinking config applies.
+    """
+    # Helper to clamp default thinking budget when max tokens specified
+    max_tokens_val = (
+        payload.get("max_tokens")
+        or payload.get("maxOutputTokens")
+        or payload.get("max_completion_tokens")
+        or payload.get("max_output_tokens")
+    )
+    if max_tokens_val is None:
+        gen_cfg = payload.get("generation_config") or payload.get("generationConfig")
+        if isinstance(gen_cfg, dict):
+            max_tokens_val = gen_cfg.get("maxOutputTokens") or gen_cfg.get("max_tokens")
+
+    def _default_budget() -> int:
+        if max_tokens_val is not None:
+            try:
+                mt = int(max_tokens_val)
+                return min(2048, max(0, mt - 128))
+            except (ValueError, TypeError):
+                pass
+        return 2048
+
+    # 1. Explicit client overrides take precedence over heuristics
+    if "thinkingConfig" in payload and isinstance(payload["thinkingConfig"], dict):
+        return dict(payload["thinkingConfig"])
+
+    if "thinking" in payload:
+        val = payload["thinking"]
+        if isinstance(val, dict):
+            if val.get("type") == "disabled":
+                return {"thinkingBudget": 0}
+            if "budget_tokens" in val and val["budget_tokens"] is not None:
+                return {"thinkingBudget": int(val["budget_tokens"])}
+            if "thinkingBudget" in val and val["thinkingBudget"] is not None:
+                return {"thinkingBudget": int(val["thinkingBudget"])}
+            if "thinkingLevel" in val and val["thinkingLevel"] is not None:
+                return {"thinkingLevel": str(val["thinkingLevel"]).upper()}
+            if val.get("type") == "enabled":
+                return {"thinkingBudget": _default_budget()}
+            return dict(val)
+        elif val is False:
+            return {"thinkingBudget": 0}
+        elif val is True:
+            return {"thinkingBudget": _default_budget()}
+
+    effort = None
+    if "reasoning_effort" in payload and payload["reasoning_effort"] is not None:
+        effort = str(payload["reasoning_effort"]).strip().lower()
+    elif "effort" in payload and payload["effort"] is not None:
+        effort = str(payload["effort"]).strip().lower()
+
+    if effort is not None:
+        if effort in ("none", "disabled", "off"):
+            return {"thinkingBudget": 0}
+        if effort in ("high", "medium", "low"):
+            return {"thinkingLevel": effort.upper()}
+
+    if "thinking_budget" in payload and payload["thinking_budget"] is not None:
+        return {"thinkingBudget": int(payload["thinking_budget"])}
+
+    # 2. Model suffix heuristics
+    m = (model or "").lower()
+    if "-high" in m:
+        return {"thinkingLevel": "HIGH"}
+    if "-medium" in m:
+        return {"thinkingLevel": "MEDIUM"}
+    if "-low" in m:
+        return {"thinkingLevel": "LOW"}
+    if "-thinking" in m:
+        return {"thinkingBudget": _default_budget()}
+
+    # 3. Standard Gemini models default to zero thinking budget
+    if "gemini" in m:
+        return {"thinkingBudget": 0}
+
+    return None
+
+
 def openai_to_cloudcode_request(
     openai_payload: dict[str, Any], project: str
 ) -> tuple[str, list[dict[str, Any]], dict[str, Any] | None, dict[str, Any] | None]:
@@ -71,15 +158,31 @@ def openai_to_cloudcode_request(
         elif role == "assistant":
             turn_role = "model"
             tool_calls = msg.get("tool_calls")
-            if (not content or not content.strip()) and tool_calls and isinstance(tool_calls, list):
+            if tool_calls and isinstance(tool_calls, list):
                 tool_call_strs = []
                 for tc in tool_calls:
                     if isinstance(tc, dict):
-                        fn = tc.get("function", {})
-                        fn_name = fn.get("name", "tool") if isinstance(fn, dict) else "tool"
-                        fn_args = fn.get("arguments", "") if isinstance(fn, dict) else ""
-                        tool_call_strs.append(f"[Tool Call: {fn_name}({fn_args})]")
-                content = " ".join(tool_call_strs)
+                        fn = tc.get("function") or {}
+                        fn_name = fn.get("name") or "unknown"
+                        fn_args = fn.get("arguments", "")
+                        fn_args_str = json.dumps(fn_args) if isinstance(fn_args, (dict, list)) else str(fn_args or "")
+                        tool_call_strs.append(f"[Tool Call: {fn_name}({fn_args_str})]")
+                if tool_call_strs:
+                    tools_text = "\n".join(tool_call_strs)
+                    if content and content.strip():
+                        content = f"{content}\n{tools_text}"
+                    else:
+                        content = tools_text
+            elif msg.get("function_call") and isinstance(msg.get("function_call"), dict):
+                fc = msg.get("function_call")
+                fc_name = fc.get("name") or "unknown"
+                fc_args = fc.get("arguments", "")
+                fc_args_str = json.dumps(fc_args) if isinstance(fc_args, (dict, list)) else str(fc_args or "")
+                tool_str = f"[Tool Call: {fc_name}({fc_args_str})]"
+                if content and content.strip():
+                    content = f"{content}\n{tool_str}"
+                else:
+                    content = tool_str
             part_text = content if content and content.strip() else " "
             turn_parts = [{"text": part_text}]
         elif role in ("tool", "function"):
@@ -124,16 +227,33 @@ def openai_to_cloudcode_request(
     if "top_p" in openai_payload and openai_payload["top_p"] is not None:
         gen_config["topP"] = float(openai_payload["top_p"])
 
+    if "top_k" in openai_payload and openai_payload["top_k"] is not None:
+        try:
+            gen_config["topK"] = int(openai_payload["top_k"])
+        except (ValueError, TypeError):
+            pass
+
     if "stop" in openai_payload and openai_payload["stop"] is not None:
         stop_val = openai_payload["stop"]
         stop_list: list[str] = []
         if isinstance(stop_val, str):
-            if stop_val.strip():
-                stop_list = [stop_val]
+            s_str = str(stop_val)
+            if s_str != "" and (s_str.strip() != "" or "\n" in s_str or "\r" in s_str):
+                stop_list = [s_str]
         elif isinstance(stop_val, list):
-            stop_list = [str(s) for s in stop_val if s is not None and str(s).strip()]
+            stop_list = [
+                str(s)
+                for s in stop_val
+                if s is not None
+                and str(s) != ""
+                and (str(s).strip() != "" or "\n" in str(s) or "\r" in str(s))
+            ]
         if stop_list:
             gen_config["stopSequences"] = stop_list
+
+    thinking_cfg = build_thinking_config(model, openai_payload)
+    if thinking_cfg is not None:
+        gen_config["thinkingConfig"] = thinking_cfg
 
     generation_config: dict[str, Any] | None = gen_config if gen_config else None
 

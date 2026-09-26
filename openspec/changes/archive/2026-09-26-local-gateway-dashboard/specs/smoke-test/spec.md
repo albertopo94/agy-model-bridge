@@ -1,19 +1,6 @@
-# Smoke Test Specification
+# Delta for Smoke Test
 
-## Purpose
-
-Provide a standalone, zero-dependency verification script to validate bridge server operation against live upstream endpoints.
-
-## Requirements
-
-### Requirement: Standalone Script Execution
-
-The smoke test SHALL be located at `scripts/smoke_test.py` and MUST execute using Python 3 standard library only (`urllib.request`, `json`, `sys`, `argparse`). It SHOULD accept `--host` (default `127.0.0.1`) and `--port` (default `8080`) arguments.
-
-#### Scenario: Script runs with default parameters
-- GIVEN a running bridge server on `127.0.0.1:8080`
-- WHEN `python3 scripts/smoke_test.py` is executed
-- THEN the script connects to the default host and port without errors.
+## MODIFIED Requirements
 
 ### Requirement: Comprehensive Endpoint Verification
 
@@ -29,6 +16,7 @@ The script MUST sequentially verify all supported bridge endpoints:
 9. `POST /v1/responses` with `stream: true` receives OpenAI Responses SSE events terminating in `response.completed`.
 
 The script MUST assert non-empty response content and valid protocol structures across all verification stages.
+(Previously: Verified only /healthz, /v1/models, and OpenAI /v1/chat/completions non-streaming and streaming)
 
 #### Scenario: All endpoints succeed
 - GIVEN a fully operational bridge server connected to upstream Cloud Code Assist
@@ -42,13 +30,3 @@ The script MUST assert non-empty response content and valid protocol structures 
 - WHEN `scripts/smoke_test.py` runs
 - THEN the script prints a descriptive diagnostic message identifying the failed protocol stage
 - AND terminates immediately with exit code 1.
-
-### Requirement: Diagnostic Failure and Non-Zero Exit Code
-
-If any endpoint returns an error status code, fails assertion, or times out, the script MUST output a clear diagnostic message indicating the failing stage and details, and MUST exit immediately with exit code 1.
-
-#### Scenario: Endpoint failure produces exit code 1
-- GIVEN the bridge server is unreachable or an endpoint fails an assertion
-- WHEN `scripts/smoke_test.py` runs
-- THEN the script prints the specific failure description
-- AND terminates with exit code 1.

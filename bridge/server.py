@@ -1,6 +1,7 @@
 """OpenAI-compatible HTTP server adapter for Google Cloud Code Assist."""
 
 import http.server
+import itertools
 import json
 import sys
 import urllib.parse
@@ -31,6 +32,19 @@ from bridge.transform import (
     build_openai_error_response,
     check_sse_error,
 )
+from bridge.dashboard import render_dashboard, get_status_data
+from bridge.anthropic import (
+    anthropic_to_cloudcode_request,
+    build_anthropic_message,
+    build_anthropic_sse_events,
+    build_anthropic_error_response,
+)
+from bridge.responses import (
+    responses_to_cloudcode_request,
+    build_responses_completion,
+    build_responses_sse_events,
+    build_responses_error_response,
+)
 
 
 class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
@@ -49,7 +63,10 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        self.send_header(
+            "Access-Control-Allow-Headers",
+            "Content-Type, Authorization, x-api-key, anthropic-version, anthropic-beta, anthropic-auth-token, openai-beta, openai-organization, openai-project",
+        )
         self.send_header("Content-Length", "0")
         self.end_headers()
 
@@ -73,7 +90,10 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
             self.send_header("Connection", "close")
         self.send_header("Content-Length", str(len(encoded)))
         self.end_headers()
-        self.wfile.write(encoded)
+        try:
+            self.wfile.write(encoded)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
     def _get_error_details(self, exc: Exception) -> tuple[int, str]:
         if isinstance(exc, (InvalidRequestError, ValueError)):
@@ -108,6 +128,33 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
         path = urllib.parse.urlparse(self.path).path.rstrip("/")
         if not path:
             path = "/"
+
+        if path == "/":
+            host = self.server.server_address[0] if hasattr(self.server, "server_address") else "127.0.0.1"
+            port = self.server.server_address[1] if hasattr(self.server, "server_address") else 8080
+            status_data = get_status_data(self.client, self.project, host, port)
+            html_content = render_dashboard(
+                host=status_data["host"],
+                port=status_data["port"],
+                auth_status=status_data["auth"],
+                models_count=status_data["models_count"],
+            )
+            encoded = html_content.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Content-Length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+            return
+
+        if path == "/api/status":
+            host = self.server.server_address[0] if hasattr(self.server, "server_address") else "127.0.0.1"
+            port = self.server.server_address[1] if hasattr(self.server, "server_address") else 8080
+            status_data = get_status_data(self.client, self.project, host, port)
+            self._send_json(200, status_data)
+            return
+
         if path == "/healthz":
             self._send_json(200, {"status": "ok"})
             return
@@ -172,13 +219,29 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
         path = urllib.parse.urlparse(self.path).path.rstrip("/")
         if not path:
             path = "/"
-        if path == "/v1/chat/completions":
 
-            raw_body = self.rfile.read(content_length) if content_length > 0 else b""
-            try:
-                payload = json.loads(raw_body.decode("utf-8"))
-            except Exception as e:
-                self.close_connection = True
+        if path not in ("/v1/chat/completions", "/v1/messages", "/v1/responses"):
+            self._send_json(
+                404,
+                {
+                    "error": {
+                        "message": f"Endpoint not found: {path}",
+                        "type": "invalid_request_error",
+                        "code": 404,
+                    }
+                },
+            )
+            return
+
+        raw_body = self.rfile.read(content_length) if content_length > 0 else b""
+        try:
+            payload = json.loads(raw_body.decode("utf-8"))
+        except Exception as e:
+            self.close_connection = True
+            if path == "/v1/messages":
+                code, err = build_anthropic_error_response(400, f"Malformed JSON payload: {e}")
+                self._send_json(code, err, headers={"Connection": "close"})
+            else:
                 self._send_json(
                     400,
                     {
@@ -190,9 +253,14 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                     },
                     headers={"Connection": "close"},
                 )
-                return
-            if not isinstance(payload, dict):
-                self.close_connection = True
+            return
+
+        if not isinstance(payload, dict):
+            self.close_connection = True
+            if path == "/v1/messages":
+                code, err = build_anthropic_error_response(400, "Invalid request body: expected JSON object")
+                self._send_json(code, err, headers={"Connection": "close"})
+            else:
                 self._send_json(
                     400,
                     {
@@ -204,20 +272,293 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                     },
                     headers={"Connection": "close"},
                 )
-                return
-            self._handle_chat_completion(payload)
             return
 
-        self._send_json(
-            404,
-            {
-                "error": {
-                    "message": f"Endpoint not found: {path}",
-                    "type": "invalid_request_error",
-                    "code": 404,
-                }
-            },
-        )
+        if path == "/v1/chat/completions":
+            self._handle_chat_completion(payload)
+        elif path == "/v1/messages":
+            self._handle_anthropic_messages(payload)
+        elif path == "/v1/responses":
+            self._handle_responses(payload)
+
+    def _send_anthropic_error(self, exc: Exception) -> None:
+        status_code, _ = self._get_error_details(exc)
+        if status_code == 401:
+            if hasattr(self, "client") and hasattr(self.client, "token_provider") and hasattr(self.client.token_provider, "invalidate"):
+                try:
+                    self.client.token_provider.invalidate()
+                except Exception:
+                    pass
+        code, err_payload = build_anthropic_error_response(status_code, str(exc))
+        self._send_json(code, err_payload)
+
+    def _handle_anthropic_messages(self, payload: dict[str, Any]) -> None:
+        try:
+            stream = bool(payload.get("stream", False))
+            model, contents, system_instruction, generation_config = anthropic_to_cloudcode_request(
+                payload, self.project
+            )
+        except ValueError as ve:
+            code, err = build_anthropic_error_response(400, str(ve))
+            self._send_json(code, err)
+            return
+        except Exception as exc:
+            self._send_anthropic_error(exc)
+            return
+
+        extra_kwargs: dict[str, Any] = {}
+        if generation_config is not None:
+            extra_kwargs["generation_config"] = generation_config
+
+        if stream:
+            try:
+                stream_gen = self.client.stream_generate_content(
+                    self.project, model, contents, system_instruction, **extra_kwargs
+                )
+            except Exception as exc:
+                self._send_anthropic_error(exc)
+                return
+
+            buffered_lines: list[str] = []
+            found_valid_event = False
+            try:
+                for line in stream_gen:
+                    buffered_lines.append(line)
+                    stripped = line.strip()
+                    if not stripped or stripped.startswith(":"):
+                        continue
+                    parsed = parse_cloudcode_sse_event(line)
+                    if parsed is not None:
+                        check_sse_error(parsed)
+                        found_valid_event = True
+                        break
+                if not found_valid_event:
+                    raise InvalidRequestError("Stream ended without data")
+            except Exception as exc:
+                if hasattr(stream_gen, "close"):
+                    stream_gen.close()
+                self._send_anthropic_error(exc)
+                return
+
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "close")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+
+            combined_gen = itertools.chain(buffered_lines, stream_gen)
+
+            try:
+                try:
+                    for event_str in build_anthropic_sse_events(combined_gen, model):
+                        self.wfile.write(event_str.encode("utf-8"))
+                        self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+                except Exception as exc:
+                    sys.stderr.write(f"Error during Anthropic stream: {exc}\n")
+                    sys.stderr.flush()
+                    try:
+                        err_payload = json.dumps({"type": "error", "error": {"type": "api_error", "message": str(exc)}})
+                        self.wfile.write(f"event: error\ndata: {err_payload}\n\n".encode("utf-8"))
+                        self.wfile.flush()
+                    except Exception:
+                        pass
+            finally:
+                if hasattr(stream_gen, "close"):
+                    stream_gen.close()
+                self.close_connection = True
+            return
+
+        try:
+            stream_gen = self.client.stream_generate_content(
+                self.project, model, contents, system_instruction, **extra_kwargs
+            )
+            try:
+                collected_text: list[str] = []
+                last_usage = None
+                last_finish = "end_turn"
+                event_count = 0
+                has_finish_reason = False
+                for line in stream_gen:
+                    parsed = parse_cloudcode_sse_event(line)
+                    if parsed is not None:
+                        event_count += 1
+                        check_sse_error(parsed)
+                        usage = extract_usage(parsed)
+                        if usage:
+                            last_usage = usage
+                        fr = extract_finish_reason(parsed)
+                        if fr:
+                            has_finish_reason = True
+                            if fr in ("length", "max_tokens"):
+                                last_finish = "max_tokens"
+                            elif fr in ("stop_sequence", "tool_use"):
+                                last_finish = fr
+                            else:
+                                last_finish = "end_turn"
+                        delta = extract_text_delta(parsed)
+                        if delta:
+                            collected_text.append(delta)
+
+                if event_count == 0 and not collected_text and not has_finish_reason:
+                    raise BridgeError("Stream ended without data")
+
+                msg_id = f"msg_{uuid.uuid4().hex[:16]}"
+                full_text = "".join(collected_text)
+                resp_obj = build_anthropic_message(
+                    message_id=msg_id,
+                    model=model,
+                    text=full_text,
+                    usage=last_usage,
+                    stop_reason=last_finish,
+                )
+                try:
+                    self._send_json(200, resp_obj)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+            finally:
+                if hasattr(stream_gen, "close"):
+                    stream_gen.close()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        except Exception as exc:
+            self._send_anthropic_error(exc)
+
+    def _handle_responses(self, payload: dict[str, Any]) -> None:
+        try:
+            stream = bool(payload.get("stream", False))
+            model, contents, system_instruction, generation_config = responses_to_cloudcode_request(
+                payload, self.project
+            )
+        except ValueError as ve:
+            code, err = build_responses_error_response(400, str(ve))
+            self._send_json(code, err)
+            return
+        except Exception as exc:
+            self._send_error(exc)
+            return
+
+        extra_kwargs: dict[str, Any] = {}
+        if generation_config is not None:
+            extra_kwargs["generation_config"] = generation_config
+
+        if stream:
+            try:
+                stream_gen = self.client.stream_generate_content(
+                    self.project, model, contents, system_instruction, **extra_kwargs
+                )
+            except Exception as exc:
+                self._send_error(exc)
+                return
+
+            buffered_lines: list[str] = []
+            found_valid_event = False
+            try:
+                for line in stream_gen:
+                    buffered_lines.append(line)
+                    stripped = line.strip()
+                    if not stripped or stripped.startswith(":"):
+                        continue
+                    parsed = parse_cloudcode_sse_event(line)
+                    if parsed is not None:
+                        check_sse_error(parsed)
+                        found_valid_event = True
+                        break
+                if not found_valid_event:
+                    raise InvalidRequestError("Stream ended without data")
+            except Exception as exc:
+                if hasattr(stream_gen, "close"):
+                    stream_gen.close()
+                self._send_error(exc)
+                return
+
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "close")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+
+            response_id = f"resp_{uuid.uuid4().hex[:16]}"
+            combined_gen = itertools.chain(buffered_lines, stream_gen)
+
+            try:
+                try:
+                    for event_str in build_responses_sse_events(combined_gen, model, response_id=response_id):
+                        self.wfile.write(event_str.encode("utf-8"))
+                        self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+                except Exception as exc:
+                    sys.stderr.write(f"Error during Responses stream: {exc}\n")
+                    sys.stderr.flush()
+                    try:
+                        err_payload = json.dumps({
+                            "type": "response.failed",
+                            "response": {
+                                "id": response_id,
+                                "status": "failed",
+                                "error": {"message": str(exc)},
+                            },
+                        })
+                        self.wfile.write(f"event: response.failed\ndata: {err_payload}\n\n".encode("utf-8"))
+                        self.wfile.flush()
+                    except Exception:
+                        pass
+            finally:
+                if hasattr(stream_gen, "close"):
+                    stream_gen.close()
+                self.close_connection = True
+            return
+
+        try:
+            stream_gen = self.client.stream_generate_content(
+                self.project, model, contents, system_instruction, **extra_kwargs
+            )
+            try:
+                collected_text: list[str] = []
+                last_usage = None
+                event_count = 0
+                has_finish_reason = False
+                for line in stream_gen:
+                    parsed = parse_cloudcode_sse_event(line)
+                    if parsed is not None:
+                        event_count += 1
+                        check_sse_error(parsed)
+                        usage = extract_usage(parsed)
+                        if usage:
+                            last_usage = usage
+                        fr = extract_finish_reason(parsed)
+                        if fr:
+                            has_finish_reason = True
+                        delta = extract_text_delta(parsed)
+                        if delta:
+                            collected_text.append(delta)
+
+                if event_count == 0 and not collected_text and not has_finish_reason:
+                    raise BridgeError("Stream ended without data")
+
+                resp_id = f"resp_{uuid.uuid4().hex[:16]}"
+                full_text = "".join(collected_text)
+                resp_obj = build_responses_completion(
+                    response_id=resp_id,
+                    model=model,
+                    text=full_text,
+                    usage=last_usage,
+                )
+                try:
+                    self._send_json(200, resp_obj)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+            finally:
+                if hasattr(stream_gen, "close"):
+                    stream_gen.close()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        except Exception as exc:
+            self._send_error(exc)
 
     def _handle_chat_completion(self, payload: dict[str, Any]) -> None:
         try:
@@ -256,13 +597,20 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                 return
 
             buffered_lines: list[str] = []
+            found_valid_event = False
             try:
                 for line in stream_gen:
                     buffered_lines.append(line)
+                    stripped = line.strip()
+                    if not stripped or stripped.startswith(":"):
+                        continue
                     parsed = parse_cloudcode_sse_event(line)
                     if parsed is not None:
                         check_sse_error(parsed)
+                        found_valid_event = True
                         break
+                if not found_valid_event:
+                    raise InvalidRequestError("Stream ended without data")
             except Exception as exc:
                 if hasattr(stream_gen, "close"):
                     stream_gen.close()
@@ -346,20 +694,27 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                     text_parts: list[str] = []
                     last_usage: dict[str, int] | None = None
                     last_finish_reason: str = "stop"
+                    event_count = 0
+                    has_finish_reason = False
                     for line in stream_gen:
                         parsed = parse_cloudcode_sse_event(line)
                         if not parsed:
                             continue
+                        event_count += 1
                         check_sse_error(parsed)
                         delta = extract_text_delta(parsed)
                         if delta:
                             text_parts.append(delta)
                         reason = extract_finish_reason(parsed)
                         if reason:
+                            has_finish_reason = True
                             last_finish_reason = reason
                         usage = extract_usage(parsed)
                         if usage:
                             last_usage = usage
+
+                    if event_count == 0 and not text_parts and not has_finish_reason:
+                        raise BridgeError("Stream ended without data")
 
                     full_text = "".join(text_parts)
                     completion_obj = build_openai_completion(

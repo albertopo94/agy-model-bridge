@@ -88,6 +88,13 @@ class TestServerEndpoints(unittest.TestCase):
             body = resp.read().decode("utf-8")
             return resp.status, resp.headers, json.loads(body)
 
+    def _http_get_raw(self, path: str):
+        url = f"{self.base_url}{path}"
+        req = urllib.request.Request(url, method="GET")
+        with urllib.request.urlopen(req, timeout=5.0) as resp:
+            body = resp.read().decode("utf-8")
+            return resp.status, resp.headers, body
+
     def _http_post(self, path: str, payload: dict, stream: bool = False):
         url = f"{self.base_url}{path}"
         data = json.dumps(payload).encode("utf-8")
@@ -269,7 +276,10 @@ class TestServerEndpoints(unittest.TestCase):
         self.assertEqual(resp.status, 204)
         self.assertEqual(resp.headers.get("Access-Control-Allow-Origin"), "*")
         self.assertEqual(resp.headers.get("Access-Control-Allow-Methods"), "GET, POST, OPTIONS")
-        self.assertEqual(resp.headers.get("Access-Control-Allow-Headers"), "Content-Type, Authorization")
+        self.assertEqual(
+            resp.headers.get("Access-Control-Allow-Headers"),
+            "Content-Type, Authorization, x-api-key, anthropic-version, anthropic-beta, anthropic-auth-token, openai-beta, openai-organization, openai-project",
+        )
         conn.close()
 
     def test_cors_header_on_get_and_streaming(self):
@@ -564,6 +574,7 @@ class TestServerEndpoints(unittest.TestCase):
                 "maxOutputTokens": 128,
                 "topP": 0.85,
                 "stopSequences": ["STOP_HERE"],
+                "thinkingConfig": {"thinkingBudget": 0},
             },
         )
 
@@ -718,7 +729,348 @@ class TestServerEndpoints(unittest.TestCase):
         self.assertEqual(parsed_chunk["error"]["type"], "api_error")
         self.assertEqual(parsed_chunk["error"]["message"], "Mid stream unexpected error")
 
+    def test_root_dashboard_endpoint(self):
+        status, headers, body = self._http_get_raw("/")
+        self.assertEqual(status, 200)
+        self.assertIn("text/html", headers.get_content_type())
+        self.assertIn("AGY Model Bridge", body)
+        self.assertIn("FreeLLMAPI", body)
+        self.assertIn("Claude Code", body)
+        self.assertIn("Codex", body)
+
+    def test_api_status_endpoint(self):
+        status, headers, body = self._http_get("/api/status")
+        self.assertEqual(status, 200)
+        self.assertEqual(headers.get_content_type(), "application/json")
+        self.assertIn("address", body)
+        self.assertIn("auth", body)
+        self.assertIn("models_count", body)
+
+    def test_anthropic_messages_non_streaming(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [{"role": "user", "content": "Hello Claude"}],
+        }
+        status, headers, body = self._http_post("/v1/messages", payload)
+        self.assertEqual(status, 200)
+        self.assertEqual(body["type"], "message")
+        self.assertEqual(body["role"], "assistant")
+        self.assertEqual(body["model"], "gemini-2.5-pro")
+        self.assertIn("Hello world!", body["content"][0]["text"])
+
+    def test_anthropic_messages_streaming(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [{"role": "user", "content": "Hello Claude"}],
+            "stream": True,
+        }
+        resp = self._http_post("/v1/messages", payload, stream=True)
+        self.assertEqual(resp.status, 200)
+        self.assertIn("text/event-stream", resp.headers.get_content_type())
+        raw_events = resp.read().decode("utf-8")
+        resp.close()
+        self.assertIn("event: message_start", raw_events)
+        self.assertIn("event: content_block_delta", raw_events)
+        self.assertIn("event: message_stop", raw_events)
+
+    def test_anthropic_messages_validation_error(self):
+        url = f"{self.base_url}/v1/messages"
+        req = urllib.request.Request(
+            url,
+            data=b'{"messages": []}',
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            urllib.request.urlopen(req, timeout=5.0)
+        self.assertEqual(ctx.exception.code, 400)
+        body = json.loads(ctx.exception.read().decode("utf-8"))
+        self.assertEqual(body["type"], "error")
+        self.assertEqual(body["error"]["type"], "invalid_request_error")
+
+    def test_responses_non_streaming(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "input": ["Hello Codex"],
+        }
+        status, headers, body = self._http_post("/v1/responses", payload)
+        self.assertEqual(status, 200)
+        self.assertEqual(body["object"], "response")
+        self.assertEqual(body["status"], "completed")
+        self.assertEqual(body["model"], "gemini-2.5-pro")
+        self.assertIn("Hello world!", body["output"][0]["content"][0]["text"])
+
+    def test_responses_streaming(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "input": ["Hello Codex"],
+            "stream": True,
+        }
+        resp = self._http_post("/v1/responses", payload, stream=True)
+        self.assertEqual(resp.status, 200)
+        self.assertIn("text/event-stream", resp.headers.get_content_type())
+        raw_events = resp.read().decode("utf-8")
+        resp.close()
+        self.assertIn("event: response.created", raw_events)
+        self.assertIn("event: response.output_text.delta", raw_events)
+        self.assertIn("event: response.completed", raw_events)
+
+    def test_responses_validation_error(self):
+        url = f"{self.base_url}/v1/responses"
+        req = urllib.request.Request(
+            url,
+            data=b'{"model": "gemini-2.5-pro", "input": []}',
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            urllib.request.urlopen(req, timeout=5.0)
+        self.assertEqual(ctx.exception.code, 400)
+        body = json.loads(ctx.exception.read().decode("utf-8"))
+        self.assertEqual(body["error"]["type"], "invalid_request_error")
+
+    def test_non_get_on_root_returns_404_or_405(self):
+        url = f"{self.base_url}/"
+        req = urllib.request.Request(
+            url,
+            data=b'{"test": 1}',
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            urllib.request.urlopen(req, timeout=5.0)
+        self.assertIn(ctx.exception.code, (404, 405))
+
+
+    def test_anthropic_streaming_in_band_sse_error_pre_stream_maps_to_429(self):
+        def error_gen():
+            yield 'data: {"error": {"code": 429, "message": "Resource exhausted: Anthropic quota exceeded", "status": "RESOURCE_EXHAUSTED"}}\n'
+
+        self.mock_client.custom_stream_generator = error_gen
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [{"role": "user", "content": "Hello"}],
+            "stream": True,
+        }
+        url = f"{self.base_url}/v1/messages"
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            urllib.request.urlopen(req)
+        err = ctx.exception
+        self.assertEqual(err.code, 429)
+        body = json.loads(err.read().decode("utf-8"))
+        self.assertEqual(body["type"], "error")
+        self.assertEqual(body["error"]["type"], "rate_limit_error")
+
+    def test_anthropic_streaming_empty_stream_returns_error_before_headers(self):
+        def empty_gen():
+            return
+            yield
+
+        self.mock_client.custom_stream_generator = empty_gen
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [{"role": "user", "content": "Hello"}],
+            "stream": True,
+        }
+        url = f"{self.base_url}/v1/messages"
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            urllib.request.urlopen(req)
+        self.assertEqual(ctx.exception.code, 400)
+
+    def test_responses_streaming_in_band_sse_error_pre_stream_maps_to_429(self):
+        def error_gen():
+            yield 'data: {"error": {"code": 429, "message": "Resource exhausted: Responses quota exceeded", "status": "RESOURCE_EXHAUSTED"}}\n'
+
+        self.mock_client.custom_stream_generator = error_gen
+        payload = {
+            "model": "gemini-2.5-pro",
+            "input": ["Hello"],
+            "stream": True,
+        }
+        url = f"{self.base_url}/v1/responses"
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            urllib.request.urlopen(req)
+        err = ctx.exception
+        self.assertEqual(err.code, 429)
+        body = json.loads(err.read().decode("utf-8"))
+        self.assertEqual(body["error"]["type"], "rate_limit_error")
+
+    def test_responses_streaming_empty_stream_returns_error_before_headers(self):
+        def empty_gen():
+            return
+            yield
+
+        self.mock_client.custom_stream_generator = empty_gen
+        payload = {
+            "model": "gemini-2.5-pro",
+            "input": ["Hello"],
+            "stream": True,
+        }
+        url = f"{self.base_url}/v1/responses"
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            urllib.request.urlopen(req)
+        self.assertEqual(ctx.exception.code, 400)
+
+    def test_anthropic_non_streaming_generator_closed(self):
+        closed = False
+
+        def tracking_gen():
+            nonlocal closed
+            try:
+                yield 'data: {"candidates": [{"content": {"parts": [{"text": "Hello"}]}}]}\n'
+            finally:
+                closed = True
+
+        handler = self.server.RequestHandlerClass.__new__(self.server.RequestHandlerClass)
+        handler.client = MagicMock()
+        handler.client.stream_generate_content.return_value = tracking_gen()
+        handler.project = "test-project"
+        handler._send_json = MagicMock()
+
+        handler._handle_anthropic_messages({"model": "gemini-2.5-pro", "messages": [{"role": "user", "content": "hi"}]})
+        self.assertTrue(closed)
+
+    def test_responses_non_streaming_generator_closed(self):
+        closed = False
+
+        def tracking_gen():
+            nonlocal closed
+            try:
+                yield 'data: {"candidates": [{"content": {"parts": [{"text": "Hello"}]}}]}\n'
+            finally:
+                closed = True
+
+        handler = self.server.RequestHandlerClass.__new__(self.server.RequestHandlerClass)
+        handler.client = MagicMock()
+        handler.client.stream_generate_content.return_value = tracking_gen()
+        handler.project = "test-project"
+        handler._send_json = MagicMock()
+
+        handler._handle_responses({"model": "gemini-2.5-pro", "input": ["hi"]})
+        self.assertTrue(closed)
+
+    def test_anthropic_streaming_broken_pipe_suppressed(self):
+        handler = self.server.RequestHandlerClass.__new__(self.server.RequestHandlerClass)
+        handler.client = self.mock_client
+        handler.project = "test-project"
+        handler.wfile = MagicMock()
+        handler.wfile.write.side_effect = BrokenPipeError("Broken pipe")
+        handler.send_response = MagicMock()
+        handler.send_header = MagicMock()
+        handler.end_headers = MagicMock()
+
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [{"role": "user", "content": "Hello"}],
+            "stream": True,
+        }
+        handler._handle_anthropic_messages(payload)
+        self.assertTrue(getattr(handler, "close_connection", False))
+
+    def test_responses_streaming_broken_pipe_suppressed(self):
+        handler = self.server.RequestHandlerClass.__new__(self.server.RequestHandlerClass)
+        handler.client = self.mock_client
+        handler.project = "test-project"
+        handler.wfile = MagicMock()
+        handler.wfile.write.side_effect = BrokenPipeError("Broken pipe")
+        handler.send_response = MagicMock()
+        handler.send_header = MagicMock()
+        handler.end_headers = MagicMock()
+
+        payload = {
+            "model": "gemini-2.5-pro",
+            "input": ["Hello"],
+            "stream": True,
+        }
+        handler._handle_responses(payload)
+        self.assertTrue(getattr(handler, "close_connection", False))
+
+    def test_anthropic_streaming_mid_stream_unexpected_error_sends_sse_error_event(self):
+        def failing_gen():
+            yield 'data: {"candidates": [{"content": {"parts": [{"text": "Part 1"}]}}]}\n'
+            raise RuntimeError("Mid-stream failure in Anthropic")
+
+        handler = self.server.RequestHandlerClass.__new__(self.server.RequestHandlerClass)
+        handler.client = MagicMock()
+        handler.client.stream_generate_content.return_value = failing_gen()
+        handler.project = "test-project"
+        written_chunks = []
+        handler.wfile = MagicMock()
+        handler.wfile.write.side_effect = lambda data: written_chunks.append(data.decode("utf-8") if isinstance(data, bytes) else data)
+        handler.send_response = MagicMock()
+        handler.send_header = MagicMock()
+        handler.end_headers = MagicMock()
+
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [{"role": "user", "content": "Hello"}],
+            "stream": True,
+        }
+
+        with patch("sys.stderr", new_callable=io.StringIO):
+            handler._handle_anthropic_messages(payload)
+
+        # Confirm event: error\ndata: {"type": "error", "error": {"type": "api_error", "message": "..."}}\n\n
+        error_chunks = [c for c in written_chunks if "event: error" in c and "Mid-stream failure in Anthropic" in c]
+        self.assertTrue(len(error_chunks) > 0, f"Expected Anthropic error chunk: {written_chunks}")
+        self.assertTrue(getattr(handler, "close_connection", False))
+
+    def test_responses_streaming_mid_stream_unexpected_error_sends_response_failed_event(self):
+        def failing_gen():
+            yield 'data: {"candidates": [{"content": {"parts": [{"text": "Part 1"}]}}]}\n'
+            raise RuntimeError("Mid-stream failure in Responses")
+
+        handler = self.server.RequestHandlerClass.__new__(self.server.RequestHandlerClass)
+        handler.client = MagicMock()
+        handler.client.stream_generate_content.return_value = failing_gen()
+        handler.project = "test-project"
+        written_chunks = []
+        handler.wfile = MagicMock()
+        handler.wfile.write.side_effect = lambda data: written_chunks.append(data.decode("utf-8") if isinstance(data, bytes) else data)
+        handler.send_response = MagicMock()
+        handler.send_header = MagicMock()
+        handler.end_headers = MagicMock()
+
+        payload = {
+            "model": "gemini-2.5-pro",
+            "input": ["Hello"],
+            "stream": True,
+        }
+
+        with patch("sys.stderr", new_callable=io.StringIO):
+            handler._handle_responses(payload)
+
+        # Confirm event: response.failed\ndata: {"type": "response.failed", "response": {"status": "failed", ...}}\n\n
+        error_chunks = [c for c in written_chunks if "event: response.failed" in c and "Mid-stream failure in Responses" in c]
+        self.assertTrue(len(error_chunks) > 0, f"Expected Responses response.failed chunk: {written_chunks}")
+        parsed_err = json.loads(error_chunks[0].split("data: ")[1].strip())
+        self.assertTrue(parsed_err["response"]["id"].startswith("resp_"))
+        self.assertTrue(getattr(handler, "close_connection", False))
+
 
 if __name__ == "__main__":
-
     unittest.main()
