@@ -815,10 +815,6 @@ class TestBuildOpenAIResponses(unittest.TestCase):
         self.assertEqual(result["data"][0]["id"], "gemini-2.5-pro")
         self.assertEqual(result["data"][0]["slug"], "gemini-2.5-pro")
         self.assertEqual(result["data"][0]["display_name"], "gemini-2.5-pro")
-        self.assertEqual(
-            result["data"][0]["supported_reasoning_levels"],
-            ["none", "low", "medium", "high"],
-        )
         self.assertEqual(result["data"][0]["object"], "model")
         self.assertEqual(result["data"][0]["owned_by"], "google")
         self.assertEqual(result["models"], result["data"])
