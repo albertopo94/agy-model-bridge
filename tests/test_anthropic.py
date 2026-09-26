@@ -30,7 +30,7 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
         self.assertIsNotNone(gen_config)
         self.assertEqual(gen_config["maxOutputTokens"], 1024)
         self.assertEqual(gen_config["temperature"], 0.5)
-        self.assertEqual(gen_config["thinkingConfig"], {"thinkingBudget": 0})
+        self.assertNotIn("thinkingConfig", gen_config)
 
     def test_system_as_content_blocks(self):
         payload = {

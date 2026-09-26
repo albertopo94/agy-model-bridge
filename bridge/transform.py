@@ -37,11 +37,12 @@ def build_thinking_config(model: str, payload: dict[str, Any]) -> dict[str, Any]
         if isinstance(gen_cfg, dict):
             max_tokens_val = gen_cfg.get("maxOutputTokens") or gen_cfg.get("max_tokens")
 
-    def _default_budget() -> int:
+    def _default_budget() -> int | None:
         if max_tokens_val is not None:
             try:
                 mt = int(max_tokens_val)
-                return min(2048, max(0, mt - 128))
+                budget = min(2048, max(0, mt - 128))
+                return budget if budget > 0 else None
             except (ValueError, TypeError):
                 pass
         return 2048
@@ -54,20 +55,24 @@ def build_thinking_config(model: str, payload: dict[str, Any]) -> dict[str, Any]
         val = payload["thinking"]
         if isinstance(val, dict):
             if val.get("type") == "disabled":
-                return {"thinkingBudget": 0}
+                return None
             if "budget_tokens" in val and val["budget_tokens"] is not None:
-                return {"thinkingBudget": int(val["budget_tokens"])}
+                b = int(val["budget_tokens"])
+                return {"thinkingBudget": b} if b > 0 else None
             if "thinkingBudget" in val and val["thinkingBudget"] is not None:
-                return {"thinkingBudget": int(val["thinkingBudget"])}
+                b = int(val["thinkingBudget"])
+                return {"thinkingBudget": b} if b > 0 else None
             if "thinkingLevel" in val and val["thinkingLevel"] is not None:
                 return {"thinkingLevel": str(val["thinkingLevel"]).upper()}
             if val.get("type") == "enabled":
-                return {"thinkingBudget": _default_budget()}
+                b = _default_budget()
+                return {"thinkingBudget": b} if b else None
             return dict(val)
         elif val is False:
-            return {"thinkingBudget": 0}
+            return None
         elif val is True:
-            return {"thinkingBudget": _default_budget()}
+            b = _default_budget()
+            return {"thinkingBudget": b} if b else None
 
     effort = None
     if "reasoning_effort" in payload and payload["reasoning_effort"] is not None:
@@ -77,12 +82,13 @@ def build_thinking_config(model: str, payload: dict[str, Any]) -> dict[str, Any]
 
     if effort is not None:
         if effort in ("none", "disabled", "off"):
-            return {"thinkingBudget": 0}
+            return None
         if effort in ("high", "medium", "low"):
             return {"thinkingLevel": effort.upper()}
 
     if "thinking_budget" in payload and payload["thinking_budget"] is not None:
-        return {"thinkingBudget": int(payload["thinking_budget"])}
+        b = int(payload["thinking_budget"])
+        return {"thinkingBudget": b} if b > 0 else None
 
     # 2. Model suffix heuristics
     m = (model or "").lower()
@@ -93,11 +99,8 @@ def build_thinking_config(model: str, payload: dict[str, Any]) -> dict[str, Any]
     if "-low" in m:
         return {"thinkingLevel": "LOW"}
     if "-thinking" in m:
-        return {"thinkingBudget": _default_budget()}
-
-    # 3. Standard Gemini models default to zero thinking budget
-    if "gemini" in m:
-        return {"thinkingBudget": 0}
+        b = _default_budget()
+        return {"thinkingBudget": b} if b else None
 
     return None
 
@@ -524,13 +527,14 @@ def build_openai_model_list(upstream_models: list[Any]) -> dict[str, Any]:
             models_data.append(
                 {
                     "id": raw_id,
+                    "slug": raw_id,
                     "object": "model",
                     "created": created,
                     "owned_by": "google",
                 }
             )
 
-    return {"object": "list", "data": models_data}
+    return {"object": "list", "data": models_data, "models": models_data}
 
 
 def build_openai_error_response(

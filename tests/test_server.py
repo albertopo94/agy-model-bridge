@@ -574,7 +574,6 @@ class TestServerEndpoints(unittest.TestCase):
                 "maxOutputTokens": 128,
                 "topP": 0.85,
                 "stopSequences": ["STOP_HERE"],
-                "thinkingConfig": {"thinkingBudget": 0},
             },
         )
 

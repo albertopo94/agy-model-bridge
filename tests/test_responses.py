@@ -28,7 +28,7 @@ class TestResponsesRequestTranslation(unittest.TestCase):
         self.assertEqual(contents, [{"role": "user", "parts": [{"text": "Hello world"}]}])
         self.assertIsNotNone(gen_config)
         self.assertEqual(gen_config["temperature"], 0.2)
-        self.assertEqual(gen_config["thinkingConfig"], {"thinkingBudget": 0})
+        self.assertNotIn("thinkingConfig", gen_config)
 
     def test_input_with_typed_items_and_input_text_blocks(self):
         payload = {
