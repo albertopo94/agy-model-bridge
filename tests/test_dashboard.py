@@ -86,6 +86,8 @@ class TestDashboardRendering(unittest.TestCase):
         self.assertIn("http://127.0.0.1:8080", html)
         self.assertIn("ANTHROPIC_BASE_URL", html)
         self.assertIn("ANTHROPIC_AUTH_TOKEN", html)
+        self.assertIn("ANTHROPIC_CUSTOM_MODEL_OPTION", html)
+        self.assertIn("CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY", html)
 
         # Card 3: Codex / Hermes / Aider Direct with /v1
         self.assertIn("Codex", html)

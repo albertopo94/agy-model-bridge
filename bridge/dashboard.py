@@ -112,6 +112,10 @@ curl http://{snippet_address}/v1/chat/completions \\
     card2_snippet = f"""# Claude Code CLI Direct Configuration
 export ANTHROPIC_BASE_URL="http://{snippet_address}"
 export ANTHROPIC_AUTH_TOKEN="dummy"
+# For Gemini/GPT-OSS models (bypasses Claude Code's model picker filter):
+export ANTHROPIC_CUSTOM_MODEL_OPTION="gemini-2.5-flash"
+# Optional: enable gateway discovery for Claude-family models (v2.1.129+)
+export CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1
 claude"""
 
     card3_snippet = f"""# Codex CLI Configuration (~/.codex/config.toml)
