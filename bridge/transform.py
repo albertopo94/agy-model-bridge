@@ -25,6 +25,8 @@ def build_thinking_config(model: str, payload: dict[str, Any]) -> dict[str, Any]
     Returns:
         A dict with thinkingConfig parameters, or None if no thinking config applies.
     """
+    m = (model or "").lower()
+
     # Helper to clamp default thinking budget when max tokens specified
     max_tokens_val = (
         payload.get("max_tokens")
@@ -47,32 +49,72 @@ def build_thinking_config(model: str, payload: dict[str, Any]) -> dict[str, Any]
                 pass
         return 2048
 
+    def _tiered_or_budget() -> dict[str, Any] | None:
+        if "-medium" in m:
+            return {"thinkingLevel": "MEDIUM"}
+        if "-low" in m:
+            return {"thinkingLevel": "LOW"}
+        if "tiered" in m or "-high" in m or not m:
+            return {"thinkingLevel": "HIGH"}
+        b = _default_budget()
+        return {"thinkingBudget": b} if b else None
+
     # 1. Explicit client overrides take precedence over heuristics
     if "thinkingConfig" in payload and isinstance(payload["thinkingConfig"], dict):
-        return dict(payload["thinkingConfig"])
+        cfg = payload["thinkingConfig"]
+        sanitized: dict[str, Any] = {}
+        if "thinkingBudget" in cfg and cfg["thinkingBudget"] is not None:
+            try:
+                b = int(cfg["thinkingBudget"])
+                if b >= 0:
+                    sanitized["thinkingBudget"] = b
+            except (ValueError, TypeError):
+                pass
+        if "thinkingLevel" in cfg and cfg["thinkingLevel"] is not None:
+            sanitized["thinkingLevel"] = str(cfg["thinkingLevel"]).upper()
+        if sanitized:
+            return sanitized
 
     if "thinking" in payload:
         val = payload["thinking"]
         if isinstance(val, dict):
-            if val.get("type") == "disabled":
+            t_type = str(val.get("type", "")).strip().lower()
+            if t_type in ("disabled", "off", "none"):
                 return None
             if "budget_tokens" in val and val["budget_tokens"] is not None:
-                b = int(val["budget_tokens"])
-                return {"thinkingBudget": b} if b > 0 else None
+                try:
+                    b = int(val["budget_tokens"])
+                    return {"thinkingBudget": b} if b > 0 else None
+                except (ValueError, TypeError):
+                    pass
             if "thinkingBudget" in val and val["thinkingBudget"] is not None:
-                b = int(val["thinkingBudget"])
-                return {"thinkingBudget": b} if b > 0 else None
+                try:
+                    b = int(val["thinkingBudget"])
+                    return {"thinkingBudget": b} if b > 0 else None
+                except (ValueError, TypeError):
+                    pass
             if "thinkingLevel" in val and val["thinkingLevel"] is not None:
                 return {"thinkingLevel": str(val["thinkingLevel"]).upper()}
-            if val.get("type") == "enabled":
-                b = _default_budget()
-                return {"thinkingBudget": b} if b else None
-            return dict(val)
+            if t_type in ("adaptive", "auto"):
+                return _tiered_or_budget()
+            if t_type == "enabled":
+                return _tiered_or_budget()
+            # If any other dict, only extract thinkingBudget or thinkingLevel
+            sanitized_thinking: dict[str, Any] = {}
+            if "thinkingBudget" in val and val["thinkingBudget"] is not None:
+                try:
+                    b = int(val["thinkingBudget"])
+                    if b >= 0:
+                        sanitized_thinking["thinkingBudget"] = b
+                except (ValueError, TypeError):
+                    pass
+            if "thinkingLevel" in val and val["thinkingLevel"] is not None:
+                sanitized_thinking["thinkingLevel"] = str(val["thinkingLevel"]).upper()
+            return sanitized_thinking if sanitized_thinking else None
         elif val is False:
             return None
         elif val is True:
-            b = _default_budget()
-            return {"thinkingBudget": b} if b else None
+            return _tiered_or_budget()
 
     effort = None
     if "reasoning_effort" in payload and payload["reasoning_effort"] is not None:

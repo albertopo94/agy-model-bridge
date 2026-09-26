@@ -975,6 +975,39 @@ class TestBuildThinkingConfig(unittest.TestCase):
         config = build_thinking_config("gemini-2.5-pro", payload)
         self.assertEqual(config, {"thinkingBudget": 1024})
 
+    def test_payload_override_thinking_type_adaptive(self):
+        # Tiered / high model maps to thinkingLevel HIGH without 'type' field
+        payload = {"thinking": {"type": "adaptive"}}
+        config = build_thinking_config("gemini-3.8-flash-tiered", payload)
+        self.assertEqual(config, {"thinkingLevel": "HIGH"})
+        self.assertNotIn("type", config)
+
+        # Medium / low model suffixes
+        config_med = build_thinking_config("gemini-3.8-flash-medium", payload)
+        self.assertEqual(config_med, {"thinkingLevel": "MEDIUM"})
+        self.assertNotIn("type", config_med)
+
+        config_low = build_thinking_config("gemini-3.8-flash-low", payload)
+        self.assertEqual(config_low, {"thinkingLevel": "LOW"})
+        self.assertNotIn("type", config_low)
+
+        # Standard non-tiered model defaults to thinkingBudget
+        config_std = build_thinking_config("gemini-2.5-pro", payload)
+        self.assertEqual(config_std, {"thinkingBudget": 2048})
+        self.assertNotIn("type", config_std)
+
+    def test_payload_override_thinking_unknown_fields_stripped(self):
+        payload = {"thinking": {"type": "unknown_mode", "custom": "value"}}
+        config = build_thinking_config("gemini-2.5-pro", payload)
+        self.assertIsNone(config)
+
+    def test_payload_override_thinking_config_direct_sanitized(self):
+        payload = {"thinkingConfig": {"type": "adaptive", "thinkingLevel": "HIGH", "invalid": 123}}
+        config = build_thinking_config("gemini-3.8-flash-tiered", payload)
+        self.assertEqual(config, {"thinkingLevel": "HIGH"})
+        self.assertNotIn("type", config)
+        self.assertNotIn("invalid", config)
+
     def test_payload_override_thinking_config_direct(self):
         payload = {"thinkingConfig": {"thinkingBudget": 500}}
         config = build_thinking_config("gemini-2.5-pro", payload)

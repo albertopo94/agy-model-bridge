@@ -64,6 +64,18 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
         self.assertEqual(contents[0]["role"], "user")
         self.assertEqual(contents[0]["parts"], [{"text": "hola"}])
 
+    def test_anthropic_thinking_adaptive_sanitization(self):
+        payload = {
+            "model": "gemini-3.8-flash-high",
+            "messages": [{"role": "user", "content": "hola"}],
+            "thinking": {"type": "adaptive"},
+        }
+        model, contents, _, gen_config = anthropic_to_cloudcode_request(payload, "test-project")
+        self.assertEqual(model, "gemini-3.8-flash-tiered")
+        self.assertIsNotNone(gen_config)
+        self.assertEqual(gen_config.get("thinkingConfig"), {"thinkingLevel": "HIGH"})
+        self.assertNotIn("type", gen_config.get("thinkingConfig", {}))
+
     def test_user_content_as_blocks_and_multi_turn(self):
         payload = {
             "model": "gemini-2.5-pro",
