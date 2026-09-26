@@ -47,6 +47,23 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
             {"parts": [{"text": "First instruction.\nSecond instruction."}]},
         )
 
+    def test_system_role_in_messages_array(self):
+        payload = {
+            "model": "gemini-3.8-flash-high",
+            "messages": [
+                {"role": "system", "content": "You are Claude Code assistant."},
+                {"role": "user", "content": "hola"},
+            ],
+        }
+        _, contents, system_inst, _ = anthropic_to_cloudcode_request(payload, "test-project")
+        self.assertEqual(
+            system_inst,
+            {"parts": [{"text": "You are Claude Code assistant."}]},
+        )
+        self.assertEqual(len(contents), 1)
+        self.assertEqual(contents[0]["role"], "user")
+        self.assertEqual(contents[0]["parts"], [{"text": "hola"}])
+
     def test_user_content_as_blocks_and_multi_turn(self):
         payload = {
             "model": "gemini-2.5-pro",

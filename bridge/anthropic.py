@@ -58,22 +58,12 @@ def anthropic_to_cloudcode_request(
             elif isinstance(item, str) and item.strip():
                 system_texts.append(item.strip())
 
-    system_instruction: dict[str, Any] | None = None
-    if system_texts:
-        system_instruction = {"parts": [{"text": "\n".join(system_texts)}]}
-
     # Parse message turns
     contents: list[dict[str, Any]] = []
     for msg in messages:
         if not isinstance(msg, dict):
             raise ValueError("Each message must be a dictionary")
         role = msg.get("role")
-        if role == "user":
-            turn_role = "user"
-        elif role == "assistant":
-            turn_role = "model"
-        else:
-            raise ValueError(f"Invalid Anthropic message role: {role}")
 
         raw_content = msg.get("content")
         if isinstance(raw_content, str):
@@ -116,6 +106,20 @@ def anthropic_to_cloudcode_request(
         else:
             text = str(raw_content)
 
+        if role in ("system", "developer"):
+            if text and text.strip():
+                system_texts.append(text.strip())
+            continue
+        elif role == "user":
+            turn_role = "user"
+        elif role == "assistant":
+            turn_role = "model"
+        elif role in ("tool", "function"):
+            turn_role = "user"
+            text = f"[Tool Result]: {text}"
+        else:
+            turn_role = "user"
+
         part_text = text if text and text.strip() else " "
         turn_parts = [{"text": part_text}]
 
@@ -124,7 +128,13 @@ def anthropic_to_cloudcode_request(
         else:
             contents.append({"role": turn_role, "parts": turn_parts})
 
+    system_instruction: dict[str, Any] | None = None
+    if system_texts:
+        system_instruction = {"parts": [{"text": "\n".join(system_texts)}]}
+
     # Alternation & turn order enforcement
+    if not contents:
+        contents.append({"role": "user", "parts": [{"text": "Hello"}]})
     if contents and contents[0]["role"] == "model":
         contents.insert(0, {"role": "user", "parts": [{"text": "Hello"}]})
     if contents and contents[-1]["role"] == "model":
