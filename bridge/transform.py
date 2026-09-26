@@ -529,6 +529,7 @@ def build_openai_model_list(upstream_models: list[Any]) -> dict[str, Any]:
                     "id": raw_id,
                     "slug": raw_id,
                     "display_name": raw_id,
+                    "supported_reasoning_levels": ["none", "low", "medium", "high"],
                     "object": "model",
                     "created": created,
                     "owned_by": "google",
