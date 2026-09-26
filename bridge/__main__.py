@@ -1,11 +1,115 @@
 """CLI runner for Antigravity Model Bridge."""
 
 import argparse
+import sys
+from pathlib import Path
+
 from bridge.server import run_server
+from bridge.setup import setup_claude, setup_codex
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Antigravity Model Bridge")
+def main(argv: list[str] | None = None) -> int:
+    """Entry point for agy-model-bridge daemon and client setup subcommands."""
+    if argv is None:
+        argv = sys.argv[1:]
+
+    # Dispatch client setup subcommands
+    if argv and argv[0] == "setup-claude":
+        parser = argparse.ArgumentParser(
+            prog="python3 -m bridge setup-claude",
+            description="Configure Claude Code settings.json for agy-model-bridge gateway.",
+        )
+        parser.add_argument(
+            "--port",
+            type=int,
+            default=None,
+            help="Gateway port (default: 8080)",
+        )
+        parser.add_argument(
+            "--model",
+            type=str,
+            default="gemini-3.8-flash-high",
+            help="Default model identifier (default: gemini-3.8-flash-high)",
+        )
+        parser.add_argument(
+            "--url",
+            "--base-url",
+            dest="base_url",
+            type=str,
+            default=None,
+            help="Gateway base URL override (without trailing slash)",
+        )
+        parser.add_argument(
+            "--token",
+            "--auth-token",
+            dest="auth_token",
+            type=str,
+            default="antigravity",
+            help="Gateway auth token (default: antigravity)",
+        )
+        parser.add_argument(
+            "--path",
+            type=Path,
+            default=None,
+            help="Path to Claude settings.json (default: ~/.claude/settings.json)",
+        )
+        args = parser.parse_args(argv[1:])
+        target = setup_claude(
+            settings_path=args.path,
+            base_url=args.base_url,
+            port=args.port,
+            model=args.model,
+            auth_token=args.auth_token,
+        )
+        print(f"Claude Code configured successfully at {target}")
+        return 0
+
+    if argv and argv[0] == "setup-codex":
+        parser = argparse.ArgumentParser(
+            prog="python3 -m bridge setup-codex",
+            description="Configure Codex CLI config.toml for agy-model-bridge gateway.",
+        )
+        parser.add_argument(
+            "--port",
+            type=int,
+            default=None,
+            help="Gateway port (default: 8080)",
+        )
+        parser.add_argument(
+            "--model",
+            type=str,
+            default="gemini-3.8-flash-high",
+            help="Default model identifier (default: gemini-3.8-flash-high)",
+        )
+        parser.add_argument(
+            "--url",
+            "--base-url",
+            dest="base_url",
+            type=str,
+            default=None,
+            help="Gateway base URL override (with /v1)",
+        )
+        parser.add_argument(
+            "--path",
+            type=Path,
+            default=None,
+            help="Path to Codex config.toml (default: ~/.codex/config.toml)",
+        )
+        args = parser.parse_args(argv[1:])
+        target = setup_codex(
+            config_path=args.path,
+            base_url=args.base_url,
+            port=args.port,
+            model=args.model,
+        )
+        print(f"Codex CLI configured successfully at {target}")
+        return 0
+
+    # Fallback to daemon server runner
+    parser = argparse.ArgumentParser(
+        prog="python3 -m bridge",
+        description="Antigravity Model Bridge - Local AI Gateway",
+    )
     parser.add_argument(
         "--host",
         type=str,
@@ -30,9 +134,10 @@ def main() -> None:
         default=None,
         help="Upstream Google Cloud Code Assist base URL override",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     run_server(host=args.host, port=args.port, project=args.project, base_url=args.base_url)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

@@ -77,10 +77,9 @@ CLIENT_CARDS: list[dict[str, Any]] = [
         "title": "Claude Code",
         "desc": "Anthropic Messages API CLI (Base URL without /v1)",
         "auto_cmd": lambda addr: (
-            f'export ANTHROPIC_BASE_URL="http://{addr}" '
-            f'ANTHROPIC_AUTH_TOKEN="local-bridge" '
-            f'ANTHROPIC_CUSTOM_MODEL_OPTION="gemini-2.5-flash" '
-            f'CLAUDE_CODE_USE_GATEWAY=1 && claude'
+            f"python3 -m bridge setup-claude --port {addr.rsplit(':', 1)[1]}"
+            if ":" in addr and addr.rsplit(":", 1)[1].isdigit() and addr.rsplit(":", 1)[1] != "8080"
+            else "python3 -m bridge setup-claude"
         ),
         "manual_snippet": lambda addr: f'export ANTHROPIC_BASE_URL="http://{addr}"\nexport ANTHROPIC_AUTH_TOKEN="local-bridge"',
         "docs_url": "https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview",
@@ -90,7 +89,9 @@ CLIENT_CARDS: list[dict[str, Any]] = [
         "title": "Codex CLI",
         "desc": "OpenAI Responses API CLI (wire_api = 'responses')",
         "auto_cmd": lambda addr: (
-            f'mkdir -p ~/.codex && printf \'\\n[model]\\nwire_api = "responses"\\nbase_url = "http://{addr}/v1"\\n\' >> ~/.codex/config.toml'
+            f"python3 -m bridge setup-codex --port {addr.rsplit(':', 1)[1]}"
+            if ":" in addr and addr.rsplit(":", 1)[1].isdigit() and addr.rsplit(":", 1)[1] != "8080"
+            else "python3 -m bridge setup-codex"
         ),
         "manual_snippet": lambda addr: f'# ~/.codex/config.toml\n[model]\nwire_api = "responses"\nbase_url = "http://{addr}/v1"',
         "docs_url": "https://github.com/openai/codex",

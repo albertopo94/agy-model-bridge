@@ -16,6 +16,7 @@ from bridge.transform import (
     extract_text_delta,
     extract_usage,
     parse_cloudcode_sse_event,
+    resolve_model_and_thinking,
 )
 
 
@@ -34,9 +35,10 @@ def responses_to_cloudcode_request(
     Raises:
         ValueError: If model or input are missing or invalid.
     """
-    model = payload.get("model")
-    if not model or not isinstance(model, str) or not model.strip():
-        raise ValueError("Missing or invalid 'model' parameter")
+    raw_model = payload.get("model")
+    if raw_model is not None and not isinstance(raw_model, str):
+        raise ValueError("Invalid 'model' parameter: must be a string")
+    model, thinking_cfg = resolve_model_and_thinking(raw_model, payload)
 
     input_items = payload.get("input")
     if isinstance(input_items, str):
@@ -156,7 +158,6 @@ def responses_to_cloudcode_request(
     if stop_items:
         gen_config["stopSequences"] = stop_items
 
-    thinking_cfg = build_thinking_config(model, payload)
     if thinking_cfg is not None:
         gen_config["thinkingConfig"] = thinking_cfg
 

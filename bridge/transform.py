@@ -105,6 +105,51 @@ def build_thinking_config(model: str, payload: dict[str, Any]) -> dict[str, Any]
     return None
 
 
+def resolve_model_and_thinking(
+    model: str | None,
+    payload: dict[str, Any],
+) -> tuple[str, dict[str, Any] | None]:
+    """Resolves model name and thinkingConfig applying flash-high/auto aliasing and client overrides.
+
+    Args:
+        model: Optional model identifier string.
+        payload: Request payload dictionary which may contain client thinking overrides.
+
+    Returns:
+        tuple of (resolved_model_name, thinking_config_dict_or_None)
+    """
+    raw_model = (model or "").strip()
+    m = raw_model.lower()
+
+    if not m or m == "auto" or m in ("gemini-3.8-flash", "gemini-3.8-flash-high"):
+        resolved_model = "gemini-3.8-flash-tiered"
+        default_thinking: dict[str, Any] | None = {"thinkingLevel": "HIGH"}
+    elif m == "gemini-3.8-flash-medium":
+        resolved_model = "gemini-3.8-flash-tiered"
+        default_thinking = {"thinkingLevel": "MEDIUM"}
+    elif m == "gemini-3.8-flash-low":
+        resolved_model = "gemini-3.8-flash-tiered"
+        default_thinking = {"thinkingLevel": "LOW"}
+    else:
+        resolved_model = raw_model
+        default_thinking = None
+
+    has_payload_override = (
+        ("thinkingConfig" in payload and isinstance(payload["thinkingConfig"], dict))
+        or "thinking" in payload
+        or "reasoning_effort" in payload
+        or "effort" in payload
+        or "thinking_budget" in payload
+    )
+
+    if has_payload_override:
+        thinking_cfg = build_thinking_config(resolved_model, payload)
+    else:
+        thinking_cfg = default_thinking if default_thinking is not None else build_thinking_config(resolved_model, payload)
+
+    return resolved_model, thinking_cfg
+
+
 def openai_to_cloudcode_request(
     openai_payload: dict[str, Any], project: str
 ) -> tuple[str, list[dict[str, Any]], dict[str, Any] | None, dict[str, Any] | None]:

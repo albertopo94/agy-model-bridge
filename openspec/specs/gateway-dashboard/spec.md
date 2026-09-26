@@ -56,16 +56,22 @@ The dashboard MUST display 4 dedicated client configuration cards in a responsiv
 4. **FreeLLMAPI**: Dedicated card for FreeLLMAPI gateway / Aider integration (`BASE_URL` with `/v1`).
 
 Each card MUST feature a standardized two-tier setup structure:
-- **Configuración automática**: Includes descriptive microcopy, a single-line command (`npx freellmapi setup-...` or CLI equivalent), and an independent copy button.
+- **Configuración automática**: Includes descriptive microcopy, a single-line command, and an independent copy button. For **Claude Code**, the command MUST be `python3 -m bridge setup-claude`. For **Codex CLI**, the command MUST be `python3 -m bridge setup-codex`.
 - **Conexión manual**: Includes descriptive microcopy, a formatted code block showing required `BASE_URL` and `API_KEY` (or environment variable exports), and an independent copy button.
 - **Documentation link**: Card footer MUST include a clickable external link (`Documentación ↗`) pointing to the client's official documentation.
 
 Embedded JavaScript MUST support click-to-copy for each copy button independently with visual feedback (e.g., "Copied!").
 
-#### Scenario: Copy automatic setup command
+#### Scenario: Copy automatic setup command for Claude Code
 - GIVEN the dashboard rendered in a browser
 - WHEN a user clicks the copy button in the "Configuración automática" section of the Claude Code card
-- THEN the single-line automatic command is copied to the clipboard
+- THEN the clipboard receives `python3 -m bridge setup-claude`
+- AND the button displays temporary "Copied!" feedback.
+
+#### Scenario: Copy automatic setup command for Codex CLI
+- GIVEN the dashboard rendered in a browser
+- WHEN a user clicks the copy button in the "Configuración automática" section of the Codex CLI card
+- THEN the clipboard receives `python3 -m bridge setup-codex`
 - AND the button displays temporary "Copied!" feedback.
 
 #### Scenario: Copy manual connection parameters

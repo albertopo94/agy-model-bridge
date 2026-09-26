@@ -12,6 +12,7 @@ from bridge.transform import (
     build_openai_error_response,
     check_sse_error,
     build_thinking_config,
+    resolve_model_and_thinking,
 )
 from bridge.client import (
     BridgeError,
@@ -1039,5 +1040,82 @@ class TestBuildThinkingConfig(unittest.TestCase):
         self.assertEqual(gen_config_ovr.get("thinkingConfig"), {"thinkingBudget": 1024})
 
 
+class TestResolveModelAndThinking(unittest.TestCase):
+    def test_none_model_resolves_to_tiered_high(self):
+        model, thinking = resolve_model_and_thinking(None, {})
+        self.assertEqual(model, "gemini-3.8-flash-tiered")
+        self.assertEqual(thinking, {"thinkingLevel": "HIGH"})
+
+    def test_empty_model_resolves_to_tiered_high(self):
+        model, thinking = resolve_model_and_thinking("", {})
+        self.assertEqual(model, "gemini-3.8-flash-tiered")
+        self.assertEqual(thinking, {"thinkingLevel": "HIGH"})
+
+        model_ws, thinking_ws = resolve_model_and_thinking("   ", {})
+        self.assertEqual(model_ws, "gemini-3.8-flash-tiered")
+        self.assertEqual(thinking_ws, {"thinkingLevel": "HIGH"})
+
+    def test_auto_model_resolves_to_tiered_high(self):
+        model, thinking = resolve_model_and_thinking("auto", {})
+        self.assertEqual(model, "gemini-3.8-flash-tiered")
+        self.assertEqual(thinking, {"thinkingLevel": "HIGH"})
+
+        model_upper, thinking_upper = resolve_model_and_thinking("AUTO", {})
+        self.assertEqual(model_upper, "gemini-3.8-flash-tiered")
+        self.assertEqual(thinking_upper, {"thinkingLevel": "HIGH"})
+
+    def test_flash_high_model_resolves_to_tiered_high(self):
+        model, thinking = resolve_model_and_thinking("gemini-3.8-flash-high", {})
+        self.assertEqual(model, "gemini-3.8-flash-tiered")
+        self.assertEqual(thinking, {"thinkingLevel": "HIGH"})
+
+    def test_flash_model_resolves_to_tiered_high(self):
+        model, thinking = resolve_model_and_thinking("gemini-3.8-flash", {})
+        self.assertEqual(model, "gemini-3.8-flash-tiered")
+        self.assertEqual(thinking, {"thinkingLevel": "HIGH"})
+
+    def test_flash_medium_model_resolves_to_tiered_medium(self):
+        model, thinking = resolve_model_and_thinking("gemini-3.8-flash-medium", {})
+        self.assertEqual(model, "gemini-3.8-flash-tiered")
+        self.assertEqual(thinking, {"thinkingLevel": "MEDIUM"})
+
+    def test_flash_low_model_resolves_to_tiered_low(self):
+        model, thinking = resolve_model_and_thinking("gemini-3.8-flash-low", {})
+        self.assertEqual(model, "gemini-3.8-flash-tiered")
+        self.assertEqual(thinking, {"thinkingLevel": "LOW"})
+
+    def test_explicit_thinking_config_overrides(self):
+        # Explicit thinkingConfig in payload overrides default HIGH
+        model, thinking = resolve_model_and_thinking(
+            "gemini-3.8-flash-high", {"thinkingConfig": {"thinkingLevel": "LOW"}}
+        )
+        self.assertEqual(model, "gemini-3.8-flash-tiered")
+        self.assertEqual(thinking, {"thinkingLevel": "LOW"})
+
+        # Disabled thinking override
+        model2, thinking2 = resolve_model_and_thinking(
+            "auto", {"thinking": {"type": "disabled"}}
+        )
+        self.assertEqual(model2, "gemini-3.8-flash-tiered")
+        self.assertIsNone(thinking2)
+
+        # Reasoning effort override
+        model3, thinking3 = resolve_model_and_thinking(
+            "gemini-3.8-flash", {"reasoning_effort": "low"}
+        )
+        self.assertEqual(model3, "gemini-3.8-flash-tiered")
+        self.assertEqual(thinking3, {"thinkingLevel": "LOW"})
+
+    def test_unaliased_model_preserved(self):
+        model, thinking = resolve_model_and_thinking("gemini-2.5-pro", {})
+        self.assertEqual(model, "gemini-2.5-pro")
+        self.assertIsNone(thinking)
+
+        model2, thinking2 = resolve_model_and_thinking("gemini-2.5-pro-high", {})
+        self.assertEqual(model2, "gemini-2.5-pro-high")
+        self.assertEqual(thinking2, {"thinkingLevel": "HIGH"})
+
+
 if __name__ == "__main__":
     unittest.main()
+

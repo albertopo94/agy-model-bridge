@@ -109,8 +109,10 @@ class TestDashboardRendering(unittest.TestCase):
         self.assertIn("http://127.0.0.1:8080/v1", html)
 
         # Setup commands and keywords (100% native, zero external package dependencies)
-        self.assertIn("ANTHROPIC_CUSTOM_MODEL_OPTION", html)
-        self.assertIn("mkdir -p ~/.codex", html)
+        self.assertIn("python3 -m bridge setup-claude", html)
+        self.assertIn("python3 -m bridge setup-codex", html)
+        self.assertNotIn("ANTHROPIC_CUSTOM_MODEL_OPTION", html)
+        self.assertNotIn("mkdir -p ~/.codex", html)
         self.assertIn("export OPENAI_BASE_URL", html)
         self.assertNotIn("npx freellmapi setup", html)
         self.assertIn("BASE_URL", html)
@@ -175,7 +177,11 @@ class TestDashboardRendering(unittest.TestCase):
         by_id = {c["id"]: c for c in CLIENT_CARDS}
         self.assertEqual(
             by_id["codex"]["auto_cmd"]("127.0.0.1:8080"),
-            'mkdir -p ~/.codex && printf \'\\n[model]\\nwire_api = "responses"\\nbase_url = "http://127.0.0.1:8080/v1"\\n\' >> ~/.codex/config.toml',
+            "python3 -m bridge setup-codex",
+        )
+        self.assertEqual(
+            by_id["codex"]["auto_cmd"]("127.0.0.1:9090"),
+            "python3 -m bridge setup-codex --port 9090",
         )
         self.assertEqual(
             by_id["codex"]["manual_snippet"]("127.0.0.1:8080"),
@@ -185,7 +191,11 @@ class TestDashboardRendering(unittest.TestCase):
 
         self.assertEqual(
             by_id["claude"]["auto_cmd"]("127.0.0.1:8080"),
-            'export ANTHROPIC_BASE_URL="http://127.0.0.1:8080" ANTHROPIC_AUTH_TOKEN="local-bridge" ANTHROPIC_CUSTOM_MODEL_OPTION="gemini-2.5-flash" CLAUDE_CODE_USE_GATEWAY=1 && claude',
+            "python3 -m bridge setup-claude",
+        )
+        self.assertEqual(
+            by_id["claude"]["auto_cmd"]("127.0.0.1:9090"),
+            "python3 -m bridge setup-claude --port 9090",
         )
         self.assertEqual(
             by_id["claude"]["manual_snippet"]("127.0.0.1:8080"),

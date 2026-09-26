@@ -124,9 +124,31 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
         _, _, _, gen_config_ovr = anthropic_to_cloudcode_request(payload_override, "test-project")
         self.assertEqual(gen_config_ovr["thinkingConfig"], {"thinkingBudget": 4096})
 
-    def test_validation_missing_model_raises_value_error(self):
+    def test_omitted_or_aliased_model_resolves_to_flash_tiered(self):
+        # Omitted model defaults to flash-tiered with HIGH thinking
+        model, _, _, gen_config = anthropic_to_cloudcode_request(
+            {"messages": [{"role": "user", "content": "Hi"}]}, "p"
+        )
+        self.assertEqual(model, "gemini-3.8-flash-tiered")
+        self.assertEqual(gen_config.get("thinkingConfig"), {"thinkingLevel": "HIGH"})
+
+        # "auto" model
+        model_auto, _, _, gen_config_auto = anthropic_to_cloudcode_request(
+            {"model": "auto", "messages": [{"role": "user", "content": "Hi"}]}, "p"
+        )
+        self.assertEqual(model_auto, "gemini-3.8-flash-tiered")
+        self.assertEqual(gen_config_auto.get("thinkingConfig"), {"thinkingLevel": "HIGH"})
+
+        # "gemini-3.8-flash-high"
+        model_fh, _, _, gen_config_fh = anthropic_to_cloudcode_request(
+            {"model": "gemini-3.8-flash-high", "messages": [{"role": "user", "content": "Hi"}]}, "p"
+        )
+        self.assertEqual(model_fh, "gemini-3.8-flash-tiered")
+        self.assertEqual(gen_config_fh.get("thinkingConfig"), {"thinkingLevel": "HIGH"})
+
+    def test_invalid_model_type_raises_value_error(self):
         with self.assertRaises(ValueError):
-            anthropic_to_cloudcode_request({"messages": [{"role": "user", "content": "Hi"}]}, "p")
+            anthropic_to_cloudcode_request({"model": 12345, "messages": [{"role": "user", "content": "Hi"}]}, "p")
 
     def test_validation_missing_or_empty_messages_raises_value_error(self):
         with self.assertRaises(ValueError):
