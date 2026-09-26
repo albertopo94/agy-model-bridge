@@ -733,9 +733,14 @@ class TestServerEndpoints(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("text/html", headers.get_content_type())
         self.assertIn("AGY Model Bridge", body)
-        self.assertIn("FreeLLMAPI", body)
         self.assertIn("Claude Code", body)
-        self.assertIn("Codex", body)
+        self.assertIn("Codex CLI", body)
+        self.assertIn("Hermes Agent", body)
+        self.assertIn("FreeLLMAPI", body)
+        self.assertIn("Configuración automática", body)
+        self.assertIn("Conexión manual", body)
+        self.assertIn("Documentación ↗", body)
+        self.assertIn("border-radius: 16px", body)
 
     def test_api_status_endpoint(self):
         status, headers, body = self._http_get("/api/status")

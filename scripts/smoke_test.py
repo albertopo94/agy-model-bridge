@@ -2,10 +2,12 @@
 """Standalone multi-protocol smoke test script for Antigravity Model Bridge."""
 
 import argparse
+import html
 import json
 import sys
 import urllib.error
 import urllib.request
+
 
 
 def test_healthz(base_url: str) -> None:
@@ -66,8 +68,32 @@ def test_dashboard(base_url: str) -> None:
             html_body = resp.read().decode("utf-8")
             if "AGY Model Bridge" not in html_body:
                 raise AssertionError("Missing 'AGY Model Bridge' title in dashboard HTML")
-            if "FreeLLMAPI" not in html_body or "Claude Code" not in html_body or "Codex" not in html_body:
-                raise AssertionError("Missing client configuration cards in dashboard HTML")
+            for card in ("Claude Code", "Codex CLI", "Hermes Agent", "FreeLLMAPI"):
+                if card not in html_body:
+                    raise AssertionError(f"Missing client card '{card}' in dashboard HTML")
+            for section in ("Configuración automática", "Conexión manual"):
+                if section not in html_body:
+                    raise AssertionError(f"Missing setup section '{section}' in dashboard HTML")
+            if "Documentación" not in html_body:
+                raise AssertionError("Missing 'Documentación' external links in dashboard HTML")
+            for expected_url in (
+                "https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview",
+                "https://github.com/openai/codex",
+            ):
+                if expected_url not in html_body:
+                    raise AssertionError(f"Missing doc URL '{expected_url}' in dashboard HTML")
+            unescaped_body = html.unescape(html_body)
+            for expected_snippet in (
+                "# ~/.codex/config.toml",
+                "[model]",
+                'wire_api = "responses"',
+                "export ANTHROPIC_BASE_URL=",
+                "export OPENAI_BASE_URL=",
+            ):
+                if expected_snippet not in unescaped_body:
+                    raise AssertionError(f"Missing snippet pattern '{expected_snippet}' in dashboard HTML")
+
+
     except Exception as e:
         print("FAILED")
         print(f"Error in dashboard retrieval: {e}", file=sys.stderr)

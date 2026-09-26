@@ -52,6 +52,23 @@ class TestDashboardRendering(unittest.TestCase):
         self.assertIn("<style>", html)
         self.assertIn("monospace", html)
 
+    def test_render_dashboard_vercel_styling_and_responsive_grid(self):
+        auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
+        html = render_dashboard("127.0.0.1", 8080, auth_status, models_count=10)
+
+        # Vercel dark surfaces
+        self.assertIn("#000000", html)
+        self.assertIn("#111111", html)
+        self.assertIn("#222222", html)
+
+        # 16px card border radius
+        self.assertIn("border-radius: 16px", html)
+
+        # 2-column grid and 768px responsive fallback
+        self.assertIn("repeat(2, minmax(0, 1fr))", html)
+        self.assertIn("@media", html)
+        self.assertIn("768px", html)
+
     def test_status_badges_healthy_state(self):
         auth_status = {"status": "Valid", "email": "user@google.com", "message": "Authenticated"}
         html = render_dashboard("127.0.0.1", 8080, auth_status, models_count=27)
@@ -77,26 +94,112 @@ class TestDashboardRendering(unittest.TestCase):
         auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
         html = render_dashboard("127.0.0.1", 8080, auth_status, models_count=20)
 
-        # Card 1: FreeLLMAPI Bridge with /v1
+        # All 4 client cards
+        self.assertIn("Claude Code", html)
+        self.assertIn("Codex CLI", html)
+        self.assertIn("Hermes Agent", html)
         self.assertIn("FreeLLMAPI", html)
+
+        # Two-tier headings
+        self.assertIn("Configuración automática", html)
+        self.assertIn("Conexión manual", html)
+
+        # Base URLs for Anthropic (without /v1) and OpenAI-compatible (with /v1)
+        self.assertIn("http://127.0.0.1:8080", html)
         self.assertIn("http://127.0.0.1:8080/v1", html)
 
-        # Card 2: Claude Code Direct without /v1
-        self.assertIn("Claude Code", html)
-        self.assertIn("http://127.0.0.1:8080", html)
-        self.assertIn("ANTHROPIC_BASE_URL", html)
-        self.assertIn("ANTHROPIC_AUTH_TOKEN", html)
-        self.assertIn("ANTHROPIC_CUSTOM_MODEL_OPTION", html)
-        self.assertIn("CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY", html)
+        # Setup commands and keywords
+        self.assertIn("npx freellmapi setup-claude", html)
+        self.assertIn("npx freellmapi setup-codex", html)
+        self.assertIn("npx freellmapi setup-hermes", html)
+        self.assertIn("npx freellmapi setup", html)
+        self.assertIn("BASE_URL", html)
+        self.assertIn("API_KEY", html)
 
-        # Card 3: Codex / Hermes / Aider Direct with /v1
-        self.assertIn("Codex", html)
-        self.assertIn('wire_api = "responses"', html)
+        # Refined manual configuration snippets (checked both in unescaped HTML and CLIENT_CARDS)
+        import html as html_lib
+        unescaped_html = html_lib.unescape(html)
+        self.assertIn('# ~/.codex/config.toml\n[model]\nwire_api = "responses"\nbase_url = "http://127.0.0.1:8080/v1"', unescaped_html)
+        self.assertIn('export ANTHROPIC_BASE_URL="http://127.0.0.1:8080"\nexport ANTHROPIC_AUTH_TOKEN="local-bridge"', unescaped_html)
+        self.assertIn('export OPENAI_BASE_URL="http://127.0.0.1:8080/v1"\nexport OPENAI_API_KEY="local-bridge"', unescaped_html)
+        self.assertIn('BASE_URL=http://127.0.0.1:8080/v1\nAPI_KEY=local-bridge', unescaped_html)
 
         # Clipboard copy functionality
+
         self.assertIn("<script>", html)
         self.assertIn("navigator.clipboard", html)
         self.assertIn("copy", html.lower())
+
+    def test_interactive_copy_handlers_and_doc_links(self):
+        auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
+        html = render_dashboard("127.0.0.1", 8080, auth_status, models_count=20)
+
+        # 8 independent snippet IDs and corresponding copy button calls
+        expected_ids = [
+            "claude-auto", "claude-manual",
+            "codex-auto", "codex-manual",
+            "hermes-auto", "hermes-manual",
+            "freellmapi-auto", "freellmapi-manual",
+        ]
+        for snippet_id in expected_ids:
+            with self.subTest(snippet_id=snippet_id):
+                self.assertIn(f'id="{snippet_id}"', html)
+                self.assertIn(f"copySnippet(this, '{snippet_id}')", html)
+
+        # External doc links
+        self.assertIn("Documentación ↗", html)
+        self.assertIn('target="_blank"', html)
+        self.assertIn('rel="noopener noreferrer"', html)
+        self.assertIn("https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview", html)
+        self.assertIn("https://github.com/openai/codex", html)
+        self.assertIn("https://hermes-agent.nousresearch.com", html)
+        self.assertIn("https://github.com/tashfeenahmed/freellmapi", html)
+
+        # Robust clipboard JavaScript
+        self.assertIn("function copySnippet(btn, elementId)", html)
+        self.assertIn("function fallbackCopy(el, btn)", html)
+        self.assertIn("execCommand", html)
+        self.assertIn('if (btn.classList.contains("copied")) return;', html)
+        self.assertIn('window.getSelection().removeAllRanges()', html)
+
+
+    def test_client_cards_schema(self):
+        from bridge.dashboard import CLIENT_CARDS
+        self.assertEqual(len(CLIENT_CARDS), 4)
+        card_titles = [c["title"] for c in CLIENT_CARDS]
+        self.assertIn("Claude Code", card_titles)
+        self.assertIn("Codex CLI", card_titles)
+        self.assertIn("Hermes Agent", card_titles)
+        self.assertIn("FreeLLMAPI", card_titles)
+
+        by_id = {c["id"]: c for c in CLIENT_CARDS}
+        self.assertEqual(
+            by_id["codex"]["manual_snippet"]("127.0.0.1:8080"),
+            '# ~/.codex/config.toml\n[model]\nwire_api = "responses"\nbase_url = "http://127.0.0.1:8080/v1"',
+        )
+        self.assertEqual(by_id["codex"]["docs_url"], "https://github.com/openai/codex")
+
+        self.assertEqual(
+            by_id["claude"]["manual_snippet"]("127.0.0.1:8080"),
+            'export ANTHROPIC_BASE_URL="http://127.0.0.1:8080"\nexport ANTHROPIC_AUTH_TOKEN="local-bridge"',
+        )
+        self.assertEqual(
+            by_id["claude"]["docs_url"],
+            "https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview",
+        )
+
+        self.assertEqual(
+            by_id["hermes"]["manual_snippet"]("127.0.0.1:8080"),
+            'export OPENAI_BASE_URL="http://127.0.0.1:8080/v1"\nexport OPENAI_API_KEY="local-bridge"',
+        )
+        self.assertEqual(by_id["hermes"]["docs_url"], "https://hermes-agent.nousresearch.com")
+
+        self.assertEqual(
+            by_id["freellmapi"]["manual_snippet"]("127.0.0.1:8080"),
+            'BASE_URL=http://127.0.0.1:8080/v1\nAPI_KEY=local-bridge',
+        )
+        self.assertEqual(by_id["freellmapi"]["docs_url"], "https://github.com/tashfeenahmed/freellmapi")
+
 
     def test_render_dashboard_host_0000_and_ipv6_substitutes_127001_in_snippets(self):
         auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
@@ -106,8 +209,6 @@ class TestDashboardRendering(unittest.TestCase):
                 # Header badge keeps the listen address
                 self.assertIn(f"🌐 {wildcard}:8080", html)
                 # Snippets substitute 127.0.0.1
-                self.assertIn("http://127.0.0.1:8080/v1/chat/completions", html)
-                self.assertIn("ANTHROPIC_BASE_URL", html)
                 self.assertIn("http://127.0.0.1:8080", html)
                 self.assertIn("http://127.0.0.1:8080/v1", html)
                 if wildcard:
@@ -173,6 +274,24 @@ class TestDashboardStatusData(unittest.TestCase):
         self.assertIn("cached-proj", _models_cache)
         entry = _models_cache["cached-proj"]
         self.assertEqual(entry[1], 0)
+
+    def test_get_status_data_models_error_negative_caching_on_expired_entry(self):
+        import time
+        from bridge.dashboard import _models_cache
+        provider = MockTokenProvider()
+        client = MockClient(token_provider=provider, fail_models=Exception("Upstream timeout"))
+
+        # Seed cache with an expired entry (70 seconds ago) with count 15
+        now = time.time()
+        _models_cache["expired-proj"] = (now - 70.0, 15)
+
+        data = get_status_data(client, "expired-proj", "127.0.0.1", 8080)
+        self.assertEqual(data["models_count"], 15)
+        # Verify negative caching: cache entry updated to now - 45.0 (giving 15s negative cache window)
+        entry = _models_cache["expired-proj"]
+        self.assertEqual(entry[1], 15)
+        self.assertAlmostEqual(entry[0], now - 45.0, delta=2.0)
+
 
 
 if __name__ == "__main__":

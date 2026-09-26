@@ -60,8 +60,7 @@ def get_status_data(client: Any, project: str, host: str, port: int) -> dict[str
                     _models_cache[project] = (now, models_count)
             except Exception:
                 models_count = cached_entry[1] if cached_entry is not None else 0
-                if cached_entry is None:
-                    _models_cache[project] = (now - 45.0, 0)
+                _models_cache[project] = (now - 45.0, models_count)
 
     return {
         "host": host,
@@ -70,6 +69,42 @@ def get_status_data(client: Any, project: str, host: str, port: int) -> dict[str
         "auth": auth_status,
         "models_count": models_count,
     }
+
+
+CLIENT_CARDS: list[dict[str, Any]] = [
+    {
+        "id": "claude",
+        "title": "Claude Code",
+        "desc": "Anthropic Messages API CLI (Base URL without /v1)",
+        "auto_cmd": lambda addr: f"npx freellmapi setup-claude --url http://{addr}",
+        "manual_snippet": lambda addr: f'export ANTHROPIC_BASE_URL="http://{addr}"\nexport ANTHROPIC_AUTH_TOKEN="local-bridge"',
+        "docs_url": "https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview",
+    },
+    {
+        "id": "codex",
+        "title": "Codex CLI",
+        "desc": "OpenAI Responses API CLI (wire_api = 'responses')",
+        "auto_cmd": lambda addr: f"npx freellmapi setup-codex --url http://{addr}/v1",
+        "manual_snippet": lambda addr: f'# ~/.codex/config.toml\n[model]\nwire_api = "responses"\nbase_url = "http://{addr}/v1"',
+        "docs_url": "https://github.com/openai/codex",
+    },
+    {
+        "id": "hermes",
+        "title": "Hermes Agent",
+        "desc": "NousResearch Hermes Agent CLI (Base URL with /v1)",
+        "auto_cmd": lambda addr: f"npx freellmapi setup-hermes --url http://{addr}/v1",
+        "manual_snippet": lambda addr: f'export OPENAI_BASE_URL="http://{addr}/v1"\nexport OPENAI_API_KEY="local-bridge"',
+        "docs_url": "https://hermes-agent.nousresearch.com",
+    },
+    {
+        "id": "freellmapi",
+        "title": "FreeLLMAPI",
+        "desc": "Custom Provider & Aider integration (Base URL with /v1)",
+        "auto_cmd": lambda addr: f"npx freellmapi setup --url http://{addr}/v1",
+        "manual_snippet": lambda addr: f'BASE_URL=http://{addr}/v1\nAPI_KEY=local-bridge',
+        "docs_url": "https://github.com/tashfeenahmed/freellmapi",
+    },
+]
 
 
 def render_dashboard(
@@ -100,32 +135,38 @@ def render_dashboard(
         auth_badge_class = "badge-danger"
         auth_label = f"Missing — {message}"
 
-    card1_snippet = f"""# OpenAI Chat Completions Endpoint
-curl http://{snippet_address}/v1/chat/completions \\
-  -H "Content-Type: application/json" \\
-  -H "Authorization: Bearer dummy-key" \\
-  -d '{{
-    "model": "gemini-2.5-pro",
-    "messages": [{{"role": "user", "content": "Hello!"}}]
-  }}'"""
+    cards_html_parts: list[str] = []
+    for card in CLIENT_CARDS:
+        auto_text = card["auto_cmd"](snippet_address)
+        manual_text = card["manual_snippet"](snippet_address)
+        card_id = card["id"]
+        cards_html_parts.append(f"""      <section class="card">
+        <div class="card-header">
+          <h2 class="card-title">{html.escape(card["title"])}</h2>
+        </div>
+        <p class="card-desc">{html.escape(card["desc"])}</p>
 
-    card2_snippet = f"""# Claude Code CLI Direct Configuration
-export ANTHROPIC_BASE_URL="http://{snippet_address}"
-export ANTHROPIC_AUTH_TOKEN="dummy"
-# For Gemini/GPT-OSS models (bypasses Claude Code's model picker filter):
-export ANTHROPIC_CUSTOM_MODEL_OPTION="gemini-2.5-flash"
-# Optional: enable gateway discovery for Claude-family models (v2.1.129+)
-export CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1
-claude"""
+        <div class="setup-block">
+          <div class="setup-header">
+            <span class="setup-title">Configuración automática</span>
+            <button class="copy-btn" onclick="copySnippet(this, '{card_id}-auto')">Copy</button>
+          </div>
+          <pre id="{card_id}-auto"><code>{html.escape(auto_text)}</code></pre>
+        </div>
 
-    card3_snippet = f"""# Codex CLI Configuration (~/.codex/config.toml)
-[model]
-name = "gemini-2.5-pro"
-wire_api = "responses"
-base_url = "http://{snippet_address}/v1"
+        <div class="setup-block">
+          <div class="setup-header">
+            <span class="setup-title">Conexión manual</span>
+            <button class="copy-btn" onclick="copySnippet(this, '{card_id}-manual')">Copy</button>
+          </div>
+          <pre id="{card_id}-manual"><code>{html.escape(manual_text)}</code></pre>
+        </div>
 
-# Hermes / Aider CLI Invocation
-aider --openai-api-base http://{snippet_address}/v1 --model gemini-2.5-pro"""
+        <div class="card-footer">
+          <a href="{html.escape(card["docs_url"])}" target="_blank" rel="noopener noreferrer" class="docs-link">Documentación ↗</a>
+        </div>
+      </section>""")
+    cards_html = "\n".join(cards_html_parts)
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -164,7 +205,7 @@ aider --openai-api-base http://{snippet_address}/v1 --model gemini-2.5-pro"""
       line-height: 1.5;
     }}
     .container {{
-      max-width: 900px;
+      max-width: 960px;
       margin: 0 auto;
     }}
     header {{
@@ -223,22 +264,29 @@ aider --openai-api-base http://{snippet_address}/v1 --model gemini-2.5-pro"""
     }}
     .cards-grid {{
       display: grid;
-      grid-template-columns: 1fr;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 1.5rem;
       margin-top: 2rem;
+    }}
+    @media (max-width: 768px) {{
+      .cards-grid {{
+        grid-template-columns: 1fr;
+      }}
     }}
     .card {{
       background: var(--card-bg);
       border: 1px solid var(--card-border);
-      border-radius: 10px;
+      border-radius: 16px;
       padding: 1.25rem 1.5rem;
       position: relative;
+      display: flex;
+      flex-direction: column;
     }}
     .card-header {{
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 0.75rem;
+      margin-bottom: 0.5rem;
     }}
     .card-title {{
       font-size: 1.05rem;
@@ -248,7 +296,39 @@ aider --openai-api-base http://{snippet_address}/v1 --model gemini-2.5-pro"""
     .card-desc {{
       font-size: 0.85rem;
       color: var(--text-secondary);
-      margin-bottom: 1rem;
+      margin-bottom: 0.75rem;
+    }}
+    .setup-block {{
+      margin-top: 0.75rem;
+    }}
+    .setup-header {{
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 0.35rem;
+    }}
+    .setup-title {{
+      font-size: 0.72rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-secondary);
+    }}
+    .card-footer {{
+      margin-top: auto;
+      padding-top: 1rem;
+      border-top: 1px solid var(--card-border);
+      display: flex;
+      justify-content: flex-end;
+    }}
+    .docs-link {{
+      color: var(--accent);
+      font-size: 0.8rem;
+      text-decoration: none;
+      transition: color 0.15s ease;
+    }}
+    .docs-link:hover {{
+      text-decoration: underline;
     }}
     .copy-btn {{
       background: #1a1a1a;
@@ -275,12 +355,12 @@ aider --openai-api-base http://{snippet_address}/v1 --model gemini-2.5-pro"""
       background: #080808;
       border: 1px solid var(--card-border);
       border-radius: 6px;
-      padding: 1rem;
+      padding: 0.75rem 1rem;
       overflow-x: auto;
       font-family: var(--font-mono);
-      font-size: 0.85rem;
+      font-size: 0.82rem;
       color: #d1d5db;
-      line-height: 1.6;
+      line-height: 1.5;
     }}
     footer {{
       margin-top: 3rem;
@@ -305,35 +385,7 @@ aider --openai-api-base http://{snippet_address}/v1 --model gemini-2.5-pro"""
     </header>
 
     <main class="cards-grid">
-      <!-- Card 1: FreeLLMAPI Bridge -->
-      <section class="card">
-        <div class="card-header">
-          <h2 class="card-title">FreeLLMAPI Bridge (OpenAI Chat API)</h2>
-          <button class="copy-btn" onclick="copySnippet(this, 'snippet-1')">Copy</button>
-        </div>
-        <p class="card-desc">OpenAI-compatible completions endpoint. Connect NextChat, LibreChat, or the OpenAI Python/TypeScript SDK.</p>
-        <pre id="snippet-1"><code>{html.escape(card1_snippet)}</code></pre>
-      </section>
-
-      <!-- Card 2: Claude Code Direct -->
-      <section class="card">
-        <div class="card-header">
-          <h2 class="card-title">Claude Code Direct (Anthropic Messages API)</h2>
-          <button class="copy-btn" onclick="copySnippet(this, 'snippet-2')">Copy</button>
-        </div>
-        <p class="card-desc">Native Anthropic Messages shim for Claude Code CLI. Note: Base URL is configured without <code>/v1</code>.</p>
-        <pre id="snippet-2"><code>{html.escape(card2_snippet)}</code></pre>
-      </section>
-
-      <!-- Card 3: Codex / Hermes / Aider Direct -->
-      <section class="card">
-        <div class="card-header">
-          <h2 class="card-title">Codex / Hermes / Aider Direct (Responses & Chat)</h2>
-          <button class="copy-btn" onclick="copySnippet(this, 'snippet-3')">Copy</button>
-        </div>
-        <p class="card-desc">OpenAI Responses API shim for Codex CLI (<code>wire_api = "responses"</code>) or standard chat completions for Aider/Hermes.</p>
-        <pre id="snippet-3"><code>{html.escape(card3_snippet)}</code></pre>
-      </section>
+{cards_html}
     </main>
 
     <footer>
@@ -365,13 +417,18 @@ aider --openai-api-base http://{snippet_address}/v1 --model gemini-2.5-pro"""
         var sel = window.getSelection();
         sel.removeAllRanges();
         sel.addRange(range);
-        setCopied(btn);
+        var successful = document.execCommand('copy');
+        window.getSelection().removeAllRanges();
+        if (successful) {{
+          setCopied(btn);
+        }}
       }} catch (e) {{
         // Selection remains active for manual copy
       }}
     }}
 
     function setCopied(btn) {{
+      if (btn.classList.contains("copied")) return;
       var original = btn.innerText;
       btn.innerText = "Copied!";
       btn.classList.add("copied");
@@ -380,6 +437,7 @@ aider --openai-api-base http://{snippet_address}/v1 --model gemini-2.5-pro"""
         btn.classList.remove("copied");
       }}, 2000);
     }}
+
   </script>
 </body>
 </html>"""

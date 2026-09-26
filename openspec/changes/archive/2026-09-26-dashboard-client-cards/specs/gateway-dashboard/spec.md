@@ -1,10 +1,6 @@
-# Gateway Dashboard Specification
+# Delta for Gateway Dashboard
 
-## Purpose
-
-Serve a self-contained, zero-dependency dark-mode dashboard at the HTTP root (`GET /`) displaying real-time bridge status badges and interactive copyable client setup snippets for Claude Code, Codex CLI, Hermes Agent, and FreeLLMAPI.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Dark-Mode Dashboard Endpoint
 
@@ -12,6 +8,7 @@ The server MUST handle `GET /` and return HTTP 200 with `Content-Type: text/html
 The HTML document MUST be self-contained with embedded CSS and JavaScript, requiring zero external CDN requests, fonts, or libraries.
 The UI SHALL render in a Geist/Vercel dark-mode palette (`#000000`/`#0d0d0d` background, `#111111` container cards with `border-radius: 16px`, `#222222` subtle borders, and monospace code blocks).
 The layout SHALL present client cards in a responsive 2-column grid on desktop screens, falling back to a single column on screens narrower than 768px.
+(Previously: Slate background `#0f172a`, 10px rounded cards `#1e293b`, and single-column cards grid)
 
 #### Scenario: Access root dashboard successfully
 - GIVEN the bridge server is active on `127.0.0.1:8080`
@@ -29,24 +26,6 @@ The layout SHALL present client cards in a responsive 2-column grid on desktop s
 - WHEN the request reaches the server
 - THEN the server returns HTTP 404 or HTTP 405 error schema.
 
-### Requirement: Real-Time Bridge Status Badges
-
-The dashboard MUST render three live status badges:
-1. **Keychain Auth**: SHALL indicate token status (`Valid`, `Expired`, or `Missing`) with connected account info. If invalid or expired, it MUST display an actionable resolution prompt (`Open Antigravity to refresh`).
-2. **Discovered Models**: SHALL display the integer count of available upstream models discovered via Cloud Code Assist.
-3. **Active Port & Host**: SHALL display the listening address (e.g., `127.0.0.1:8080`).
-
-#### Scenario: Display healthy status badges
-- GIVEN a valid Keychain token and 27 discovered upstream models
-- WHEN `GET /` is loaded
-- THEN the dashboard displays active badges for Keychain auth (`Valid`), model count (`27 Models Discovered`), and active address (`127.0.0.1:8080`).
-
-#### Scenario: Display degraded auth badge with actionable guidance
-- GIVEN Keychain token is missing or expired
-- WHEN `GET /` is loaded
-- THEN the Keychain badge displays warning/error state
-- AND displays clear instructions directing the user to open Antigravity to refresh credentials.
-
 ### Requirement: Interactive Client Configuration Cards
 
 The dashboard MUST display 4 dedicated client configuration cards in a responsive 2-column grid:
@@ -61,6 +40,7 @@ Each card MUST feature a standardized two-tier setup structure:
 - **Documentation link**: Card footer MUST include a clickable external link (`Documentación ↗`) pointing to the client's official documentation.
 
 Embedded JavaScript MUST support click-to-copy for each copy button independently with visual feedback (e.g., "Copied!").
+(Previously: 3 cards with single-snippet copy and no two-tier breakdown or doc links)
 
 #### Scenario: Copy automatic setup command
 - GIVEN the dashboard rendered in a browser
