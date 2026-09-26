@@ -108,11 +108,11 @@ class TestDashboardRendering(unittest.TestCase):
         self.assertIn("http://127.0.0.1:8080", html)
         self.assertIn("http://127.0.0.1:8080/v1", html)
 
-        # Setup commands and keywords
-        self.assertIn("npx freellmapi setup-claude", html)
-        self.assertIn("npx freellmapi setup-codex", html)
-        self.assertIn("npx freellmapi setup-hermes", html)
-        self.assertIn("npx freellmapi setup", html)
+        # Setup commands and keywords (100% native, zero external package dependencies)
+        self.assertIn("ANTHROPIC_CUSTOM_MODEL_OPTION", html)
+        self.assertIn("mkdir -p ~/.codex", html)
+        self.assertIn("export OPENAI_BASE_URL", html)
+        self.assertNotIn("npx freellmapi setup", html)
         self.assertIn("BASE_URL", html)
         self.assertIn("API_KEY", html)
 
@@ -174,11 +174,19 @@ class TestDashboardRendering(unittest.TestCase):
 
         by_id = {c["id"]: c for c in CLIENT_CARDS}
         self.assertEqual(
+            by_id["codex"]["auto_cmd"]("127.0.0.1:8080"),
+            'mkdir -p ~/.codex && printf \'\\n[model]\\nwire_api = "responses"\\nbase_url = "http://127.0.0.1:8080/v1"\\n\' >> ~/.codex/config.toml',
+        )
+        self.assertEqual(
             by_id["codex"]["manual_snippet"]("127.0.0.1:8080"),
             '# ~/.codex/config.toml\n[model]\nwire_api = "responses"\nbase_url = "http://127.0.0.1:8080/v1"',
         )
         self.assertEqual(by_id["codex"]["docs_url"], "https://github.com/openai/codex")
 
+        self.assertEqual(
+            by_id["claude"]["auto_cmd"]("127.0.0.1:8080"),
+            'export ANTHROPIC_BASE_URL="http://127.0.0.1:8080" ANTHROPIC_AUTH_TOKEN="local-bridge" ANTHROPIC_CUSTOM_MODEL_OPTION="gemini-2.5-flash" CLAUDE_CODE_USE_GATEWAY=1 && claude',
+        )
         self.assertEqual(
             by_id["claude"]["manual_snippet"]("127.0.0.1:8080"),
             'export ANTHROPIC_BASE_URL="http://127.0.0.1:8080"\nexport ANTHROPIC_AUTH_TOKEN="local-bridge"',
@@ -189,11 +197,19 @@ class TestDashboardRendering(unittest.TestCase):
         )
 
         self.assertEqual(
+            by_id["hermes"]["auto_cmd"]("127.0.0.1:8080"),
+            'export OPENAI_BASE_URL="http://127.0.0.1:8080/v1" OPENAI_API_KEY="local-bridge" && hermes',
+        )
+        self.assertEqual(
             by_id["hermes"]["manual_snippet"]("127.0.0.1:8080"),
             'export OPENAI_BASE_URL="http://127.0.0.1:8080/v1"\nexport OPENAI_API_KEY="local-bridge"',
         )
         self.assertEqual(by_id["hermes"]["docs_url"], "https://hermes-agent.nousresearch.com")
 
+        self.assertEqual(
+            by_id["freellmapi"]["auto_cmd"]("127.0.0.1:8080"),
+            'http://127.0.0.1:8080/v1',
+        )
         self.assertEqual(
             by_id["freellmapi"]["manual_snippet"]("127.0.0.1:8080"),
             'BASE_URL=http://127.0.0.1:8080/v1\nAPI_KEY=local-bridge',

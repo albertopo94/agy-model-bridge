@@ -76,7 +76,12 @@ CLIENT_CARDS: list[dict[str, Any]] = [
         "id": "claude",
         "title": "Claude Code",
         "desc": "Anthropic Messages API CLI (Base URL without /v1)",
-        "auto_cmd": lambda addr: f"npx freellmapi setup-claude --url http://{addr}",
+        "auto_cmd": lambda addr: (
+            f'export ANTHROPIC_BASE_URL="http://{addr}" '
+            f'ANTHROPIC_AUTH_TOKEN="local-bridge" '
+            f'ANTHROPIC_CUSTOM_MODEL_OPTION="gemini-2.5-flash" '
+            f'CLAUDE_CODE_USE_GATEWAY=1 && claude'
+        ),
         "manual_snippet": lambda addr: f'export ANTHROPIC_BASE_URL="http://{addr}"\nexport ANTHROPIC_AUTH_TOKEN="local-bridge"',
         "docs_url": "https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview",
     },
@@ -84,7 +89,9 @@ CLIENT_CARDS: list[dict[str, Any]] = [
         "id": "codex",
         "title": "Codex CLI",
         "desc": "OpenAI Responses API CLI (wire_api = 'responses')",
-        "auto_cmd": lambda addr: f"npx freellmapi setup-codex --url http://{addr}/v1",
+        "auto_cmd": lambda addr: (
+            f'mkdir -p ~/.codex && printf \'\\n[model]\\nwire_api = "responses"\\nbase_url = "http://{addr}/v1"\\n\' >> ~/.codex/config.toml'
+        ),
         "manual_snippet": lambda addr: f'# ~/.codex/config.toml\n[model]\nwire_api = "responses"\nbase_url = "http://{addr}/v1"',
         "docs_url": "https://github.com/openai/codex",
     },
@@ -92,7 +99,7 @@ CLIENT_CARDS: list[dict[str, Any]] = [
         "id": "hermes",
         "title": "Hermes Agent",
         "desc": "NousResearch Hermes Agent CLI (Base URL with /v1)",
-        "auto_cmd": lambda addr: f"npx freellmapi setup-hermes --url http://{addr}/v1",
+        "auto_cmd": lambda addr: f'export OPENAI_BASE_URL="http://{addr}/v1" OPENAI_API_KEY="local-bridge" && hermes',
         "manual_snippet": lambda addr: f'export OPENAI_BASE_URL="http://{addr}/v1"\nexport OPENAI_API_KEY="local-bridge"',
         "docs_url": "https://hermes-agent.nousresearch.com",
     },
@@ -100,7 +107,7 @@ CLIENT_CARDS: list[dict[str, Any]] = [
         "id": "freellmapi",
         "title": "FreeLLMAPI",
         "desc": "Custom Provider & Aider integration (Base URL with /v1)",
-        "auto_cmd": lambda addr: f"npx freellmapi setup --url http://{addr}/v1",
+        "auto_cmd": lambda addr: f"http://{addr}/v1",
         "manual_snippet": lambda addr: f'BASE_URL=http://{addr}/v1\nAPI_KEY=local-bridge',
         "docs_url": "https://github.com/tashfeenahmed/freellmapi",
     },
