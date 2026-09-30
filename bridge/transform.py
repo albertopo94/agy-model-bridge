@@ -55,26 +55,57 @@ UNSUPPORTED_SCHEMA_KEYS = frozenset({
 })
 
 
-def sanitize_schema_for_gemini(schema: Any, inside_properties_map: bool = False, root: Any = None) -> Any:
+def _resolve_pointer(root: Any, ref: str) -> Any:
+    """Best-effort JSON pointer resolution against schema root."""
+    if not isinstance(ref, str) or not ref.startswith("#/"):
+        return None
+    node = root
+    for raw_segment in ref[2:].split("/"):
+        if not isinstance(node, dict):
+            return None
+        segment = raw_segment.replace("~1", "/").replace("~0", "~")
+        node = node.get(segment)
+    return node
+
+
+def sanitize_schema_for_gemini(
+    schema: Any,
+    inside_properties_map: bool = False,
+    root: Any = None,
+    expanding: frozenset[str] | None = None,
+) -> Any:
     """Recursively sanitizes a JSON schema to ensure compatibility with Google Gemini OpenAPI 3.0 protobuf schema."""
     if root is None:
         root = schema
+    if expanding is None:
+        expanding = frozenset()
 
     if isinstance(schema, list):
-        return [sanitize_schema_for_gemini(item, False, root) for item in schema]
+        return [sanitize_schema_for_gemini(item, False, root, expanding) for item in schema]
 
     if not isinstance(schema, dict):
         return schema
 
     out: dict[str, Any] = {}
     nullable = False
+    inlined: dict[str, Any] | None = None
 
     for key, value in schema.items():
         if inside_properties_map:
-            out[key] = sanitize_schema_for_gemini(value, False, root)
+            out[key] = sanitize_schema_for_gemini(value, False, root, expanding)
             continue
 
         if key.lower().startswith("x-"):
+            continue
+
+        if key == "$ref" and isinstance(value, str) and value not in expanding:
+            target = _resolve_pointer(root, value)
+            if isinstance(target, dict):
+                inlined_res = sanitize_schema_for_gemini(
+                    target, False, root, expanding | {value}
+                )
+                if isinstance(inlined_res, dict):
+                    inlined = inlined_res
             continue
 
         if key in UNSUPPORTED_SCHEMA_KEYS:
@@ -90,12 +121,43 @@ def sanitize_schema_for_gemini(schema: Any, inside_properties_map: bool = False,
                 nullable = True
             continue
 
-        out[key] = sanitize_schema_for_gemini(value, key == "properties", root)
+        out[key] = sanitize_schema_for_gemini(value, key == "properties", root, expanding)
 
     if nullable:
         out["nullable"] = True
 
-    return out
+    merged = {**inlined, **out} if inlined else out
+
+    if inside_properties_map:
+        return merged
+
+    # Gemini Schema proto requires `items` on every ARRAY.
+    # Handle tuple params (prefixItems or items list) and missing items.
+    type_val = merged.get("type")
+    is_array = isinstance(type_val, str) and type_val.lower() == "array"
+    if is_array or "items" in merged or "prefixItems" in schema:
+        members: list[Any] = []
+        if isinstance(schema.get("prefixItems"), list):
+            members.extend(sanitize_schema_for_gemini(schema["prefixItems"], False, root, expanding))
+        single: dict[str, Any] | None = None
+        if isinstance(merged.get("items"), list):
+            members.extend(merged["items"])
+        elif isinstance(merged.get("items"), dict):
+            single = merged["items"]
+
+        if members:
+            branches = members + ([single] if single else [])
+            valid_branches = [b for b in branches if isinstance(b, dict) and b]
+            if len(valid_branches) == 1:
+                merged["items"] = valid_branches[0]
+            elif valid_branches:
+                merged["items"] = {"anyOf": valid_branches}
+            else:
+                merged["items"] = {}
+        elif single is None and (is_array or "items" in merged):
+            merged["items"] = {}
+
+    return merged
 
 
 def build_thinking_config(model: str, payload: dict[str, Any]) -> dict[str, Any] | None:

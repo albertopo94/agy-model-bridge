@@ -1415,6 +1415,47 @@ class TestSanitizeSchemaForGemini(unittest.TestCase):
         self.assertIn("const", sanitized["properties"])
         self.assertIn("not", sanitized["properties"])
 
+    def test_array_without_items_gets_empty_items_schema(self):
+        schema = {
+            "type": "array",
+            "description": "A list of tags",
+        }
+        sanitized = sanitize_schema_for_gemini(schema)
+        self.assertEqual(sanitized["type"], "array")
+        self.assertEqual(sanitized["items"], {})
+
+    def test_array_prefix_items_converted_to_items(self):
+        schema = {
+            "type": "array",
+            "prefixItems": [
+                {"type": "string"},
+                {"type": "number"},
+            ],
+        }
+        sanitized = sanitize_schema_for_gemini(schema)
+        self.assertEqual(sanitized["type"], "array")
+        self.assertIn("anyOf", sanitized["items"])
+        self.assertEqual(len(sanitized["items"]["anyOf"]), 2)
+
+    def test_inlines_internal_ref_pointers(self):
+        schema = {
+            "$defs": {
+                "User": {
+                    "type": "object",
+                    "properties": {"name": {"type": "string"}},
+                }
+            },
+            "type": "object",
+            "properties": {
+                "author": {"$ref": "#/$defs/User"},
+            },
+        }
+        sanitized = sanitize_schema_for_gemini(schema)
+        author = sanitized["properties"]["author"]
+        self.assertEqual(author["type"], "object")
+        self.assertEqual(author["properties"]["name"]["type"], "string")
+        self.assertNotIn("$ref", author)
+
 
 if __name__ == "__main__":
     unittest.main()
