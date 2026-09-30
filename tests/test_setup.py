@@ -604,14 +604,34 @@ class TestCLIRestore(unittest.TestCase):
 
         out = io.StringIO()
         with unittest.mock.patch("sys.stdout", out):
-            with unittest.mock.patch("builtins.input", return_value=""):
+            with unittest.mock.patch("builtins.input", return_value="") as mock_input:
                 exit_code = main(["restore-claude", "--path", str(target)])
         self.assertEqual(exit_code, 0)
         self.assertEqual(target.read_text(encoding="utf-8"), '{"env": "immediate_previous"}')
         output = out.getvalue()
-        self.assertIn("[1] settings.json.backup-2026-09-30T12-00-00", output)
-        self.assertIn("<-- Anterior inmediata (Presione Enter para seleccionar)", output)
+        self.assertIn("[1] settings.json.backup-2026-09-30T12-00-00  <-- Anterior inmediata", output)
         self.assertIn("[2] settings.json.backup-2026-09-20T10-00-00", output)
+        prompt_arg = mock_input.call_args[0][0]
+        self.assertIn("Ingrese un número (1-2)", prompt_arg)
+        self.assertIn("presione Enter para [1]", prompt_arg)
+        self.assertIn("'q' para cancelar", prompt_arg)
+
+    def test_cli_restore_claude_interactive_cancels_with_q(self):
+        import io
+        from bridge.__main__ import main
+        target = self.dir_path / "settings.json"
+        target.write_text('{"env": "bridge"}', encoding="utf-8")
+
+        b1 = self.dir_path / "settings.json.backup-1"
+        b1.write_text('{"env": "old"}', encoding="utf-8")
+
+        out = io.StringIO()
+        with unittest.mock.patch("sys.stdout", out):
+            with unittest.mock.patch("builtins.input", return_value="q"):
+                exit_code = main(["restore-claude", "--path", str(target)])
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(target.read_text(encoding="utf-8"), '{"env": "bridge"}')
+        self.assertIn("Operación cancelada", out.getvalue())
 
     def test_cli_restore_claude_interactive_selects_specific_number(self):
         import io

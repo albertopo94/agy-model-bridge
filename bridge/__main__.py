@@ -63,19 +63,27 @@ def _handle_restore_cli(
     print(f"\nBackups disponibles para {client_name}:")
     for i, b in enumerate(backups, 1):
         if i == 1:
-            print(f"  [{i}] {b.name}  <-- Anterior inmediata (Presione Enter para seleccionar)")
+            print(f"  [{i}] {b.name}  <-- Anterior inmediata")
         else:
             print(f"  [{i}] {b.name}")
 
+    count = len(backups)
+    range_str = f"1-{count}" if count > 1 else "1"
+    prompt_str = f"\nIngrese un número ({range_str}), presione Enter para [1], o 'q' para cancelar: "
+
     try:
-        choice = input("\nSeleccione una opción [1]: ").strip()
+        choice = input(prompt_str).strip()
     except (EOFError, KeyboardInterrupt):
         print("\nOperación cancelada.")
-        return 1
+        return 0
+
+    if choice.lower() in ("q", "quit", "cancel"):
+        print("Operación cancelada.")
+        return 0
 
     if not choice:
         selected_index = 0
-    elif choice.isdigit() and 1 <= int(choice) <= len(backups):
+    elif choice.isdigit() and 1 <= int(choice) <= count:
         selected_index = int(choice) - 1
     else:
         print("Opción inválida.")
