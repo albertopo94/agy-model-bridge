@@ -113,6 +113,10 @@ class TestDashboardRendering(unittest.TestCase):
         self.assertIn("python3 -m bridge setup-codex", html)
         self.assertNotIn("ANTHROPIC_CUSTOM_MODEL_OPTION", html)
         self.assertNotIn("mkdir -p ~/.codex", html)
+
+        # Claude Code mascot icon
+        self.assertIn('class="card-icon"', html)
+        self.assertIn("#D4562F", html)
         self.assertIn("export OPENAI_BASE_URL", html)
         self.assertNotIn("npx freellmapi setup", html)
         self.assertIn("BASE_URL", html)

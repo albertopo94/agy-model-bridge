@@ -71,11 +71,22 @@ def get_status_data(client: Any, project: str, host: str, port: int) -> dict[str
     }
 
 
+CLAUDE_ICON_SVG = (
+    '<svg class="card-icon" width="22" height="18" viewBox="0 0 16 12" fill="none" '
+    'xmlns="http://www.w3.org/2000/svg" aria-hidden="true">'
+    '<path fill-rule="evenodd" clip-rule="evenodd" '
+    'd="M1 1h3v3H1V1zm11 0h3v3h-3V1zM1 4h14v5H1V4zm2 1h2v2H3V5zm8 0h2v2h-2V5zM2 9h2v2H2V9zm10 0h2v2h-2V9z" '
+    'fill="#D4562F"/>'
+    '</svg>'
+)
+
+
 CLIENT_CARDS: list[dict[str, Any]] = [
     {
         "id": "claude",
         "title": "Claude Code",
         "desc": "Anthropic Messages API CLI (Base URL without /v1)",
+        "icon_svg": CLAUDE_ICON_SVG,
         "auto_cmd": lambda addr: (
             f"python3 -m bridge setup-claude --port {addr.rsplit(':', 1)[1]}"
             if ":" in addr and addr.rsplit(":", 1)[1].isdigit() and addr.rsplit(":", 1)[1] != "8080"
@@ -148,9 +159,10 @@ def render_dashboard(
         auto_text = card["auto_cmd"](snippet_address)
         manual_text = card["manual_snippet"](snippet_address)
         card_id = card["id"]
+        icon_html = card.get("icon_svg", "")
         cards_html_parts.append(f"""      <section class="card">
         <div class="card-header">
-          <h2 class="card-title">{html.escape(card["title"])}</h2>
+          <h2 class="card-title">{icon_html}{html.escape(card["title"])}</h2>
         </div>
         <p class="card-desc">{html.escape(card["desc"])}</p>
 
@@ -300,6 +312,13 @@ def render_dashboard(
       font-size: 1.05rem;
       font-weight: 600;
       color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+    }}
+    .card-icon {{
+      display: inline-block;
+      flex-shrink: 0;
     }}
     .card-desc {{
       font-size: 0.85rem;
