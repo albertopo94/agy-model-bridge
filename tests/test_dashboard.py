@@ -52,6 +52,21 @@ class TestDashboardRendering(unittest.TestCase):
         self.assertIn("<style>", html)
         self.assertIn("monospace", html)
 
+    def test_restore_configuration_blocks(self):
+        auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
+        html = render_dashboard("127.0.0.1", 24980, auth_status, models_count=20)
+
+        # Restore section heading in supported cards
+        self.assertIn("Restaurar configuración", html)
+        self.assertIn("python3 -m bridge restore-claude", html)
+        self.assertIn("python3 -m bridge restore-codex", html)
+
+        # Copy buttons and pre IDs for restore
+        self.assertIn('id="claude-restore"', html)
+        self.assertIn("copySnippet(this, 'claude-restore')", html)
+        self.assertIn('id="codex-restore"', html)
+        self.assertIn("copySnippet(this, 'codex-restore')", html)
+
     def test_render_dashboard_vercel_styling_and_responsive_grid(self):
         auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
         html = render_dashboard("127.0.0.1", 24980, auth_status, models_count=10)
@@ -151,10 +166,10 @@ class TestDashboardRendering(unittest.TestCase):
         auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
         html = render_dashboard("127.0.0.1", 24980, auth_status, models_count=20)
 
-        # 8 independent snippet IDs and corresponding copy button calls
+        # 10 independent snippet IDs and corresponding copy button calls
         expected_ids = [
-            "claude-auto", "claude-manual",
-            "codex-auto", "codex-manual",
+            "claude-auto", "claude-manual", "claude-restore",
+            "codex-auto", "codex-manual", "codex-restore",
             "hermes-auto", "hermes-manual",
             "freellmapi-auto", "freellmapi-manual",
         ]
@@ -199,8 +214,12 @@ class TestDashboardRendering(unittest.TestCase):
             "python3 -m bridge setup-codex --port 9090",
         )
         self.assertEqual(
+            by_id["codex"]["restore_cmd"]("127.0.0.1:24980"),
+            "python3 -m bridge restore-codex",
+        )
+        self.assertEqual(
             by_id["codex"]["manual_snippet"]("127.0.0.1:24980"),
-            '# ~/.codex/config.toml\n[model]\nwire_api = "responses"\nbase_url = "http://127.0.0.1:24980/v1"',
+            '# ~/.codex/config.toml\n[model]\nwire_api = "responses"\nbase_url = "http://{addr}/v1"'.replace("{addr}", "127.0.0.1:24980"),
         )
         self.assertEqual(by_id["codex"]["docs_url"], "https://github.com/openai/codex")
 
@@ -211,6 +230,10 @@ class TestDashboardRendering(unittest.TestCase):
         self.assertEqual(
             by_id["claude"]["auto_cmd"]("127.0.0.1:9090"),
             "python3 -m bridge setup-claude --port 9090",
+        )
+        self.assertEqual(
+            by_id["claude"]["restore_cmd"]("127.0.0.1:24980"),
+            "python3 -m bridge restore-claude",
         )
         self.assertEqual(
             by_id["claude"]["manual_snippet"]("127.0.0.1:24980"),

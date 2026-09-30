@@ -112,6 +112,7 @@ CLIENT_CARDS: list[dict[str, Any]] = [
             if ":" in addr and addr.rsplit(":", 1)[1].isdigit() and addr.rsplit(":", 1)[1] != "24980"
             else "python3 -m bridge setup-claude"
         ),
+        "restore_cmd": lambda addr: "python3 -m bridge restore-claude",
         "manual_snippet": lambda addr: f'export ANTHROPIC_BASE_URL="http://{addr}"\nexport ANTHROPIC_AUTH_TOKEN="local-bridge"',
         "docs_url": "https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview",
     },
@@ -124,6 +125,7 @@ CLIENT_CARDS: list[dict[str, Any]] = [
             if ":" in addr and addr.rsplit(":", 1)[1].isdigit() and addr.rsplit(":", 1)[1] != "24980"
             else "python3 -m bridge setup-codex"
         ),
+        "restore_cmd": lambda addr: "python3 -m bridge restore-codex",
         "manual_snippet": lambda addr: f'# ~/.codex/config.toml\n[model]\nwire_api = "responses"\nbase_url = "http://{addr}/v1"',
         "docs_url": "https://github.com/openai/codex",
     },
@@ -180,6 +182,19 @@ def render_dashboard(
         manual_text = card["manual_snippet"](snippet_address)
         card_id = card["id"]
         icon_html = card.get("icon_svg", "")
+
+        restore_block_html = ""
+        if "restore_cmd" in card:
+            restore_text = card["restore_cmd"](snippet_address)
+            restore_block_html = f"""
+        <div class="setup-block">
+          <div class="setup-header">
+            <span class="setup-title">Restaurar configuración</span>
+            <button class="copy-btn" onclick="copySnippet(this, '{card_id}-restore')">Copy</button>
+          </div>
+          <pre id="{card_id}-restore"><code>{html.escape(restore_text)}</code></pre>
+        </div>"""
+
         cards_html_parts.append(f"""      <section class="card">
         <div class="card-header">
           <h2 class="card-title">{icon_html}{html.escape(card["title"])}</h2>
@@ -200,7 +215,7 @@ def render_dashboard(
             <button class="copy-btn" onclick="copySnippet(this, '{card_id}-manual')">Copy</button>
           </div>
           <pre id="{card_id}-manual"><code>{html.escape(manual_text)}</code></pre>
-        </div>
+        </div>{restore_block_html}
 
         <div class="card-footer">
           <a href="{html.escape(card["docs_url"])}" target="_blank" rel="noopener noreferrer" class="docs-link">Documentación ↗</a>

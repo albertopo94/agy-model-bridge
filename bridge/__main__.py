@@ -5,7 +5,86 @@ import sys
 from pathlib import Path
 
 from bridge.server import run_server
-from bridge.setup import setup_claude, setup_codex
+from bridge.setup import list_backups, restore_backup, setup_claude, setup_codex
+
+
+def _handle_restore_cli(
+    client_name: str,
+    default_target: Path,
+    argv: list[str],
+    prog_name: str,
+) -> int:
+    """Helper to handle restore CLI subcommand for Claude Code or Codex."""
+    parser = argparse.ArgumentParser(
+        prog=prog_name,
+        description=f"Restore {client_name} configuration from a historical backup.",
+    )
+    parser.add_argument(
+        "--path",
+        type=Path,
+        default=default_target,
+        help=f"Path to {client_name} config file (default: {default_target})",
+    )
+    parser.add_argument(
+        "--backup",
+        type=Path,
+        default=None,
+        help="Specific backup file path to restore",
+    )
+    parser.add_argument(
+        "--latest",
+        action="store_true",
+        help="Restore the most recent backup directly without interactive prompt",
+    )
+    args = parser.parse_args(argv)
+    target = args.path
+
+    if args.backup is not None:
+        try:
+            restored = restore_backup(target, backup_path=args.backup)
+            print(f"Restaurada configuración desde: {restored.name}")
+            print(f"{client_name} listo en {target}")
+            return 0
+        except FileNotFoundError as exc:
+            print(f"Error: {exc}")
+            return 1
+
+    backups = list_backups(target)
+    if not backups:
+        print(f"No se encontraron backups para {client_name} en {target.parent}")
+        return 1
+
+    if args.latest:
+        restored = restore_backup(target, backup_path=backups[0])
+        print(f"Restaurada configuración desde: {restored.name}")
+        print(f"{client_name} listo en {target}")
+        return 0
+
+    print(f"\nBackups disponibles para {client_name}:")
+    for i, b in enumerate(backups, 1):
+        if i == 1:
+            print(f"  [{i}] {b.name}  <-- Anterior inmediata (Presione Enter para seleccionar)")
+        else:
+            print(f"  [{i}] {b.name}")
+
+    try:
+        choice = input("\nSeleccione una opción [1]: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print("\nOperación cancelada.")
+        return 1
+
+    if not choice:
+        selected_index = 0
+    elif choice.isdigit() and 1 <= int(choice) <= len(backups):
+        selected_index = int(choice) - 1
+    else:
+        print("Opción inválida.")
+        return 1
+
+    restored = restore_backup(target, backup_path=backups[selected_index])
+    print(f"\nRestaurada configuración desde: {restored.name}")
+    print(f"{client_name} listo en {target}")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -116,6 +195,22 @@ def main(argv: list[str] | None = None) -> int:
         print("Codex CLI will read this configuration automatically.")
         print("Run 'codex' to start coding with Gemini 3.8 Flash · high (1M context).")
         return 0
+
+    if argv and argv[0] == "restore-claude":
+        return _handle_restore_cli(
+            client_name="Claude Code",
+            default_target=Path.home() / ".claude" / "settings.json",
+            argv=argv[1:],
+            prog_name=f"{prog_base} restore-claude",
+        )
+
+    if argv and argv[0] == "restore-codex":
+        return _handle_restore_cli(
+            client_name="Codex CLI",
+            default_target=Path.home() / ".codex" / "config.toml",
+            argv=argv[1:],
+            prog_name=f"{prog_base} restore-codex",
+        )
 
     # Fallback to daemon server runner
     parser = argparse.ArgumentParser(

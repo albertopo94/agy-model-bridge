@@ -7,7 +7,14 @@ import unittest
 import unittest.mock
 from pathlib import Path
 
-from bridge.setup import atomic_write_file, create_backup, setup_claude, setup_codex
+from bridge.setup import (
+    atomic_write_file,
+    create_backup,
+    list_backups,
+    restore_backup,
+    setup_claude,
+    setup_codex,
+)
 
 
 class TestAtomicWriteFile(unittest.TestCase):
@@ -100,6 +107,110 @@ class TestCreateBackup(unittest.TestCase):
             bool(iso_pattern.match(backup_path.name)),
             f"Backup name '{backup_path.name}' does not match expected ISO pattern",
         )
+
+
+class TestListBackups(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.dir_path = Path(self.temp_dir.name)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_list_backups_empty_when_dir_missing(self):
+        missing_target = self.dir_path / "nonexistent" / "settings.json"
+        self.assertEqual(list_backups(missing_target), [])
+
+    def test_list_backups_empty_when_no_backups(self):
+        target = self.dir_path / "settings.json"
+        target.write_text("{}", encoding="utf-8")
+        self.assertEqual(list_backups(target), [])
+
+    def test_list_backups_sorts_by_mtime_descending(self):
+        import time
+        target = self.dir_path / "settings.json"
+        target.write_text("{}", encoding="utf-8")
+
+        b1 = self.dir_path / "settings.json.backup-2026-09-20T10-00-00"
+        b1.write_text('{"v": 1}', encoding="utf-8")
+        os.utime(b1, (1000.0, 1000.0))
+
+        b2 = self.dir_path / "settings.json.backup-2026-09-30T08-57-26-113Z"
+        b2.write_text('{"v": 2}', encoding="utf-8")
+        os.utime(b2, (2000.0, 2000.0))
+
+        b3 = self.dir_path / "settings.json.backup-2026-09-30T12-15-44"
+        b3.write_text('{"v": 3}', encoding="utf-8")
+        os.utime(b3, (3000.0, 3000.0))
+
+        # Irrelevant file that should not be included
+        other = self.dir_path / "other.json.backup-2026-09-30T12-00-00"
+        other.write_text("{}", encoding="utf-8")
+
+        results = list_backups(target)
+        self.assertEqual(len(results), 3)
+        self.assertEqual(results[0], b3)  # Most recent
+        self.assertEqual(results[1], b2)  # Intermediate (e.g. freellmapi format)
+        self.assertEqual(results[2], b1)  # Oldest
+
+
+class TestRestoreBackup(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.dir_path = Path(self.temp_dir.name)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_restore_backup_raises_if_no_backups(self):
+        target = self.dir_path / "settings.json"
+        with self.assertRaises(FileNotFoundError):
+            restore_backup(target)
+
+    def test_restore_backup_raises_if_specified_backup_missing(self):
+        target = self.dir_path / "settings.json"
+        missing_b = self.dir_path / "settings.json.backup-none"
+        with self.assertRaises(FileNotFoundError):
+            restore_backup(target, backup_path=missing_b)
+
+    def test_restore_latest_backup_when_no_backup_specified(self):
+        target = self.dir_path / "settings.json"
+        target.write_text('{"active": "bridge"}', encoding="utf-8")
+
+        b_old = self.dir_path / "settings.json.backup-2026-09-29T10-00-00"
+        b_old.write_text('{"config": "old"}', encoding="utf-8")
+        os.utime(b_old, (1000.0, 1000.0))
+
+        b_latest = self.dir_path / "settings.json.backup-2026-09-30T11-00-00"
+        b_latest.write_text('{"config": "previous_native"}', encoding="utf-8")
+        os.utime(b_latest, (2000.0, 2000.0))
+
+        restored = restore_backup(target)
+
+        self.assertEqual(restored, b_latest)
+        self.assertEqual(target.read_text(encoding="utf-8"), '{"config": "previous_native"}')
+        self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o600)
+        # Ensure backup file is NOT deleted
+        self.assertTrue(b_latest.exists())
+        self.assertTrue(b_old.exists())
+        # Ensure NO new backup was created upon restore
+        backups = list_backups(target)
+        self.assertEqual(len(backups), 2)
+
+    def test_restore_specific_historical_backup(self):
+        target = self.dir_path / "config.toml"
+        target.write_text('active = "bridge"\n', encoding="utf-8")
+
+        b1 = self.dir_path / "config.toml.backup-1"
+        b1.write_text('setting = "choice1"\n', encoding="utf-8")
+
+        b2 = self.dir_path / "config.toml.backup-2"
+        b2.write_text('setting = "choice2"\n', encoding="utf-8")
+
+        restored = restore_backup(target, backup_path=b1)
+        self.assertEqual(restored, b1)
+        self.assertEqual(target.read_text(encoding="utf-8"), 'setting = "choice1"\n')
+        self.assertTrue(b1.exists())
 
 
 class TestSetupClaude(unittest.TestCase):
@@ -411,12 +522,133 @@ class TestCLIParsing(unittest.TestCase):
 
     def test_cli_help_flags(self):
         from bridge.__main__ import main
-        for subcmd in (["setup-claude", "--help"], ["setup-codex", "--help"], ["--help"]):
+        for subcmd in (
+            ["setup-claude", "--help"],
+            ["setup-codex", "--help"],
+            ["restore-claude", "--help"],
+            ["restore-codex", "--help"],
+            ["--help"],
+        ):
             with self.subTest(subcmd=subcmd):
                 with self.assertRaises(SystemExit) as cm:
                     with unittest.mock.patch("sys.stdout"):
                         main(subcmd)
                 self.assertEqual(cm.exception.code, 0)
+
+
+class TestCLIRestore(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.dir_path = Path(self.temp_dir.name)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_cli_restore_claude_no_backups_returns_1(self):
+        import io
+        from bridge.__main__ import main
+        target = self.dir_path / "settings.json"
+        out = io.StringIO()
+        with unittest.mock.patch("sys.stdout", out):
+            exit_code = main(["restore-claude", "--path", str(target)])
+        self.assertEqual(exit_code, 1)
+        self.assertIn("No se encontraron backups", out.getvalue())
+
+    def test_cli_restore_claude_with_latest_flag(self):
+        import io
+        from bridge.__main__ import main
+        target = self.dir_path / "settings.json"
+        target.write_text('{"env": "bridge"}', encoding="utf-8")
+
+        b1 = self.dir_path / "settings.json.backup-1"
+        b1.write_text('{"env": "older"}', encoding="utf-8")
+        os.utime(b1, (1000.0, 1000.0))
+
+        b2 = self.dir_path / "settings.json.backup-2"
+        b2.write_text('{"env": "immediate_previous"}', encoding="utf-8")
+        os.utime(b2, (2000.0, 2000.0))
+
+        out = io.StringIO()
+        with unittest.mock.patch("sys.stdout", out):
+            exit_code = main(["restore-claude", "--path", str(target), "--latest"])
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(target.read_text(encoding="utf-8"), '{"env": "immediate_previous"}')
+        self.assertIn("Restaurada configuración desde:", out.getvalue())
+        self.assertIn("Claude Code", out.getvalue())
+
+    def test_cli_restore_claude_with_backup_flag(self):
+        from bridge.__main__ import main
+        target = self.dir_path / "settings.json"
+        target.write_text('{"env": "bridge"}', encoding="utf-8")
+
+        b1 = self.dir_path / "settings.json.backup-1"
+        b1.write_text('{"env": "specific"}', encoding="utf-8")
+
+        exit_code = main(["restore-claude", "--path", str(target), "--backup", str(b1)])
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(target.read_text(encoding="utf-8"), '{"env": "specific"}')
+
+    def test_cli_restore_claude_interactive_enter_picks_option_1(self):
+        import io
+        from bridge.__main__ import main
+        target = self.dir_path / "settings.json"
+        target.write_text('{"env": "bridge"}', encoding="utf-8")
+
+        b1 = self.dir_path / "settings.json.backup-2026-09-20T10-00-00"
+        b1.write_text('{"env": "old"}', encoding="utf-8")
+        os.utime(b1, (1000.0, 1000.0))
+
+        b2 = self.dir_path / "settings.json.backup-2026-09-30T12-00-00"
+        b2.write_text('{"env": "immediate_previous"}', encoding="utf-8")
+        os.utime(b2, (2000.0, 2000.0))
+
+        out = io.StringIO()
+        with unittest.mock.patch("sys.stdout", out):
+            with unittest.mock.patch("builtins.input", return_value=""):
+                exit_code = main(["restore-claude", "--path", str(target)])
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(target.read_text(encoding="utf-8"), '{"env": "immediate_previous"}')
+        output = out.getvalue()
+        self.assertIn("[1] settings.json.backup-2026-09-30T12-00-00", output)
+        self.assertIn("<-- Anterior inmediata (Presione Enter para seleccionar)", output)
+        self.assertIn("[2] settings.json.backup-2026-09-20T10-00-00", output)
+
+    def test_cli_restore_claude_interactive_selects_specific_number(self):
+        import io
+        from bridge.__main__ import main
+        target = self.dir_path / "settings.json"
+        target.write_text('{"env": "bridge"}', encoding="utf-8")
+
+        b1 = self.dir_path / "settings.json.backup-2026-09-20T10-00-00"
+        b1.write_text('{"env": "old"}', encoding="utf-8")
+        os.utime(b1, (1000.0, 1000.0))
+
+        b2 = self.dir_path / "settings.json.backup-2026-09-30T12-00-00"
+        b2.write_text('{"env": "immediate_previous"}', encoding="utf-8")
+        os.utime(b2, (2000.0, 2000.0))
+
+        out = io.StringIO()
+        with unittest.mock.patch("sys.stdout", out):
+            with unittest.mock.patch("builtins.input", return_value="2"):
+                exit_code = main(["restore-claude", "--path", str(target)])
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(target.read_text(encoding="utf-8"), '{"env": "old"}')
+
+    def test_cli_restore_codex_with_latest_flag(self):
+        import io
+        from bridge.__main__ import main
+        target = self.dir_path / "config.toml"
+        target.write_text('active = "bridge"\n', encoding="utf-8")
+
+        b = self.dir_path / "config.toml.backup-1"
+        b.write_text('active = "native_codex"\n', encoding="utf-8")
+
+        out = io.StringIO()
+        with unittest.mock.patch("sys.stdout", out):
+            exit_code = main(["restore-codex", "--path", str(target), "--latest"])
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(target.read_text(encoding="utf-8"), 'active = "native_codex"\n')
+        self.assertIn("Codex CLI", out.getvalue())
 
 
 if __name__ == "__main__":

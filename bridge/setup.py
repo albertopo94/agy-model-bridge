@@ -69,6 +69,59 @@ def create_backup(path: Path) -> Path | None:
     return backup_path
 
 
+def list_backups(config_path: Path) -> list[Path]:
+    """Lists all historical backup files for config_path sorted by mtime descending.
+
+    Discovers both agy-model-bridge (.backup-YYYY-MM-DDTHH-MM-SS) and FreeLLMAPI
+    (.backup-YYYY-MM-DDTHH-MM-SS-mmmZ) backups.
+
+    Args:
+        config_path: Path to the target configuration file.
+
+    Returns:
+        List of Path objects sorted with most recent backup first.
+    """
+    path = Path(config_path)
+    parent = path.parent
+    if not parent.exists() or not parent.is_dir():
+        return []
+
+    pattern = f"{path.name}.backup-*"
+    backups = [p for p in parent.glob(pattern) if p.is_file()]
+    backups.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    return backups
+
+
+def restore_backup(config_path: Path, backup_path: Path | None = None) -> Path:
+    """Restores config_path from a backup file without creating redundant backups.
+
+    Args:
+        config_path: Target configuration file to overwrite.
+        backup_path: Specific backup Path to restore. If None, restores the most
+            recent backup found by list_backups(config_path).
+
+    Returns:
+        Path of the restored backup file.
+
+    Raises:
+        FileNotFoundError: If no backup exists or specified backup is missing.
+    """
+    target = Path(config_path)
+    if backup_path is None:
+        backups = list_backups(target)
+        if not backups:
+            raise FileNotFoundError(f"No backups found for {target}")
+        chosen_backup = backups[0]
+    else:
+        chosen_backup = Path(backup_path)
+        if not chosen_backup.exists() or not chosen_backup.is_file():
+            raise FileNotFoundError(f"Backup file not found: {chosen_backup}")
+
+    content = chosen_backup.read_text(encoding="utf-8")
+    atomic_write_file(target, content, mode=0o600)
+    return chosen_backup
+
+
 class ConfigPath(type(Path())):
     """Path subclass that carries an optional backup_path attribute."""
     backup_path: Path | None = None
