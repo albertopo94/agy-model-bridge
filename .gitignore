@@ -1,5 +1,7 @@
 # Local AI runtime state
 .atl/
+.codegraph/
+.engram/
 __pycache__/
 *.py[cod]
 *.egg-info/

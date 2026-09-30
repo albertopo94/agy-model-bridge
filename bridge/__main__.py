@@ -4,6 +4,12 @@ import argparse
 import sys
 from pathlib import Path
 
+from bridge.daemon import (
+    get_daemon_status,
+    open_dashboard,
+    start_daemon,
+    stop_daemon,
+)
 from bridge.server import run_server
 from bridge.setup import (
     describe_backup,
@@ -111,6 +117,94 @@ def main(argv: list[str] | None = None) -> int:
     prog_base = Path(sys.argv[0]).name if sys.argv and sys.argv[0] else "agy-bridge"
     if prog_base.endswith(".py"):
         prog_base = "python3 -m bridge"
+
+    # Dispatch daemon lifecycle subcommands
+    if argv and argv[0] == "start":
+        parser = argparse.ArgumentParser(
+            prog=f"{prog_base} start",
+            description="Start AGY Model Bridge in the background as a daemon process.",
+        )
+        parser.add_argument("--port", type=int, default=24980, help="Gateway port (default: 24980)")
+        parser.add_argument("--host", type=str, default="127.0.0.1", help="Host address (default: 127.0.0.1)")
+        parser.add_argument("--no-open", action="store_true", help="Do not open web browser automatically")
+        parser.add_argument("--project", type=str, default=None, help="Google Cloud project ID override")
+        parser.add_argument("--base-url", type=str, default=None, help="Upstream API base URL override")
+        args = parser.parse_args(argv[1:])
+
+        res = start_daemon(
+            port=args.port,
+            host=args.host,
+            no_open=args.no_open,
+            project=args.project,
+            base_url=args.base_url,
+        )
+        st = res.get("status")
+        if st == "started":
+            browser_hint = " (abierto en el navegador)" if res.get("opened_browser") else ""
+            print(f"✔ AGY Model Bridge corriendo en segundo plano (PID {res['pid']})")
+            print(f"➜ Dashboard: {res['url']}{browser_hint}")
+            return 0
+        elif st == "already_running":
+            pid_str = f" (PID {res['pid']})" if res.get("pid") else ""
+            print(f"AGY Model Bridge ya está corriendo{pid_str}")
+            print(f"➜ Dashboard: {res['url']}")
+            return 0
+        else:
+            print(f"Error: {res.get('error', 'Fallo al iniciar el daemon')}")
+            return 1
+
+    if argv and argv[0] == "stop":
+        parser = argparse.ArgumentParser(
+            prog=f"{prog_base} stop",
+            description="Stop the running background AGY Model Bridge daemon.",
+        )
+        parser.add_argument("--port", type=int, default=24980, help="Gateway port (default: 24980)")
+        parser.add_argument("--host", type=str, default="127.0.0.1", help="Host address (default: 127.0.0.1)")
+        args = parser.parse_args(argv[1:])
+        res = stop_daemon(port=args.port, host=args.host)
+        if res.get("status") == "stopped":
+            pid_str = f" (PID {res['pid']})" if res.get("pid") else ""
+            print(f"✔ AGY Model Bridge detenido{pid_str}")
+        else:
+            print("AGY Model Bridge no está corriendo.")
+        return 0
+
+    if argv and argv[0] == "status":
+        parser = argparse.ArgumentParser(
+            prog=f"{prog_base} status",
+            description="Check the status of the AGY Model Bridge daemon.",
+        )
+        parser.add_argument("--port", type=int, default=24980, help="Gateway port (default: 24980)")
+        parser.add_argument("--host", type=str, default="127.0.0.1", help="Host address (default: 127.0.0.1)")
+        args = parser.parse_args(argv[1:])
+        st = get_daemon_status(port=args.port, host=args.host)
+        if st.get("running"):
+            auth_st = st.get("auth", {}).get("status", "Valid")
+            pid_str = f" (PID {st['pid']})" if st.get("pid") else ""
+            print(f"✔ Estado: Activo{pid_str}")
+            print(f"➜ Dirección: {st['url']}")
+            print(f"➜ Modelos disponibles: {st.get('models_count', 0)}")
+            print(f"➜ Autenticación Keychain: {auth_st}")
+        else:
+            print("Estado: Detenido")
+            print(f"Ejecute '{prog_base} start' para iniciar el servicio en segundo plano.")
+        return 0
+
+    if argv and argv[0] in ("dashboard", "open"):
+        parser = argparse.ArgumentParser(
+            prog=f"{prog_base} {argv[0]}",
+            description="Open the AGY Model Bridge local dashboard in the default browser.",
+        )
+        parser.add_argument("--port", type=int, default=24980, help="Gateway port (default: 24980)")
+        parser.add_argument("--host", type=str, default="127.0.0.1", help="Host address (default: 127.0.0.1)")
+        args = parser.parse_args(argv[1:])
+        st = get_daemon_status(port=args.port, host=args.host)
+        if not st.get("running"):
+            print(f"Aviso: El bridge no parece estar activo en {st['url']}")
+            print(f"Ejecute '{prog_base} start' para iniciarlo.")
+        print(f"Abriendo dashboard en {st['url']}...")
+        open_dashboard(port=args.port, host=args.host)
+        return 0
 
     # Dispatch client setup subcommands
     if argv and argv[0] == "setup-claude":

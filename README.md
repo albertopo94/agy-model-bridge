@@ -45,38 +45,39 @@ Simply launch the Antigravity application so it can renew its credentials in Key
 
 ## Installation
 
-You can run the bridge directly with Python 3, or install it as a global CLI command:
+### Option A: One-line install (Recommended)
+
+Run directly in your terminal to install `agy-bridge` into `~/.local/bin` without manual Git cloning:
 
 ```bash
-# Option A: Install globally in editable mode
+curl -fsSL https://raw.githubusercontent.com/albertopo94/agy-model-bridge/main/install.sh | bash
+```
+
+### Option B: Local development or pip
+
+```bash
+git clone https://github.com/albertopo94/agy-model-bridge.git
+cd agy-model-bridge
 pip install -e .
-
-# Now 'agy-bridge' and 'agy-model-bridge' are available in your PATH
-agy-bridge
-
-# Option B: Run directly without installation
-python3 -m bridge
 ```
 
 ---
 
 ## Quick Start
 
-### 1. Start the Bridge Server
+### 1. Start the Bridge in the Background
 
 ```bash
-agy-bridge --host 127.0.0.1 --port 24980
+agy-bridge start
 ```
 
-CLI options:
-- `--host`: Host address to bind (default: `127.0.0.1`).
-- `--port`: Port number to bind (default: `24980`).
-- `--project`: Optional Google Cloud project ID override (defaults to auto-discovery via `loadCodeAssist`).
-- `--base-url`: Optional upstream API base URL override.
+This launches the gateway detached in the background, waits for health check confirmation, and automatically opens the local dashboard in your default web browser (`http://127.0.0.1:24980/`).
 
-### 2. Automatic Client Setup
+*Use `--no-open` to prevent opening the browser automatically, or `--port PORT` to customize the port.*
 
-Configure your terminal coding agents with a single command:
+### 2. Configure Your Terminal Coding Agents
+
+Configure your tools with a single command (with automated ISO backups and atomic file writes):
 
 ```bash
 # Configure Claude Code CLI (~/.claude/settings.json)
@@ -86,11 +87,18 @@ agy-bridge setup-claude
 agy-bridge setup-codex
 ```
 
-*Both commands create an automatic timestamped backup before writing, apply `0o600` file permissions atomically, and preserve your existing custom settings, hooks, and plugins.*
+### 3. Manage the Background Service
 
-### 3. Open the Local Dashboard
+```bash
+# Check daemon status, active port, and discovered models
+agy-bridge status
 
-Open [http://127.0.0.1:24980/](http://127.0.0.1:24980/) in your browser to view active status badges, discovered models, and one-click copyable setup cards for each tool.
+# Open or re-open the web dashboard at any time
+agy-bridge dashboard
+
+# Stop the running background service
+agy-bridge stop
+```
 
 ---
 
