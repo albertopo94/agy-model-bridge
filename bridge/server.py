@@ -133,7 +133,7 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
 
         if path == "/":
             host = self.server.server_address[0] if hasattr(self.server, "server_address") else "127.0.0.1"
-            port = self.server.server_address[1] if hasattr(self.server, "server_address") else 8080
+            port = self.server.server_address[1] if hasattr(self.server, "server_address") else 24980
             status_data = get_status_data(self.client, self.project, host, port)
             html_content = render_dashboard(
                 host=status_data["host"],
@@ -152,7 +152,7 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
 
         if path == "/api/status":
             host = self.server.server_address[0] if hasattr(self.server, "server_address") else "127.0.0.1"
-            port = self.server.server_address[1] if hasattr(self.server, "server_address") else 8080
+            port = self.server.server_address[1] if hasattr(self.server, "server_address") else 24980
             status_data = get_status_data(self.client, self.project, host, port)
             self._send_json(200, status_data)
             return
@@ -763,7 +763,7 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
 
 def create_server(
     host: str = "127.0.0.1",
-    port: int = 8080,
+    port: int = 24980,
     client: Any | None = None,
     project: str | None = None,
     base_url: str | None = None,
@@ -798,7 +798,7 @@ def create_server(
 
 def run_server(
     host: str = "127.0.0.1",
-    port: int = 8080,
+    port: int = 24980,
     project: str | None = None,
     base_url: str | None = None,
 ) -> None:

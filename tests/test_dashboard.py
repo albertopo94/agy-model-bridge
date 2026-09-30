@@ -31,7 +31,7 @@ class MockClient:
 class TestDashboardRendering(unittest.TestCase):
     def test_render_dashboard_html_structure(self):
         auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
-        html = render_dashboard("127.0.0.1", 8080, auth_status, models_count=27)
+        html = render_dashboard("127.0.0.1", 24980, auth_status, models_count=27)
 
         self.assertIn("<!DOCTYPE html>", html)
         self.assertIn("<html", html)
@@ -45,7 +45,7 @@ class TestDashboardRendering(unittest.TestCase):
 
     def test_render_dashboard_styling(self):
         auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
-        html = render_dashboard("127.0.0.1", 8080, auth_status, models_count=10)
+        html = render_dashboard("127.0.0.1", 24980, auth_status, models_count=10)
 
         # Dark mode styling elements
         self.assertTrue("#0f172a" in html or "#000000" in html or "background" in html)
@@ -54,7 +54,7 @@ class TestDashboardRendering(unittest.TestCase):
 
     def test_render_dashboard_vercel_styling_and_responsive_grid(self):
         auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
-        html = render_dashboard("127.0.0.1", 8080, auth_status, models_count=10)
+        html = render_dashboard("127.0.0.1", 24980, auth_status, models_count=10)
 
         # Vercel dark surfaces
         self.assertIn("#000000", html)
@@ -71,10 +71,10 @@ class TestDashboardRendering(unittest.TestCase):
 
     def test_status_badges_healthy_state(self):
         auth_status = {"status": "Valid", "email": "user@google.com", "message": "Authenticated"}
-        html = render_dashboard("127.0.0.1", 8080, auth_status, models_count=27)
+        html = render_dashboard("127.0.0.1", 24980, auth_status, models_count=27)
 
         # Address badge
-        self.assertIn("127.0.0.1:8080", html)
+        self.assertIn("127.0.0.1:24980", html)
         # Keychain Auth badge
         self.assertIn("Valid", html)
         self.assertIn("user@google.com", html)
@@ -85,14 +85,14 @@ class TestDashboardRendering(unittest.TestCase):
         for status in ("Expired", "Missing"):
             with self.subTest(status=status):
                 auth_status = {"status": status, "email": None, "message": "Open Antigravity to refresh"}
-                html = render_dashboard("127.0.0.1", 8080, auth_status, models_count=0)
+                html = render_dashboard("127.0.0.1", 24980, auth_status, models_count=0)
 
                 self.assertIn(status, html)
                 self.assertIn("Open Antigravity to refresh", html)
 
     def test_interactive_setup_cards(self):
         auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
-        html = render_dashboard("127.0.0.1", 8080, auth_status, models_count=20)
+        html = render_dashboard("127.0.0.1", 24980, auth_status, models_count=20)
 
         # All 4 client cards
         self.assertIn("Claude Code", html)
@@ -105,8 +105,8 @@ class TestDashboardRendering(unittest.TestCase):
         self.assertIn("Conexión manual", html)
 
         # Base URLs for Anthropic (without /v1) and OpenAI-compatible (with /v1)
-        self.assertIn("http://127.0.0.1:8080", html)
-        self.assertIn("http://127.0.0.1:8080/v1", html)
+        self.assertIn("http://127.0.0.1:24980", html)
+        self.assertIn("http://127.0.0.1:24980/v1", html)
 
         # Setup commands and keywords (100% native, zero external package dependencies)
         self.assertIn("python3 -m bridge setup-claude", html)
@@ -126,10 +126,10 @@ class TestDashboardRendering(unittest.TestCase):
         # Refined manual configuration snippets (checked both in unescaped HTML and CLIENT_CARDS)
         import html as html_lib
         unescaped_html = html_lib.unescape(html)
-        self.assertIn('# ~/.codex/config.toml\n[model]\nwire_api = "responses"\nbase_url = "http://127.0.0.1:8080/v1"', unescaped_html)
-        self.assertIn('export ANTHROPIC_BASE_URL="http://127.0.0.1:8080"\nexport ANTHROPIC_AUTH_TOKEN="local-bridge"', unescaped_html)
-        self.assertIn('export OPENAI_BASE_URL="http://127.0.0.1:8080/v1"\nexport OPENAI_API_KEY="local-bridge"', unescaped_html)
-        self.assertIn('BASE_URL=http://127.0.0.1:8080/v1\nAPI_KEY=local-bridge', unescaped_html)
+        self.assertIn('# ~/.codex/config.toml\n[model]\nwire_api = "responses"\nbase_url = "http://127.0.0.1:24980/v1"', unescaped_html)
+        self.assertIn('export ANTHROPIC_BASE_URL="http://127.0.0.1:24980"\nexport ANTHROPIC_AUTH_TOKEN="local-bridge"', unescaped_html)
+        self.assertIn('export OPENAI_BASE_URL="http://127.0.0.1:24980/v1"\nexport OPENAI_API_KEY="local-bridge"', unescaped_html)
+        self.assertIn('BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY=local-bridge', unescaped_html)
 
         # Clipboard copy functionality
 
@@ -139,7 +139,7 @@ class TestDashboardRendering(unittest.TestCase):
 
     def test_interactive_copy_handlers_and_doc_links(self):
         auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
-        html = render_dashboard("127.0.0.1", 8080, auth_status, models_count=20)
+        html = render_dashboard("127.0.0.1", 24980, auth_status, models_count=20)
 
         # 8 independent snippet IDs and corresponding copy button calls
         expected_ids = [
@@ -181,7 +181,7 @@ class TestDashboardRendering(unittest.TestCase):
 
         by_id = {c["id"]: c for c in CLIENT_CARDS}
         self.assertEqual(
-            by_id["codex"]["auto_cmd"]("127.0.0.1:8080"),
+            by_id["codex"]["auto_cmd"]("127.0.0.1:24980"),
             "python3 -m bridge setup-codex",
         )
         self.assertEqual(
@@ -189,13 +189,13 @@ class TestDashboardRendering(unittest.TestCase):
             "python3 -m bridge setup-codex --port 9090",
         )
         self.assertEqual(
-            by_id["codex"]["manual_snippet"]("127.0.0.1:8080"),
-            '# ~/.codex/config.toml\n[model]\nwire_api = "responses"\nbase_url = "http://127.0.0.1:8080/v1"',
+            by_id["codex"]["manual_snippet"]("127.0.0.1:24980"),
+            '# ~/.codex/config.toml\n[model]\nwire_api = "responses"\nbase_url = "http://127.0.0.1:24980/v1"',
         )
         self.assertEqual(by_id["codex"]["docs_url"], "https://github.com/openai/codex")
 
         self.assertEqual(
-            by_id["claude"]["auto_cmd"]("127.0.0.1:8080"),
+            by_id["claude"]["auto_cmd"]("127.0.0.1:24980"),
             "python3 -m bridge setup-claude",
         )
         self.assertEqual(
@@ -203,8 +203,8 @@ class TestDashboardRendering(unittest.TestCase):
             "python3 -m bridge setup-claude --port 9090",
         )
         self.assertEqual(
-            by_id["claude"]["manual_snippet"]("127.0.0.1:8080"),
-            'export ANTHROPIC_BASE_URL="http://127.0.0.1:8080"\nexport ANTHROPIC_AUTH_TOKEN="local-bridge"',
+            by_id["claude"]["manual_snippet"]("127.0.0.1:24980"),
+            'export ANTHROPIC_BASE_URL="http://127.0.0.1:24980"\nexport ANTHROPIC_AUTH_TOKEN="local-bridge"',
         )
         self.assertEqual(
             by_id["claude"]["docs_url"],
@@ -212,22 +212,22 @@ class TestDashboardRendering(unittest.TestCase):
         )
 
         self.assertEqual(
-            by_id["hermes"]["auto_cmd"]("127.0.0.1:8080"),
-            'export OPENAI_BASE_URL="http://127.0.0.1:8080/v1" OPENAI_API_KEY="local-bridge" && hermes',
+            by_id["hermes"]["auto_cmd"]("127.0.0.1:24980"),
+            'export OPENAI_BASE_URL="http://127.0.0.1:24980/v1" OPENAI_API_KEY="local-bridge" && hermes',
         )
         self.assertEqual(
-            by_id["hermes"]["manual_snippet"]("127.0.0.1:8080"),
-            'export OPENAI_BASE_URL="http://127.0.0.1:8080/v1"\nexport OPENAI_API_KEY="local-bridge"',
+            by_id["hermes"]["manual_snippet"]("127.0.0.1:24980"),
+            'export OPENAI_BASE_URL="http://127.0.0.1:24980/v1"\nexport OPENAI_API_KEY="local-bridge"',
         )
         self.assertEqual(by_id["hermes"]["docs_url"], "https://hermes-agent.nousresearch.com")
 
         self.assertEqual(
-            by_id["freellmapi"]["auto_cmd"]("127.0.0.1:8080"),
-            'http://127.0.0.1:8080/v1',
+            by_id["freellmapi"]["auto_cmd"]("127.0.0.1:24980"),
+            'http://127.0.0.1:24980/v1',
         )
         self.assertEqual(
-            by_id["freellmapi"]["manual_snippet"]("127.0.0.1:8080"),
-            'BASE_URL=http://127.0.0.1:8080/v1\nAPI_KEY=local-bridge',
+            by_id["freellmapi"]["manual_snippet"]("127.0.0.1:24980"),
+            'BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY=local-bridge',
         )
         self.assertEqual(by_id["freellmapi"]["docs_url"], "https://github.com/tashfeenahmed/freellmapi")
 
@@ -236,14 +236,14 @@ class TestDashboardRendering(unittest.TestCase):
         auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
         for wildcard in ("0.0.0.0", "::", ""):
             with self.subTest(host=wildcard):
-                html = render_dashboard(wildcard, 8080, auth_status, models_count=5)
+                html = render_dashboard(wildcard, 24980, auth_status, models_count=5)
                 # Header badge keeps the listen address
-                self.assertIn(f"🌐 {wildcard}:8080", html)
+                self.assertIn(f"🌐 {wildcard}:24980", html)
                 # Snippets substitute 127.0.0.1
-                self.assertIn("http://127.0.0.1:8080", html)
-                self.assertIn("http://127.0.0.1:8080/v1", html)
+                self.assertIn("http://127.0.0.1:24980", html)
+                self.assertIn("http://127.0.0.1:24980/v1", html)
                 if wildcard:
-                    self.assertNotIn(f"http://{wildcard}:8080", html)
+                    self.assertNotIn(f"http://{wildcard}:24980", html)
 
 
 class TestDashboardStatusData(unittest.TestCase):
@@ -255,10 +255,10 @@ class TestDashboardStatusData(unittest.TestCase):
         provider = MockTokenProvider(token="valid-tok", account="test@domain.com")
         client = MockClient(token_provider=provider, models=["m1", "m2", "m3"])
 
-        data = get_status_data(client, "test-project", "127.0.0.1", 8080)
+        data = get_status_data(client, "test-project", "127.0.0.1", 24980)
         self.assertEqual(data["host"], "127.0.0.1")
-        self.assertEqual(data["port"], 8080)
-        self.assertEqual(data["address"], "127.0.0.1:8080")
+        self.assertEqual(data["port"], 24980)
+        self.assertEqual(data["address"], "127.0.0.1:24980")
         self.assertEqual(data["auth"]["status"], "Valid")
         self.assertEqual(data["auth"]["email"], "test@domain.com")
         self.assertEqual(data["models_count"], 3)
@@ -269,7 +269,7 @@ class TestDashboardStatusData(unittest.TestCase):
         provider._cached_expiry = time.time() - 30.0  # Expired 30 seconds ago
         client = MockClient(token_provider=provider)
 
-        data = get_status_data(client, "test-project", "127.0.0.1", 8080)
+        data = get_status_data(client, "test-project", "127.0.0.1", 24980)
         self.assertEqual(data["auth"]["status"], "Expired")
         self.assertIn("Open Antigravity to refresh", data["auth"]["message"])
 
@@ -293,7 +293,7 @@ class TestDashboardStatusData(unittest.TestCase):
         provider = MockTokenProvider()
         client = MockClient(token_provider=provider, fail_models=Exception("Upstream timeout"))
 
-        data = get_status_data(client, "test-project", "127.0.0.1", 8080)
+        data = get_status_data(client, "test-project", "127.0.0.1", 24980)
         self.assertEqual(data["models_count"], 0)
 
     def test_get_status_data_models_error_negative_caching(self):
@@ -301,7 +301,7 @@ class TestDashboardStatusData(unittest.TestCase):
         provider = MockTokenProvider()
         client = MockClient(token_provider=provider, fail_models=Exception("Upstream timeout"))
 
-        get_status_data(client, "cached-proj", "127.0.0.1", 8080)
+        get_status_data(client, "cached-proj", "127.0.0.1", 24980)
         self.assertIn("cached-proj", _models_cache)
         entry = _models_cache["cached-proj"]
         self.assertEqual(entry[1], 0)
@@ -316,7 +316,7 @@ class TestDashboardStatusData(unittest.TestCase):
         now = time.time()
         _models_cache["expired-proj"] = (now - 70.0, 15)
 
-        data = get_status_data(client, "expired-proj", "127.0.0.1", 8080)
+        data = get_status_data(client, "expired-proj", "127.0.0.1", 24980)
         self.assertEqual(data["models_count"], 15)
         # Verify negative caching: cache entry updated to now - 45.0 (giving 15s negative cache window)
         entry = _models_cache["expired-proj"]

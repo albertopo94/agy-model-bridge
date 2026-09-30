@@ -27,7 +27,7 @@ def main(argv: list[str] | None = None) -> int:
             "--port",
             type=int,
             default=None,
-            help="Gateway port (default: 8080)",
+            help="Gateway port (default: 24980)",
         )
         parser.add_argument(
             "--model",
@@ -77,7 +77,7 @@ def main(argv: list[str] | None = None) -> int:
             "--port",
             type=int,
             default=None,
-            help="Gateway port (default: 8080)",
+            help="Gateway port (default: 24980)",
         )
         parser.add_argument(
             "--model",
@@ -123,8 +123,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--port",
         type=int,
-        default=8080,
-        help="Port number to bind server (default: 8080)",
+        default=24980,
+        help="Port number to bind server (default: 24980)",
     )
     parser.add_argument(
         "--project",

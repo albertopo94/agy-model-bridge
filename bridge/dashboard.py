@@ -102,7 +102,7 @@ CLIENT_CARDS: list[dict[str, Any]] = [
         "icon_svg": CLAUDE_ICON_SVG,
         "auto_cmd": lambda addr: (
             f"python3 -m bridge setup-claude --port {addr.rsplit(':', 1)[1]}"
-            if ":" in addr and addr.rsplit(":", 1)[1].isdigit() and addr.rsplit(":", 1)[1] != "8080"
+            if ":" in addr and addr.rsplit(":", 1)[1].isdigit() and addr.rsplit(":", 1)[1] != "24980"
             else "python3 -m bridge setup-claude"
         ),
         "manual_snippet": lambda addr: f'export ANTHROPIC_BASE_URL="http://{addr}"\nexport ANTHROPIC_AUTH_TOKEN="local-bridge"',
@@ -114,7 +114,7 @@ CLIENT_CARDS: list[dict[str, Any]] = [
         "desc": "OpenAI Responses API CLI (wire_api = 'responses')",
         "auto_cmd": lambda addr: (
             f"python3 -m bridge setup-codex --port {addr.rsplit(':', 1)[1]}"
-            if ":" in addr and addr.rsplit(":", 1)[1].isdigit() and addr.rsplit(":", 1)[1] != "8080"
+            if ":" in addr and addr.rsplit(":", 1)[1].isdigit() and addr.rsplit(":", 1)[1] != "24980"
             else "python3 -m bridge setup-codex"
         ),
         "manual_snippet": lambda addr: f'# ~/.codex/config.toml\n[model]\nwire_api = "responses"\nbase_url = "http://{addr}/v1"',

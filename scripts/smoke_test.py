@@ -385,7 +385,7 @@ def test_responses_streaming(base_url: str, model: str) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Multi-protocol smoke test for Antigravity Model Bridge")
     parser.add_argument("--host", type=str, default="127.0.0.1", help="Bridge host (default: 127.0.0.1)")
-    parser.add_argument("--port", type=int, default=8080, help="Bridge port (default: 8080)")
+    parser.add_argument("--port", type=int, default=24980, help="Bridge port (default: 24980)")
     parser.add_argument("--model", type=str, default=None, help="Model override")
     args = parser.parse_args()
 

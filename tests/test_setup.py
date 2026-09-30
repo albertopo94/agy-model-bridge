@@ -122,7 +122,7 @@ class TestSetupClaude(unittest.TestCase):
         data = json.loads(target.read_text(encoding="utf-8"))
         self.assertIn("env", data)
         env = data["env"]
-        self.assertEqual(env["ANTHROPIC_BASE_URL"], "http://127.0.0.1:8080")
+        self.assertEqual(env["ANTHROPIC_BASE_URL"], "http://127.0.0.1:24980")
         self.assertEqual(env["ANTHROPIC_AUTH_TOKEN"], "antigravity")
         self.assertEqual(env["ANTHROPIC_MODEL"], "gemini-3.8-flash-high")
         self.assertEqual(env["ANTHROPIC_DEFAULT_SONNET_MODEL"], "gemini-3.8-flash-high")
@@ -134,7 +134,7 @@ class TestSetupClaude(unittest.TestCase):
         # Indentation should be 2 spaces
         raw_text = target.read_text(encoding="utf-8")
         self.assertIn('  "env": {', raw_text)
-        self.assertIn('    "ANTHROPIC_BASE_URL": "http://127.0.0.1:8080"', raw_text)
+        self.assertIn('    "ANTHROPIC_BASE_URL": "http://127.0.0.1:24980"', raw_text)
 
         # No backup should have been created for a fresh file
         backups = list(self.dir_path.glob("settings.json.backup-*"))
@@ -165,7 +165,7 @@ class TestSetupClaude(unittest.TestCase):
         self.assertEqual(updated_data["outputStyle"], "verbose")
         self.assertEqual(updated_data["permissions"], {"allowAll": False})
         self.assertEqual(updated_data["env"]["CUSTOM_EXISTING_KEY"], "custom_val")
-        self.assertEqual(updated_data["env"]["ANTHROPIC_BASE_URL"], "http://127.0.0.1:8080")
+        self.assertEqual(updated_data["env"]["ANTHROPIC_BASE_URL"], "http://127.0.0.1:24980")
         self.assertEqual(updated_data["env"]["ANTHROPIC_MODEL"], "gemini-3.8-flash-high")
 
     def test_custom_flags_port_model_url(self):
@@ -234,7 +234,7 @@ class TestSetupCodex(unittest.TestCase):
         self.assertIn("model_auto_compact_token_limit = 943718", content)
         self.assertIn("[model_providers.agy]", content)
         self.assertIn('name = "agy"', content)
-        self.assertIn('base_url = "http://127.0.0.1:8080/v1"', content)
+        self.assertIn('base_url = "http://127.0.0.1:24980/v1"', content)
         self.assertIn('wire_api = "responses"', content)
         self.assertIn("requires_openai_auth = false", content)
 
@@ -277,7 +277,7 @@ class TestSetupCodex(unittest.TestCase):
         self.assertIn("[projects]\nactive = \"my-project\"", updated)
         self.assertIn("[mcp_servers]\nserver1 = \"http://localhost:3000\"", updated)
         self.assertIn('model = "gemini-3.8-flash-high"', updated)
-        self.assertIn('base_url = "http://127.0.0.1:8080/v1"', updated)
+        self.assertIn('base_url = "http://127.0.0.1:24980/v1"', updated)
 
     def test_insertion_with_existing_tables_without_agy_block(self):
         target = self.dir_path / "config.toml"

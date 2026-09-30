@@ -52,10 +52,10 @@ You can run the bridge directly with Python 3, or install it as a global CLI com
 pip install -e .
 
 # Now 'agy-bridge' and 'agy-model-bridge' are available in your PATH
-agy-bridge --port 8080
+agy-bridge
 
 # Option B: Run directly without installation
-python3 -m bridge --port 8080
+python3 -m bridge
 ```
 
 ---
@@ -65,12 +65,12 @@ python3 -m bridge --port 8080
 ### 1. Start the Bridge Server
 
 ```bash
-agy-bridge --host 127.0.0.1 --port 8080
+agy-bridge --host 127.0.0.1 --port 24980
 ```
 
 CLI options:
 - `--host`: Host address to bind (default: `127.0.0.1`).
-- `--port`: Port number to bind (default: `8080`).
+- `--port`: Port number to bind (default: `24980`).
 - `--project`: Optional Google Cloud project ID override (defaults to auto-discovery via `loadCodeAssist`).
 - `--base-url`: Optional upstream API base URL override.
 
@@ -90,7 +90,7 @@ agy-bridge setup-codex
 
 ### 3. Open the Local Dashboard
 
-Open [http://127.0.0.1:8080/](http://127.0.0.1:8080/) in your browser to view active status badges, discovered models, and one-click copyable setup cards for each tool.
+Open [http://127.0.0.1:24980/](http://127.0.0.1:24980/) in your browser to view active status badges, discovered models, and one-click copyable setup cards for each tool.
 
 ---
 
@@ -105,7 +105,7 @@ agy-bridge setup-claude
 This automatically configures `~/.claude/settings.json` with:
 - Model: `gemini-3.8-flash-high` (aliased to upstream `gemini-3.8-flash-tiered` with high thinking)
 - Context window: 1,048,576 tokens (`CLAUDE_CODE_AUTO_COMPACT_WINDOW`)
-- Gateway base URL: `http://127.0.0.1:8080`
+- Gateway base URL: `http://127.0.0.1:24980`
 
 Once configured, simply launch Claude:
 ```bash
@@ -114,7 +114,7 @@ claude
 
 *(Alternative: set environment variables manually for a single session:)*
 ```bash
-export ANTHROPIC_BASE_URL="http://127.0.0.1:8080" ANTHROPIC_AUTH_TOKEN="antigravity" ANTHROPIC_MODEL="gemini-3.8-flash-high" CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1 && claude
+export ANTHROPIC_BASE_URL="http://127.0.0.1:24980" ANTHROPIC_AUTH_TOKEN="antigravity" ANTHROPIC_MODEL="gemini-3.8-flash-high" CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1 && claude
 ```
 
 ### 🎴 Codex CLI
@@ -134,12 +134,12 @@ codex
 Hermes Agent connects using standard OpenAI environment variables:
 
 ```bash
-export OPENAI_BASE_URL="http://127.0.0.1:8080/v1" OPENAI_API_KEY="local-bridge" && hermes
+export OPENAI_BASE_URL="http://127.0.0.1:24980/v1" OPENAI_API_KEY="local-bridge" && hermes
 ```
 
 ### 🎴 FreeLLMAPI
 Register this bridge as an OpenAI-compatible Custom Provider in FreeLLMAPI:
-- **Base URL**: `http://127.0.0.1:8080/v1`
+- **Base URL**: `http://127.0.0.1:24980/v1`
 - **API Key**: `local-bridge` (or any string)
 
 ---
@@ -161,5 +161,5 @@ All 291 tests run in ~1 second with zero external dependencies and zero network 
 Run the 9-stage live verification script against a running bridge server:
 
 ```bash
-python3 scripts/smoke_test.py --host 127.0.0.1 --port 8080
+python3 scripts/smoke_test.py --host 127.0.0.1 --port 24980
 ```

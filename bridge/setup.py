@@ -84,7 +84,7 @@ def setup_claude(
 
     Args:
         settings_path: Path to settings.json (defaults to ~/.claude/settings.json).
-        base_url: Base URL for gateway (default: http://127.0.0.1:8080 or http://127.0.0.1:{port}).
+        base_url: Base URL for gateway (default: http://127.0.0.1:24980 or http://127.0.0.1:{port}).
         port: Gateway port override.
         model: Default model identifier (default: gemini-3.8-flash-high).
         auth_token: Gateway auth token (default: antigravity).
@@ -102,7 +102,7 @@ def setup_claude(
     elif port is not None:
         resolved_url = f"http://127.0.0.1:{port}"
     else:
-        resolved_url = "http://127.0.0.1:8080"
+        resolved_url = "http://127.0.0.1:24980"
 
     settings: dict[str, Any] = {}
     if target.exists():
@@ -173,7 +173,7 @@ def setup_codex(
 
     Args:
         config_path: Path to config.toml (defaults to ~/.codex/config.toml).
-        base_url: Base URL for gateway (default: http://127.0.0.1:8080/v1 or http://127.0.0.1:{port}/v1).
+        base_url: Base URL for gateway (default: http://127.0.0.1:24980/v1 or http://127.0.0.1:{port}/v1).
         port: Gateway port override.
         model: Default model identifier (default: gemini-3.8-flash-high).
 
@@ -190,7 +190,7 @@ def setup_codex(
     elif port is not None:
         resolved_url = f"http://127.0.0.1:{port}/v1"
     else:
-        resolved_url = "http://127.0.0.1:8080/v1"
+        resolved_url = "http://127.0.0.1:24980/v1"
 
     block = build_codex_block(model=model, base_url=resolved_url)
 
