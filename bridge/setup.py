@@ -14,6 +14,8 @@ import shutil
 from typing import Any
 import uuid
 
+import bridge.daemon
+
 
 def atomic_write_file(path: Path, content: str, mode: int = 0o600) -> None:
     """Atomically writes content to path using a tempfile and os.replace.
@@ -388,5 +390,178 @@ def setup_codex(
     res = ConfigPath(target)
     res.backup_path = backup_path
     return res
+
+
+def uninstall(
+    daemon_dir: Path | None = None,
+    bin_dir: Path | None = None,
+    claude_settings_path: Path | None = None,
+    codex_config_path: Path | None = None,
+    restore_configs: bool = True,
+    purge_backups: bool = False,
+) -> dict[str, Any]:
+    """Uninstalls Antigravity Model Bridge and optionally restores client configurations.
+
+    Args:
+        daemon_dir: Path to daemon directory (default: ~/.agy-bridge).
+        bin_dir: Path to launcher binary directory (default: ~/.local/bin).
+        claude_settings_path: Path to Claude settings.json (default: ~/.claude/settings.json).
+        codex_config_path: Path to Codex config.toml (default: ~/.codex/config.toml).
+        restore_configs: Whether to restore Claude/Codex configurations.
+        purge_backups: Whether to delete historical configuration backups.
+
+    Returns:
+        Structured dictionary reporting actions performed:
+        {
+            "daemon_stopped": bool,
+            "claude_restored": bool,
+            "codex_restored": bool,
+            "binaries_removed": list[str],
+            "daemon_dir_removed": bool,
+            "backups_purged": bool,
+        }
+    """
+    resolved_daemon_dir = Path(daemon_dir) if daemon_dir is not None else Path.home() / ".agy-bridge"
+    resolved_bin_dir = Path(bin_dir) if bin_dir is not None else Path.home() / ".local" / "bin"
+    resolved_claude = Path(claude_settings_path) if claude_settings_path is not None else Path.home() / ".claude" / "settings.json"
+    resolved_codex = Path(codex_config_path) if codex_config_path is not None else Path.home() / ".codex" / "config.toml"
+
+    # 1. Stop daemon if running
+    pid_file = resolved_daemon_dir / "bridge.pid"
+    stop_result = bridge.daemon.stop_daemon(pid_file=pid_file)
+    daemon_stopped = stop_result.get("status") == "stopped"
+
+    # 2. Restore or surgically clean client configurations
+    claude_restored = False
+    codex_restored = False
+
+    if restore_configs:
+        # Claude restoration
+        claude_backups = list_backups(resolved_claude)
+        if claude_backups:
+            try:
+                restore_backup(resolved_claude, backup_path=claude_backups[0])
+                claude_restored = True
+            except OSError:
+                claude_restored = False
+        elif resolved_claude.exists() and resolved_claude.is_file():
+            try:
+                content = resolved_claude.read_text(encoding="utf-8").strip()
+                if content:
+                    settings = json.loads(content)
+                    if isinstance(settings, dict):
+                        env = settings.get("env")
+                        if isinstance(env, dict):
+                            keys_to_clean = [
+                                k
+                                for k in env
+                                if k
+                                in (
+                                    "ANTHROPIC_BASE_URL",
+                                    "ANTHROPIC_AUTH_TOKEN",
+                                    "ANTHROPIC_MODEL",
+                                    "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
+                                    "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY",
+                                )
+                                or (k.startswith("ANTHROPIC_DEFAULT_") and k.endswith("_MODEL"))
+                            ]
+                            for k in keys_to_clean:
+                                del env[k]
+
+                        model_picker = settings.get("modelPicker")
+                        if isinstance(model_picker, dict):
+                            agy_models = {
+                                "gemini-3.8-flash-high",
+                                "gemini-3.7-flash-tiered",
+                                "gemini-3.6-flash-tiered",
+                                "claude-sonnet-4-6",
+                                "claude-opus-4-6-thinking",
+                            }
+                            options = model_picker.get("options", [])
+                            if isinstance(options, list):
+                                remaining_opts = [
+                                    opt
+                                    for opt in options
+                                    if isinstance(opt, dict)
+                                    and opt.get("model") not in agy_models
+                                    and not opt.get("label", "").startswith("Custom (")
+                                ]
+                                if remaining_opts:
+                                    settings["modelPicker"]["options"] = remaining_opts
+                                else:
+                                    settings.pop("modelPicker", None)
+                            else:
+                                settings.pop("modelPicker", None)
+
+                        formatted_json = json.dumps(settings, indent=2) + "\n"
+                        atomic_write_file(resolved_claude, formatted_json, mode=0o600)
+                        claude_restored = True
+            except (json.JSONDecodeError, OSError):
+                claude_restored = False
+
+        # Codex restoration
+        codex_backups = list_backups(resolved_codex)
+        if codex_backups:
+            try:
+                restore_backup(resolved_codex, backup_path=codex_backups[0])
+                codex_restored = True
+            except OSError:
+                codex_restored = False
+        elif resolved_codex.exists() and resolved_codex.is_file():
+            try:
+                content = resolved_codex.read_text(encoding="utf-8")
+                if CODEX_BLOCK_REGEX.search(content):
+                    cleaned = CODEX_BLOCK_REGEX.sub("", content).strip()
+                    if cleaned:
+                        cleaned += "\n"
+                    atomic_write_file(resolved_codex, cleaned, mode=0o600)
+                    codex_restored = True
+            except OSError:
+                codex_restored = False
+
+    # 3. Purge backup files if requested
+    if purge_backups:
+        all_backups = list_backups(resolved_claude) + list_backups(resolved_codex)
+        for b in all_backups:
+            try:
+                b.unlink()
+            except OSError:
+                pass
+        backups_purged = True
+    else:
+        backups_purged = False
+
+    # 4. Remove launcher scripts
+    binaries_removed: list[str] = []
+    for binary_name in ("agy-bridge", "agy-model-bridge"):
+        target_bin = resolved_bin_dir / binary_name
+        if target_bin.exists() or target_bin.is_symlink():
+            try:
+                target_bin.unlink()
+                binaries_removed.append(str(target_bin))
+            except OSError:
+                pass
+
+    # 5. Remove daemon and core directory
+    daemon_dir_removed = False
+    if resolved_daemon_dir.exists():
+        try:
+            if resolved_daemon_dir.is_dir():
+                shutil.rmtree(resolved_daemon_dir)
+            else:
+                resolved_daemon_dir.unlink()
+            daemon_dir_removed = True
+        except OSError:
+            daemon_dir_removed = False
+
+    return {
+        "daemon_stopped": daemon_stopped,
+        "claude_restored": claude_restored,
+        "codex_restored": codex_restored,
+        "binaries_removed": binaries_removed,
+        "daemon_dir_removed": daemon_dir_removed,
+        "backups_purged": backups_purged,
+    }
+
 
 

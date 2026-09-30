@@ -15,6 +15,7 @@ from bridge.setup import (
     restore_backup,
     setup_claude,
     setup_codex,
+    uninstall,
 )
 
 
@@ -609,6 +610,7 @@ class TestCLIParsing(unittest.TestCase):
             ["setup-codex", "--help"],
             ["restore-claude", "--help"],
             ["restore-codex", "--help"],
+            ["uninstall", "--help"],
             ["--help"],
         ):
             with self.subTest(subcmd=subcmd):
@@ -819,6 +821,337 @@ class TestCLIRestore(unittest.TestCase):
         self.assertIn("[3] config.toml.backup-2026-09-20T10-00-00  [Codex Original]", output)
 
 
+class TestUninstall(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp_dir.name)
+        self.daemon_dir = self.root / ".agy-bridge"
+        self.daemon_dir.mkdir(parents=True, exist_ok=True)
+        self.bin_dir = self.root / ".local" / "bin"
+        self.bin_dir.mkdir(parents=True, exist_ok=True)
+        self.claude_dir = self.root / ".claude"
+        self.claude_dir.mkdir(parents=True, exist_ok=True)
+        self.claude_settings = self.claude_dir / "settings.json"
+        self.codex_dir = self.root / ".codex"
+        self.codex_dir.mkdir(parents=True, exist_ok=True)
+        self.codex_config = self.codex_dir / "config.toml"
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    @unittest.mock.patch("bridge.daemon.stop_daemon")
+    def test_uninstall_stops_daemon_and_removes_daemon_dir(self, mock_stop_daemon):
+        mock_stop_daemon.return_value = {"status": "stopped", "pid": 12345}
+        (self.daemon_dir / "bridge.log").write_text("log content", encoding="utf-8")
+
+        result = uninstall(
+            daemon_dir=self.daemon_dir,
+            bin_dir=self.bin_dir,
+            claude_settings_path=self.claude_settings,
+            codex_config_path=self.codex_config,
+        )
+
+        mock_stop_daemon.assert_called_once_with(pid_file=self.daemon_dir / "bridge.pid")
+        self.assertTrue(result["daemon_stopped"])
+        self.assertTrue(result["daemon_dir_removed"])
+        self.assertFalse(self.daemon_dir.exists())
+
+    def test_uninstall_removes_launcher_binaries(self):
+        bin1 = self.bin_dir / "agy-bridge"
+        bin1.write_text("#!/bin/sh\n", encoding="utf-8")
+        bin2 = self.bin_dir / "agy-model-bridge"
+        bin2.symlink_to(bin1)
+
+        result = uninstall(
+            daemon_dir=self.daemon_dir,
+            bin_dir=self.bin_dir,
+            claude_settings_path=self.claude_settings,
+            codex_config_path=self.codex_config,
+        )
+
+        self.assertFalse(bin1.exists())
+        self.assertFalse(bin2.exists())
+        self.assertFalse(bin2.is_symlink())
+        self.assertIn(str(bin1), result["binaries_removed"])
+        self.assertIn(str(bin2), result["binaries_removed"])
+
+    def test_uninstall_restores_claude_and_codex_from_backups(self):
+        # Create backups
+        b_claude = self.claude_dir / "settings.json.backup-2026-09-20T10-00-00"
+        b_claude.write_text(json.dumps({"env": {"CUSTOM": "original"}}), encoding="utf-8")
+        self.claude_settings.write_text(json.dumps({"env": {"ANTHROPIC_BASE_URL": "http://127.0.0.1:24980"}}), encoding="utf-8")
+
+        b_codex = self.codex_dir / "config.toml.backup-2026-09-20T10-00-00"
+        b_codex.write_text('model = "original-gpt"\n', encoding="utf-8")
+        self.codex_config.write_text('# agy:start\nmodel = "gemini"\n# agy:end\n', encoding="utf-8")
+
+        result = uninstall(
+            daemon_dir=self.daemon_dir,
+            bin_dir=self.bin_dir,
+            claude_settings_path=self.claude_settings,
+            codex_config_path=self.codex_config,
+            restore_configs=True,
+            purge_backups=False,
+        )
+
+        self.assertTrue(result["claude_restored"])
+        self.assertTrue(result["codex_restored"])
+        self.assertFalse(result["backups_purged"])
+
+        # Verify content restored
+        claude_data = json.loads(self.claude_settings.read_text(encoding="utf-8"))
+        self.assertEqual(claude_data, {"env": {"CUSTOM": "original"}})
+        self.assertEqual(self.codex_config.read_text(encoding="utf-8"), 'model = "original-gpt"\n')
+        # Backups still exist since purge_backups was False
+        self.assertTrue(b_claude.exists())
+        self.assertTrue(b_codex.exists())
+
+    def test_uninstall_surgically_cleans_configs_when_no_backups(self):
+        # Claude config with agy keys and modelPicker, but user custom keys preserved
+        claude_initial = {
+            "outputStyle": "verbose",
+            "permissions": {"allowAll": False},
+            "env": {
+                "USER_KEY": "keep_me",
+                "ANTHROPIC_BASE_URL": "http://127.0.0.1:24980",
+                "ANTHROPIC_AUTH_TOKEN": "antigravity",
+                "ANTHROPIC_MODEL": "gemini-3.8-flash-high",
+                "ANTHROPIC_DEFAULT_SONNET_MODEL": "gemini-3.8-flash-high",
+                "ANTHROPIC_DEFAULT_HAIKU_MODEL": "gemini-3.8-flash-high",
+                "ANTHROPIC_DEFAULT_OPUS_MODEL": "gemini-3.8-flash-high",
+                "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "1048576",
+                "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY": "1",
+            },
+            "modelPicker": {
+                "options": [
+                    {"model": "gemini-3.8-flash-high", "label": "Gemini 3.8 Flash"},
+                    {"model": "gemini-3.7-flash-tiered", "label": "Gemini 3.7 Flash"},
+                ],
+                "replaceBuiltInOptions": False,
+            },
+        }
+        self.claude_settings.write_text(json.dumps(claude_initial, indent=2), encoding="utf-8")
+
+        # Codex config with user tables and delimited agy block
+        codex_initial = (
+            "[projects]\n"
+            'active = "my-project"\n\n'
+            "# agy:start\n"
+            'model = "gemini-3.8-flash-high"\n'
+            'model_provider = "agy"\n\n'
+            "[model_providers.agy]\n"
+            'base_url = "http://127.0.0.1:24980/v1"\n'
+            "# agy:end\n\n"
+            "[mcp_servers]\n"
+            's1 = "url"\n'
+        )
+        self.codex_config.write_text(codex_initial, encoding="utf-8")
+
+        result = uninstall(
+            daemon_dir=self.daemon_dir,
+            bin_dir=self.bin_dir,
+            claude_settings_path=self.claude_settings,
+            codex_config_path=self.codex_config,
+            restore_configs=True,
+            purge_backups=False,
+        )
+
+        self.assertTrue(result["claude_restored"])
+        self.assertTrue(result["codex_restored"])
+
+        # Check Claude surgical cleaning
+        claude_cleaned = json.loads(self.claude_settings.read_text(encoding="utf-8"))
+        self.assertEqual(claude_cleaned["outputStyle"], "verbose")
+        self.assertEqual(claude_cleaned["permissions"], {"allowAll": False})
+        self.assertEqual(claude_cleaned["env"], {"USER_KEY": "keep_me"})
+        self.assertNotIn("modelPicker", claude_cleaned)
+
+        # Check Codex surgical cleaning
+        codex_cleaned = self.codex_config.read_text(encoding="utf-8")
+        self.assertNotIn("# agy:start", codex_cleaned)
+        self.assertNotIn("# agy:end", codex_cleaned)
+        self.assertNotIn("model_providers.agy", codex_cleaned)
+        self.assertIn("[projects]\nactive = \"my-project\"", codex_cleaned)
+        self.assertIn("[mcp_servers]\ns1 = \"url\"", codex_cleaned)
+
+    def test_uninstall_restore_configs_false_leaves_configs_untouched(self):
+        claude_content = '{\n  "env": {\n    "ANTHROPIC_MODEL": "gemini"\n  }\n}\n'
+        self.claude_settings.write_text(claude_content, encoding="utf-8")
+        codex_content = '# agy:start\nmodel = "gemini"\n# agy:end\n'
+        self.codex_config.write_text(codex_content, encoding="utf-8")
+
+        result = uninstall(
+            daemon_dir=self.daemon_dir,
+            bin_dir=self.bin_dir,
+            claude_settings_path=self.claude_settings,
+            codex_config_path=self.codex_config,
+            restore_configs=False,
+            purge_backups=False,
+        )
+
+        self.assertFalse(result["claude_restored"])
+        self.assertFalse(result["codex_restored"])
+        self.assertEqual(self.claude_settings.read_text(encoding="utf-8"), claude_content)
+        self.assertEqual(self.codex_config.read_text(encoding="utf-8"), codex_content)
+
+    def test_uninstall_purge_backups_deletes_all_backup_files(self):
+        b1 = self.claude_dir / "settings.json.backup-1"
+        b1.write_text("{}", encoding="utf-8")
+        b2 = self.claude_dir / "settings.json.backup-2"
+        b2.write_text("{}", encoding="utf-8")
+        b3 = self.codex_dir / "config.toml.backup-1"
+        b3.write_text("test", encoding="utf-8")
+
+        result = uninstall(
+            daemon_dir=self.daemon_dir,
+            bin_dir=self.bin_dir,
+            claude_settings_path=self.claude_settings,
+            codex_config_path=self.codex_config,
+            restore_configs=True,
+            purge_backups=True,
+        )
+
+        self.assertTrue(result["backups_purged"])
+        self.assertFalse(b1.exists())
+        self.assertFalse(b2.exists())
+        self.assertFalse(b3.exists())
+
+    def test_uninstall_handles_nonexistent_paths_gracefully(self):
+        nonexistent_root = self.root / "empty_dir"
+        result = uninstall(
+            daemon_dir=nonexistent_root / "daemon",
+            bin_dir=nonexistent_root / "bin",
+            claude_settings_path=nonexistent_root / "settings.json",
+            codex_config_path=nonexistent_root / "config.toml",
+            restore_configs=True,
+            purge_backups=True,
+        )
+
+        self.assertFalse(result["daemon_stopped"])
+        self.assertFalse(result["claude_restored"])
+        self.assertFalse(result["codex_restored"])
+        self.assertEqual(result["binaries_removed"], [])
+        self.assertFalse(result["daemon_dir_removed"])
+        self.assertTrue(result["backups_purged"])
+
+
+class TestCLIUninstall(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.dir_path = Path(self.temp_dir.name)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    @unittest.mock.patch("bridge.__main__.uninstall")
+    def test_cli_uninstall_interactive_cancel_on_no_or_enter(self, mock_uninstall):
+        import io
+        from bridge.__main__ import main
+
+        out = io.StringIO()
+        with unittest.mock.patch("sys.stdout", out):
+            with unittest.mock.patch("builtins.input", return_value="n"):
+                exit_code = main(["uninstall"])
+
+        self.assertEqual(exit_code, 0)
+        mock_uninstall.assert_not_called()
+        self.assertIn("cancelada", out.getvalue().lower())
+
+    @unittest.mock.patch("bridge.__main__.uninstall")
+    def test_cli_uninstall_interactive_confirm_on_s(self, mock_uninstall):
+        import io
+        from bridge.__main__ import main
+
+        mock_uninstall.return_value = {
+            "daemon_stopped": True,
+            "claude_restored": True,
+            "codex_restored": True,
+            "binaries_removed": ["/bin/agy-bridge"],
+            "daemon_dir_removed": True,
+            "backups_purged": False,
+        }
+
+        out = io.StringIO()
+        with unittest.mock.patch("sys.stdout", out):
+            with unittest.mock.patch("builtins.input", return_value="s"):
+                exit_code = main(["uninstall"])
+
+        self.assertEqual(exit_code, 0)
+        mock_uninstall.assert_called_once_with(restore_configs=True, purge_backups=False)
+        self.assertIn("desinstalado correctamente", out.getvalue())
+
+    @unittest.mock.patch("bridge.__main__.uninstall")
+    def test_cli_uninstall_yes_flag_skips_prompt(self, mock_uninstall):
+        import io
+        from bridge.__main__ import main
+
+        mock_uninstall.return_value = {
+            "daemon_stopped": False,
+            "claude_restored": False,
+            "codex_restored": False,
+            "binaries_removed": [],
+            "daemon_dir_removed": False,
+            "backups_purged": False,
+        }
+
+        out = io.StringIO()
+        with unittest.mock.patch("sys.stdout", out):
+            with unittest.mock.patch("builtins.input", side_effect=AssertionError("Prompt should not be called")):
+                exit_code = main(["uninstall", "--yes"])
+
+        self.assertEqual(exit_code, 0)
+        mock_uninstall.assert_called_once_with(restore_configs=True, purge_backups=False)
+
+    @unittest.mock.patch("bridge.__main__.uninstall")
+    def test_cli_uninstall_short_y_flag_skips_prompt(self, mock_uninstall):
+        from bridge.__main__ import main
+
+        mock_uninstall.return_value = {
+            "daemon_stopped": False,
+            "claude_restored": False,
+            "codex_restored": False,
+            "binaries_removed": [],
+            "daemon_dir_removed": False,
+            "backups_purged": False,
+        }
+
+        with unittest.mock.patch("sys.stdout"):
+            with unittest.mock.patch("builtins.input", side_effect=AssertionError("Prompt should not be called")):
+                exit_code = main(["uninstall", "-y"])
+
+        self.assertEqual(exit_code, 0)
+        mock_uninstall.assert_called_once_with(restore_configs=True, purge_backups=False)
+
+    @unittest.mock.patch("bridge.__main__.uninstall")
+    def test_cli_uninstall_flags_purge_and_keep_configs(self, mock_uninstall):
+        from bridge.__main__ import main
+
+        mock_uninstall.return_value = {
+            "daemon_stopped": True,
+            "claude_restored": False,
+            "codex_restored": False,
+            "binaries_removed": [],
+            "daemon_dir_removed": True,
+            "backups_purged": True,
+        }
+
+        with unittest.mock.patch("sys.stdout"):
+            exit_code = main(["uninstall", "-y", "--purge", "--keep-configs"])
+
+        self.assertEqual(exit_code, 0)
+        mock_uninstall.assert_called_once_with(restore_configs=False, purge_backups=True)
+
+    def test_cli_uninstall_help(self):
+        from bridge.__main__ import main
+
+        with self.assertRaises(SystemExit) as cm:
+            with unittest.mock.patch("sys.stdout"):
+                main(["uninstall", "--help"])
+        self.assertEqual(cm.exception.code, 0)
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
 

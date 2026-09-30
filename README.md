@@ -187,6 +187,29 @@ Ingrese un número (1-3), presione Enter para [1], o 'q' para cancelar:
 
 ---
 
+## Uninstallation
+
+To completely uninstall AGY Model Bridge, stop the running background daemon, remove the CLI binaries and daemon directory (`~/.agy-bridge`), and restore Claude Code and Codex CLI configurations to their original state:
+
+### Option A: Via the installed CLI
+
+```bash
+agy-bridge uninstall
+```
+
+Options:
+- `-y`, `--yes`: Skip interactive confirmation prompt.
+- `--purge`: Purge all historical configuration backups.
+- `--keep-configs`: Keep current configurations without restoring Claude/Codex.
+
+### Option B: One-line uninstaller (Remote / Script)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/albertopo94/agy-model-bridge/main/uninstall.sh | bash
+```
+
+---
+
 ## CLI Command Reference
 
 | Command | Description |
@@ -199,6 +222,7 @@ Ingrese un número (1-3), presione Enter para [1], o 'q' para cancelar:
 | `agy-bridge restore-claude` | Interactively restores a Claude Code configuration backup |
 | `agy-bridge setup-codex` | Surgically configures Codex CLI (`~/.codex/config.toml`) |
 | `agy-bridge restore-codex` | Interactively restores a Codex CLI configuration backup |
+| `agy-bridge uninstall` | Uninstalls bridge, terminates daemon, and restores client configs |
 
 ---
 

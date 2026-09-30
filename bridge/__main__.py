@@ -17,6 +17,7 @@ from bridge.setup import (
     restore_backup,
     setup_claude,
     setup_codex,
+    uninstall,
 )
 
 
@@ -321,6 +322,60 @@ def main(argv: list[str] | None = None) -> int:
             argv=argv[1:],
             prog_name=f"{prog_base} restore-codex",
         )
+
+    if argv and argv[0] == "uninstall":
+        parser = argparse.ArgumentParser(
+            prog=f"{prog_base} uninstall",
+            description="Uninstall AGY Model Bridge, terminate daemon, and restore client configurations.",
+        )
+        parser.add_argument(
+            "-y",
+            "--yes",
+            action="store_true",
+            help="Skip interactive confirmation prompt",
+        )
+        parser.add_argument(
+            "--purge",
+            action="store_true",
+            help="Purge all historical configuration backups",
+        )
+        parser.add_argument(
+            "--keep-configs",
+            action="store_true",
+            help="Do not restore Claude/Codex configurations",
+        )
+        args = parser.parse_args(argv[1:])
+
+        if not args.yes:
+            try:
+                confirm = input("¿Estás seguro de que deseas desinstalar AGY Model Bridge? [s/N]: ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                print("\nOperación de desinstalación cancelada.")
+                return 0
+
+            if confirm not in ("s", "si", "sí", "y", "yes"):
+                print("Operación de desinstalación cancelada.")
+                return 0
+
+        res = uninstall(
+            restore_configs=not args.keep_configs,
+            purge_backups=args.purge,
+        )
+
+        print("✔ AGY Model Bridge desinstalado correctamente.")
+        if res.get("daemon_stopped"):
+            print("  - Servicio en segundo plano detenido.")
+        if res.get("binaries_removed"):
+            print(f"  - Binarios eliminados: {', '.join(res['binaries_removed'])}")
+        if res.get("daemon_dir_removed"):
+            print("  - Directorio ~/.agy-bridge eliminado.")
+        if res.get("claude_restored"):
+            print("  - Configuración de Claude Code restaurada.")
+        if res.get("codex_restored"):
+            print("  - Configuración de Codex CLI restaurada.")
+        if res.get("backups_purged"):
+            print("  - Historial de backups purgado.")
+        return 0
 
     # Fallback to daemon server runner
     parser = argparse.ArgumentParser(
