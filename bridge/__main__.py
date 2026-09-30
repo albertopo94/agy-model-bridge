@@ -144,11 +144,13 @@ def main(argv: list[str] | None = None) -> int:
             browser_hint = " (abierto en el navegador)" if res.get("opened_browser") else ""
             print(f"✔ AGY Model Bridge corriendo en segundo plano (PID {res['pid']})")
             print(f"➜ Dashboard: {res['url']}{browser_hint}")
+            print(f"➜ Para detener el servicio: {prog_base} stop")
             return 0
         elif st == "already_running":
             pid_str = f" (PID {res['pid']})" if res.get("pid") else ""
             print(f"AGY Model Bridge ya está corriendo{pid_str}")
             print(f"➜ Dashboard: {res['url']}")
+            print(f"➜ Para detener el servicio: {prog_base} stop")
             return 0
         else:
             print(f"Error: {res.get('error', 'Fallo al iniciar el daemon')}")
