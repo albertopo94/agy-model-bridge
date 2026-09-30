@@ -12,9 +12,10 @@ Zero-dependency, pure Python 3 local AI gateway that bridges the Google Cloud Co
   - `GET /v1/models` — Dynamic model catalog discovered directly from upstream Cloud Code Assist with Codex serde compatibility (`data`, `models`, `slug`, `display_name`).
   - `POST /v1/chat/completions` — OpenAI Chat Completions API with full streaming (SSE `text/event-stream`) and non-streaming support (for FreeLLMAPI, Hermes Agent, Aider).
   - `POST /v1/responses` — OpenAI Responses API shim for Codex CLI (`wire_api = "responses"`).
-  - `POST /v1/messages` — Anthropic Messages API shim with SSE stream mapping (`message_start`, `content_block_delta`, `message_delta`, `message_stop`) for Claude Code CLI.
+  - `POST /v1/messages` — Anthropic Messages API shim with dynamic SSE stream mapping (`thinking_delta`, `text_delta`, `tool_use`, `input_json_delta`), recursive OpenAPI 3.0 schema sanitization, and full tool calling for Claude Code CLI.
+- **Built-in Setup CLI**: Native subcommands (`setup-claude`, `setup-codex`) that surgically configure client environments with atomic writes, file permissions `0o600`, and automatic timestamped backups.
 - **macOS Keychain OAuth Integration**: Seamlessly extracts Google OAuth credentials stored by Antigravity in Keychain (`service="gemini"`, `account="antigravity"`) with thread-safe TTL caching and automatic 401 re-read.
-- **Adaptive Thinking Configuration**: Intelligently configures `thinkingConfig` for Gemini reasoning models while strictly omitting it when budget is 0 or disabled, preventing protobuf validation errors.
+- **Adaptive Thinking & Model Aliasing**: Intelligently resolves `gemini-3.8-flash-high` / `auto` to upstream `gemini-3.8-flash-tiered`, automatically configuring reasoning levels (`HIGH`, `MEDIUM`, `LOW`) and token budgets.
 
 ---
 
@@ -42,12 +43,29 @@ Simply launch the Antigravity application so it can renew its credentials in Key
 
 ---
 
+## Installation
+
+You can run the bridge directly with Python 3, or install it as a global CLI command:
+
+```bash
+# Option A: Install globally in editable mode
+pip install -e .
+
+# Now 'agy-bridge' and 'agy-model-bridge' are available in your PATH
+agy-bridge --port 8080
+
+# Option B: Run directly without installation
+python3 -m bridge --port 8080
+```
+
+---
+
 ## Quick Start
 
 ### 1. Start the Bridge Server
 
 ```bash
-python3 -m bridge --host 127.0.0.1 --port 8080
+agy-bridge --host 127.0.0.1 --port 8080
 ```
 
 CLI options:
@@ -56,7 +74,21 @@ CLI options:
 - `--project`: Optional Google Cloud project ID override (defaults to auto-discovery via `loadCodeAssist`).
 - `--base-url`: Optional upstream API base URL override.
 
-### 2. Open the Local Dashboard
+### 2. Automatic Client Setup
+
+Configure your terminal coding agents with a single command:
+
+```bash
+# Configure Claude Code CLI (~/.claude/settings.json)
+agy-bridge setup-claude
+
+# Configure Codex CLI (~/.codex/config.toml)
+agy-bridge setup-codex
+```
+
+*Both commands create an automatic timestamped backup before writing, apply `0o600` file permissions atomically, and preserve your existing custom settings, hooks, and plugins.*
+
+### 3. Open the Local Dashboard
 
 Open [http://127.0.0.1:8080/](http://127.0.0.1:8080/) in your browser to view active status badges, discovered models, and one-click copyable setup cards for each tool.
 
@@ -65,24 +97,37 @@ Open [http://127.0.0.1:8080/](http://127.0.0.1:8080/) in your browser to view ac
 ## Client Integration
 
 ### 🎴 Claude Code CLI
-Claude Code expects the Anthropic Messages protocol and custom base URL without `/v1`:
 
+Run the automated setup:
 ```bash
-export ANTHROPIC_BASE_URL="http://127.0.0.1:8080" ANTHROPIC_AUTH_TOKEN="local-bridge" ANTHROPIC_CUSTOM_MODEL_OPTION="gemini-2.5-flash" CLAUDE_CODE_USE_GATEWAY=1 && claude
+agy-bridge setup-claude
+```
+This automatically configures `~/.claude/settings.json` with:
+- Model: `gemini-3.8-flash-high` (aliased to upstream `gemini-3.8-flash-tiered` with high thinking)
+- Context window: 1,048,576 tokens (`CLAUDE_CODE_AUTO_COMPACT_WINDOW`)
+- Gateway base URL: `http://127.0.0.1:8080`
+
+Once configured, simply launch Claude:
+```bash
+claude
+```
+
+*(Alternative: set environment variables manually for a single session:)*
+```bash
+export ANTHROPIC_BASE_URL="http://127.0.0.1:8080" ANTHROPIC_AUTH_TOKEN="antigravity" ANTHROPIC_MODEL="gemini-3.8-flash-high" CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1 && claude
 ```
 
 ### 🎴 Codex CLI
-Add the custom model provider block to `~/.codex/config.toml`:
 
-```toml
-[model]
-wire_api = "responses"
-base_url = "http://127.0.0.1:8080/v1"
-```
-
-Or append it in one line:
+Run the automated setup:
 ```bash
-mkdir -p ~/.codex && printf '\n[model]\nwire_api = "responses"\nbase_url = "http://127.0.0.1:8080/v1"\n' >> ~/.codex/config.toml
+agy-bridge setup-codex
+```
+This surgically adds an `[model_providers.agy]` block to `~/.codex/config.toml` using `wire_api = "responses"` and `model = "gemini-3.8-flash-high"`.
+
+Once configured, launch Codex:
+```bash
+codex
 ```
 
 ### 🎴 Hermes Agent
@@ -93,7 +138,7 @@ export OPENAI_BASE_URL="http://127.0.0.1:8080/v1" OPENAI_API_KEY="local-bridge" 
 ```
 
 ### 🎴 FreeLLMAPI
-Register this bridge as an OpenAI-compatible Custom Provider:
+Register this bridge as an OpenAI-compatible Custom Provider in FreeLLMAPI:
 - **Base URL**: `http://127.0.0.1:8080/v1`
 - **API Key**: `local-bridge` (or any string)
 
@@ -109,7 +154,7 @@ Execute the complete test suite:
 python3 -m unittest discover -s tests -v
 ```
 
-All 223 tests run in ~1 second with zero external dependencies and zero network access.
+All 291 tests run in ~1 second with zero external dependencies and zero network access.
 
 ### End-to-End Smoke Test
 
