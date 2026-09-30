@@ -114,11 +114,20 @@ This automatically configures `~/.claude/settings.json` with:
 - Model: `gemini-3.8-flash-high` (aliased to upstream `gemini-3.8-flash-tiered` with high thinking)
 - Context window: 1,048,576 tokens (`CLAUDE_CODE_AUTO_COMPACT_WINDOW`)
 - Gateway base URL: `http://127.0.0.1:24980`
+- Curated `modelPicker` options for the `/model` slash command
 
 Once configured, simply launch Claude:
 ```bash
 claude
 ```
+
+#### Changing Models in Claude Code (`/model`)
+Typing `/model` inside Claude Code displays curated models ready to use:
+1. **Gemini 3.8 Flash · high (1M)** (`gemini-3.8-flash-high`) — *Default*
+2. **Gemini 3.7 Flash** (`gemini-3.7-flash-tiered`)
+3. **Gemini 3.6 Flash** (`gemini-3.6-flash-tiered`)
+4. **Claude Sonnet 4.6 (Cloud Code)** (`claude-sonnet-4-6`)
+5. **Claude Opus 4.6 Thinking (Cloud Code)** (`claude-opus-4-6-thinking`)
 
 *(Alternative: set environment variables manually for a single session:)*
 ```bash
@@ -152,6 +161,47 @@ Register this bridge as an OpenAI-compatible Custom Provider in FreeLLMAPI:
 
 ---
 
+## Restoring Configuration Backups
+
+Before modifying any configuration files, `agy-bridge` creates timestamped backups. You can restore previous configurations at any time with automated provenance detection:
+
+```bash
+# Restore Claude Code configuration
+agy-bridge restore-claude
+
+# Restore Codex CLI configuration
+agy-bridge restore-codex
+```
+
+The interactive selector classifies each backup so you know exactly what you are restoring:
+```text
+Backups disponibles para Claude Code:
+  [1] settings.json.backup-2026-09-30T14-07-08  [AGY Bridge]  <-- Anterior inmediata
+  [2] settings.json.backup-2026-09-30T13-43-12  [FreeLLMAPI]
+  [3] settings.json.backup-2026-09-22T17-00-18-257Z  [Anthropic Original]
+
+Ingrese un número (1-3), presione Enter para [1], o 'q' para cancelar:
+```
+
+*Use `--latest` to restore the immediate previous backup directly without interactive prompts.*
+
+---
+
+## CLI Command Reference
+
+| Command | Description |
+|---|---|
+| `agy-bridge start` | Starts background daemon and opens web dashboard automatically |
+| `agy-bridge stop` | Stops the running background daemon |
+| `agy-bridge status` | Checks daemon status, port, models count, and auth |
+| `agy-bridge dashboard` (or `open`) | Opens the local dashboard in your default browser |
+| `agy-bridge setup-claude` | Surgically configures Claude Code (`~/.claude/settings.json`) |
+| `agy-bridge restore-claude` | Interactively restores a Claude Code configuration backup |
+| `agy-bridge setup-codex` | Surgically configures Codex CLI (`~/.codex/config.toml`) |
+| `agy-bridge restore-codex` | Interactively restores a Codex CLI configuration backup |
+
+---
+
 ## Running Tests
 
 ### Unit and Integration Tests
@@ -162,7 +212,7 @@ Execute the complete test suite:
 python3 -m unittest discover -s tests -v
 ```
 
-All 291 tests run in ~1 second with zero external dependencies and zero network access.
+All 339 tests run in ~1 second with zero external dependencies and zero network access.
 
 ### End-to-End Smoke Test
 
