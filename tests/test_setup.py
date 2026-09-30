@@ -10,6 +10,7 @@ from pathlib import Path
 from bridge.setup import (
     atomic_write_file,
     create_backup,
+    describe_backup,
     list_backups,
     restore_backup,
     setup_claude,
@@ -152,6 +153,61 @@ class TestListBackups(unittest.TestCase):
         self.assertEqual(results[0], b3)  # Most recent
         self.assertEqual(results[1], b2)  # Intermediate (e.g. freellmapi format)
         self.assertEqual(results[2], b1)  # Oldest
+
+
+class TestDescribeBackup(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.dir_path = Path(self.temp_dir.name)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_describe_claude_freellmapi_backup(self):
+        b = self.dir_path / "settings.json.backup-2026-09-30T13-30-12"
+        b.write_text(json.dumps({
+            "env": {
+                "ANTHROPIC_BASE_URL": "http://127.0.0.1:31415",
+                "ANTHROPIC_AUTH_TOKEN": "freellmapi-fa8cac1b8",
+            }
+        }), encoding="utf-8")
+        self.assertEqual(describe_backup(b), "FreeLLMAPI")
+
+    def test_describe_claude_agy_bridge_backup(self):
+        b = self.dir_path / "settings.json.backup-2026-09-30T14-04-58"
+        b.write_text(json.dumps({
+            "env": {
+                "ANTHROPIC_BASE_URL": "http://127.0.0.1:24980",
+                "ANTHROPIC_AUTH_TOKEN": "antigravity",
+            }
+        }), encoding="utf-8")
+        self.assertEqual(describe_backup(b), "AGY Bridge")
+
+    def test_describe_claude_anthropic_original_backup(self):
+        b = self.dir_path / "settings.json.backup-2026-09-22T17-00-18-257Z"
+        b.write_text(json.dumps({
+            "env": {}
+        }), encoding="utf-8")
+        self.assertEqual(describe_backup(b), "Anthropic Original")
+
+    def test_describe_codex_agy_bridge_backup(self):
+        b = self.dir_path / "config.toml.backup-2026-09-30T12-15-55"
+        b.write_text('# agy:start\nmodel = "gemini"\n# agy:end', encoding="utf-8")
+        self.assertEqual(describe_backup(b), "AGY Bridge")
+
+    def test_describe_codex_freellmapi_backup(self):
+        b = self.dir_path / "config.toml.backup-2026-09-26T21-34-23"
+        b.write_text('base_url = "http://127.0.0.1:31415/v1"', encoding="utf-8")
+        self.assertEqual(describe_backup(b), "FreeLLMAPI")
+
+    def test_describe_codex_original_backup(self):
+        b = self.dir_path / "config.toml.backup-2026-09-26T21-34-23-420Z"
+        b.write_text('[projects]\nactive = "main"', encoding="utf-8")
+        self.assertEqual(describe_backup(b), "Codex Original")
+
+    def test_describe_missing_or_invalid_file(self):
+        missing = self.dir_path / "does_not_exist"
+        self.assertEqual(describe_backup(missing), "Desconocido")
 
 
 class TestRestoreBackup(unittest.TestCase):
@@ -635,12 +691,50 @@ class TestCLIRestore(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(target.read_text(encoding="utf-8"), '{"env": "immediate_previous"}')
         output = out.getvalue()
-        self.assertIn("[1] settings.json.backup-2026-09-30T12-00-00  <-- Anterior inmediata", output)
-        self.assertIn("[2] settings.json.backup-2026-09-20T10-00-00", output)
+        self.assertIn("[1] settings.json.backup-2026-09-30T12-00-00  [Anthropic Original]  <-- Anterior inmediata", output)
+        self.assertIn("[2] settings.json.backup-2026-09-20T10-00-00  [Anthropic Original]", output)
         prompt_arg = mock_input.call_args[0][0]
         self.assertIn("Ingrese un número (1-2)", prompt_arg)
         self.assertIn("presione Enter para [1]", prompt_arg)
         self.assertIn("'q' para cancelar", prompt_arg)
+
+    def test_cli_restore_claude_interactive_displays_distinct_provenance_tags(self):
+        import io
+        from bridge.__main__ import main
+        target = self.dir_path / "settings.json"
+        target.write_text('{"env": {}}', encoding="utf-8")
+
+        b1 = self.dir_path / "settings.json.backup-2026-09-20T10-00-00"
+        b1.write_text('{"env": {}}', encoding="utf-8")
+        os.utime(b1, (1000.0, 1000.0))
+
+        b2 = self.dir_path / "settings.json.backup-2026-09-25T10-00-00"
+        b2.write_text(json.dumps({
+            "env": {
+                "ANTHROPIC_BASE_URL": "http://127.0.0.1:31415",
+                "ANTHROPIC_AUTH_TOKEN": "freellmapi-xyz",
+            }
+        }), encoding="utf-8")
+        os.utime(b2, (2000.0, 2000.0))
+
+        b3 = self.dir_path / "settings.json.backup-2026-09-30T12-00-00"
+        b3.write_text(json.dumps({
+            "env": {
+                "ANTHROPIC_BASE_URL": "http://127.0.0.1:24980",
+                "ANTHROPIC_AUTH_TOKEN": "antigravity",
+            }
+        }), encoding="utf-8")
+        os.utime(b3, (3000.0, 3000.0))
+
+        out = io.StringIO()
+        with unittest.mock.patch("sys.stdout", out):
+            with unittest.mock.patch("builtins.input", return_value="q"):
+                main(["restore-claude", "--path", str(target)])
+
+        output = out.getvalue()
+        self.assertIn("[1] settings.json.backup-2026-09-30T12-00-00  [AGY Bridge]  <-- Anterior inmediata", output)
+        self.assertIn("[2] settings.json.backup-2026-09-25T10-00-00  [FreeLLMAPI]", output)
+        self.assertIn("[3] settings.json.backup-2026-09-20T10-00-00  [Anthropic Original]", output)
 
     def test_cli_restore_claude_interactive_cancels_with_q(self):
         import io
@@ -695,6 +789,34 @@ class TestCLIRestore(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(target.read_text(encoding="utf-8"), 'active = "native_codex"\n')
         self.assertIn("Codex CLI", out.getvalue())
+
+    def test_cli_restore_codex_interactive_displays_distinct_provenance_tags(self):
+        import io
+        from bridge.__main__ import main
+        target = self.dir_path / "config.toml"
+        target.write_text('active = "test"', encoding="utf-8")
+
+        b1 = self.dir_path / "config.toml.backup-2026-09-20T10-00-00"
+        b1.write_text('[projects]\nactive = "main"', encoding="utf-8")
+        os.utime(b1, (1000.0, 1000.0))
+
+        b2 = self.dir_path / "config.toml.backup-2026-09-25T10-00-00"
+        b2.write_text('base_url = "http://127.0.0.1:31415/v1"', encoding="utf-8")
+        os.utime(b2, (2000.0, 2000.0))
+
+        b3 = self.dir_path / "config.toml.backup-2026-09-30T12-00-00"
+        b3.write_text('# agy:start\nmodel = "gemini"\n# agy:end', encoding="utf-8")
+        os.utime(b3, (3000.0, 3000.0))
+
+        out = io.StringIO()
+        with unittest.mock.patch("sys.stdout", out):
+            with unittest.mock.patch("builtins.input", return_value="q"):
+                main(["restore-codex", "--path", str(target)])
+
+        output = out.getvalue()
+        self.assertIn("[1] config.toml.backup-2026-09-30T12-00-00  [AGY Bridge]  <-- Anterior inmediata", output)
+        self.assertIn("[2] config.toml.backup-2026-09-25T10-00-00  [FreeLLMAPI]", output)
+        self.assertIn("[3] config.toml.backup-2026-09-20T10-00-00  [Codex Original]", output)
 
 
 if __name__ == "__main__":

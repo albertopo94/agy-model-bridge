@@ -92,6 +92,68 @@ def list_backups(config_path: Path) -> list[Path]:
     return backups
 
 
+def describe_backup(backup_path: Path) -> str:
+    """Identifies the provenance/origin of a configuration backup file.
+
+    Inspects content and naming patterns to classify backups as:
+    - "AGY Bridge": Antigravity Model Bridge configuration
+    - "FreeLLMAPI": FreeLLMAPI configuration
+    - "Anthropic Original": Original un-proxied Claude Code configuration
+    - "Codex Original": Original un-proxied Codex CLI configuration
+    - "Personalizado": Other custom proxy/endpoint configuration
+    - "Desconocido": Unreadable or empty file
+
+    Args:
+        backup_path: Path to the backup file to inspect.
+
+    Returns:
+        Provenance string tag.
+    """
+    path = Path(backup_path)
+    if not path.exists() or not path.is_file():
+        return "Desconocido"
+
+    try:
+        content = path.read_text(encoding="utf-8")
+    except OSError:
+        return "Desconocido"
+
+    if not content.strip():
+        return "Desconocido"
+
+    # Claude Code JSON settings inspection
+    if "settings.json" in path.name or content.lstrip().startswith("{"):
+        try:
+            data = json.loads(content)
+            if isinstance(data, dict):
+                env = data.get("env")
+                if not isinstance(env, dict):
+                    env = {}
+                base_url = str(env.get("ANTHROPIC_BASE_URL", "")).lower()
+                auth_token = str(env.get("ANTHROPIC_AUTH_TOKEN", "")).lower()
+                model = str(env.get("ANTHROPIC_MODEL", "")).lower()
+
+                if "24980" in base_url or auth_token == "antigravity" or "gemini-3.8-flash-high" in model:
+                    return "AGY Bridge"
+                if "31415" in base_url or "freellmapi" in auth_token or "freellmapi" in base_url:
+                    return "FreeLLMAPI"
+                if not base_url or "anthropic.com" in base_url:
+                    return "Anthropic Original"
+                return "Personalizado"
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            pass
+
+    # Codex TOML config inspection
+    if "# agy:start" in content or "[model_providers.agy]" in content or 'model_provider = "agy"' in content or ":24980" in content:
+        return "AGY Bridge"
+    if "# freellmapi:start" in content or "[model_providers.freellmapi]" in content or 'model_provider = "freellmapi"' in content or ":31415" in content or "freellmapi" in content.lower():
+        return "FreeLLMAPI"
+    if "config.toml" in path.name or "[projects" in content or "model = " in content or "personality" in content:
+        return "Codex Original"
+
+    return "Desconocido"
+
+
 def restore_backup(config_path: Path, backup_path: Path | None = None) -> Path:
     """Restores config_path from a backup file without creating redundant backups.
 

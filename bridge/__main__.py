@@ -5,7 +5,13 @@ import sys
 from pathlib import Path
 
 from bridge.server import run_server
-from bridge.setup import list_backups, restore_backup, setup_claude, setup_codex
+from bridge.setup import (
+    describe_backup,
+    list_backups,
+    restore_backup,
+    setup_claude,
+    setup_codex,
+)
 
 
 def _handle_restore_cli(
@@ -62,10 +68,12 @@ def _handle_restore_cli(
 
     print(f"\nBackups disponibles para {client_name}:")
     for i, b in enumerate(backups, 1):
+        tag = describe_backup(b)
+        tag_str = f"  [{tag}]"
         if i == 1:
-            print(f"  [{i}] {b.name}  <-- Anterior inmediata")
+            print(f"  [{i}] {b.name}{tag_str}  <-- Anterior inmediata")
         else:
-            print(f"  [{i}] {b.name}")
+            print(f"  [{i}] {b.name}{tag_str}")
 
     count = len(backups)
     range_str = f"1-{count}" if count > 1 else "1"
