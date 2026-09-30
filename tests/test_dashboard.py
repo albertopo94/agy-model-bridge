@@ -81,6 +81,16 @@ class TestDashboardRendering(unittest.TestCase):
         # Models count badge
         self.assertIn("27 Models Discovered", html)
 
+    def test_github_header_link(self):
+        auth_status = {"status": "Valid", "email": "user@google.com", "message": "Authenticated"}
+        html = render_dashboard("127.0.0.1", 24980, auth_status, models_count=27)
+
+        self.assertIn("https://github.com/albertopo94/agy-model-bridge", html)
+        self.assertIn('class="github-link"', html)
+        self.assertIn('class="github-icon"', html)
+        self.assertIn('target="_blank"', html)
+        self.assertIn('rel="noopener noreferrer"', html)
+
     def test_status_badges_degraded_state(self):
         for status in ("Expired", "Missing"):
             with self.subTest(status=status):
