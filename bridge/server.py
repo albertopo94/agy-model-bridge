@@ -24,6 +24,8 @@ from bridge.transform import (
     openai_to_cloudcode_request,
     parse_cloudcode_sse_event,
     extract_text_delta,
+    extract_thought_delta,
+    extract_function_calls,
     extract_finish_reason,
     extract_usage,
     build_openai_chunk,
@@ -295,7 +297,7 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
     def _handle_anthropic_messages(self, payload: dict[str, Any]) -> None:
         try:
             stream = bool(payload.get("stream", False))
-            model, contents, system_instruction, generation_config = anthropic_to_cloudcode_request(
+            model, contents, system_instruction, generation_config, tools = anthropic_to_cloudcode_request(
                 payload, self.project
             )
         except ValueError as ve:
@@ -309,6 +311,8 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
         extra_kwargs: dict[str, Any] = {}
         if generation_config is not None:
             extra_kwargs["generation_config"] = generation_config
+        if tools is not None:
+            extra_kwargs["tools"] = tools
 
         if stream:
             try:
@@ -377,6 +381,8 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
             )
             try:
                 collected_text: list[str] = []
+                collected_thoughts: list[str] = []
+                collected_tool_calls: list[dict[str, Any]] = []
                 last_usage = None
                 last_finish = "end_turn"
                 event_count = 0
@@ -398,21 +404,39 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                                 last_finish = fr
                             else:
                                 last_finish = "end_turn"
+                        thought = extract_thought_delta(parsed)
+                        if thought:
+                            collected_thoughts.append(thought)
                         delta = extract_text_delta(parsed)
                         if delta:
                             collected_text.append(delta)
+                        fc_list = extract_function_calls(parsed)
+                        if fc_list:
+                            collected_tool_calls.extend(fc_list)
 
-                if event_count == 0 and not collected_text and not has_finish_reason:
+                if (
+                    event_count == 0
+                    and not collected_text
+                    and not collected_thoughts
+                    and not collected_tool_calls
+                    and not has_finish_reason
+                ):
                     raise BridgeError("Stream ended without data")
+
+                if collected_tool_calls:
+                    last_finish = "tool_use"
 
                 msg_id = f"msg_{uuid.uuid4().hex[:16]}"
                 full_text = "".join(collected_text)
+                full_thought = "".join(collected_thoughts) if collected_thoughts else None
                 resp_obj = build_anthropic_message(
                     message_id=msg_id,
                     model=model,
                     text=full_text,
                     usage=last_usage,
                     stop_reason=last_finish,
+                    thinking=full_thought,
+                    tool_calls=collected_tool_calls if collected_tool_calls else None,
                 )
                 try:
                     self._send_json(200, resp_obj)

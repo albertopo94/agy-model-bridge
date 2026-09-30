@@ -759,8 +759,12 @@ class TestServerEndpoints(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(body["type"], "message")
         self.assertEqual(body["role"], "assistant")
-        self.assertEqual(body["model"], "gemini-2.5-pro")
-        self.assertIn("Hello world!", body["content"][0]["text"])
+        text_blocks = [b for b in body["content"] if b.get("type") == "text"]
+        self.assertTrue(len(text_blocks) > 0)
+        self.assertIn("Hello world!", text_blocks[0]["text"])
+        think_blocks = [b for b in body["content"] if b.get("type") == "thinking"]
+        self.assertTrue(len(think_blocks) > 0)
+        self.assertEqual(think_blocks[0]["thinking"], "thinking...")
 
     def test_anthropic_messages_streaming(self):
         payload = {

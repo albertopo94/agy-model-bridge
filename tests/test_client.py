@@ -161,6 +161,30 @@ class TestCloudCodeClient(unittest.TestCase):
         self.assertEqual(payload["request"]["generationConfig"], gen_cfg)
 
     @patch("urllib.request.urlopen")
+    def test_stream_generate_content_with_tools_and_tool_config(self, mock_urlopen):
+        mock_resp = MagicMock()
+        mock_resp.__iter__.return_value = iter([b'data: {"candidates": []}\n'])
+        mock_urlopen.return_value = mock_resp
+
+        tools_val = [{"functionDeclarations": [{"name": "test_tool", "parameters": {}}]}]
+        tool_cfg_val = {"functionCallingConfig": {"mode": "AUTO"}}
+        lines = list(
+            self.client.stream_generate_content(
+                project="aicode-consumers",
+                model="gemini-2.5-pro",
+                contents=[{"role": "user", "parts": [{"text": "Hi"}]}],
+                tools=tools_val,
+                tool_config=tool_cfg_val,
+            )
+        )
+        self.assertEqual(len(lines), 1)
+
+        req = mock_urlopen.call_args[0][0]
+        payload = json.loads(req.data.decode("utf-8"))
+        self.assertEqual(payload["request"]["tools"], tools_val)
+        self.assertEqual(payload["request"]["toolConfig"], tool_cfg_val)
+
+    @patch("urllib.request.urlopen")
     def test_stream_generate_content_closes_response_on_exit(self, mock_urlopen):
         mock_resp = MagicMock()
         mock_resp.__iter__.return_value = iter([b"data: 1\n", b"data: 2\n"])

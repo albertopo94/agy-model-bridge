@@ -4,6 +4,8 @@ from bridge.transform import (
     openai_to_cloudcode_request,
     parse_cloudcode_sse_event,
     extract_text_delta,
+    extract_thought_delta,
+    extract_function_calls,
     extract_finish_reason,
     extract_usage,
     build_openai_chunk,
@@ -592,6 +594,206 @@ class TestExtractTextDeltaAndFiltering(unittest.TestCase):
         self.assertIsNone(
             extract_text_delta({"candidates": [{"content": {"parts": []}}]})
         )
+
+
+class TestExtractThoughtDelta(unittest.TestCase):
+    def test_extract_standard_thought_delta(self):
+        event = {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [{"thought": True, "text": "Analyzing the codebase..."}],
+                        "role": "model",
+                    }
+                }
+            ]
+        }
+        delta = extract_thought_delta(event)
+        self.assertEqual(delta, "Analyzing the codebase...")
+
+    def test_non_thought_parts_return_none(self):
+        event = {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [{"text": "Hello world!"}],
+                        "role": "model",
+                    }
+                }
+            ]
+        }
+        self.assertIsNone(extract_thought_delta(event))
+
+    def test_extract_thought_delta_with_response_wrapper(self):
+        event = {
+            "response": {
+                "candidates": [
+                    {
+                        "content": {
+                            "parts": [{"thought": True, "text": "Wrapped thought"}],
+                            "role": "model",
+                        }
+                    }
+                ]
+            }
+        }
+        self.assertEqual(extract_thought_delta(event), "Wrapped thought")
+
+    def test_multiple_thought_parts_concatenated(self):
+        event = {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {"thought": True, "text": "Part 1. "},
+                            {"thought": True, "text": "Part 2."},
+                        ],
+                        "role": "model",
+                    }
+                }
+            ]
+        }
+        self.assertEqual(extract_thought_delta(event), "Part 1. Part 2.")
+
+    def test_mixed_parts_extracts_only_thoughts(self):
+        event = {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {"thought": True, "text": "Deep thinking"},
+                            {"text": "Answer"},
+                        ],
+                        "role": "model",
+                    }
+                }
+            ]
+        }
+        self.assertEqual(extract_thought_delta(event), "Deep thinking")
+
+    def test_empty_candidates_or_parts_returns_none(self):
+        self.assertIsNone(extract_thought_delta({}))
+        self.assertIsNone(extract_thought_delta({"candidates": []}))
+        self.assertIsNone(extract_thought_delta({"candidates": [{}]}))
+        self.assertIsNone(extract_thought_delta(None))
+
+
+class TestExtractFunctionCalls(unittest.TestCase):
+    def test_extract_standard_function_call(self):
+        event = {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {
+                                "functionCall": {
+                                    "name": "run_command",
+                                    "args": {"command": "ls -la"},
+                                }
+                            }
+                        ],
+                        "role": "model",
+                    }
+                }
+            ]
+        }
+        calls = extract_function_calls(event)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["name"], "run_command")
+        self.assertEqual(calls[0]["args"], {"command": "ls -la"})
+        self.assertTrue(calls[0]["id"].startswith("toolu_"))
+
+    def test_extract_function_call_preserving_explicit_id(self):
+        event = {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {
+                                "functionCall": {
+                                    "id": "call_custom_999",
+                                    "name": "read_file",
+                                    "args": {"path": "test.txt"},
+                                }
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+        calls = extract_function_calls(event)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["id"], "call_custom_999")
+        self.assertEqual(calls[0]["name"], "read_file")
+        self.assertEqual(calls[0]["args"], {"path": "test.txt"})
+
+    def test_extract_function_call_with_json_string_args(self):
+        event = {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {
+                                "functionCall": {
+                                    "name": "parse_data",
+                                    "args": '{"key": "value"}',
+                                }
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+        calls = extract_function_calls(event)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["name"], "parse_data")
+        self.assertEqual(calls[0]["args"], {"key": "value"})
+
+    def test_extract_multiple_function_calls(self):
+        event = {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {"functionCall": {"name": "tool_a", "args": {}}},
+                            {"functionCall": {"name": "tool_b", "args": {"x": 1}}},
+                        ]
+                    }
+                }
+            ]
+        }
+        calls = extract_function_calls(event)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0]["name"], "tool_a")
+        self.assertEqual(calls[1]["name"], "tool_b")
+        self.assertEqual(calls[1]["args"], {"x": 1})
+
+    def test_extract_function_calls_with_response_wrapper(self):
+        event = {
+            "response": {
+                "candidates": [
+                    {
+                        "content": {
+                            "parts": [
+                                {"functionCall": {"name": "wrapped_tool", "args": {}}}
+                            ]
+                        }
+                    }
+                ]
+            }
+        }
+        calls = extract_function_calls(event)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["name"], "wrapped_tool")
+
+    def test_no_function_calls_returns_empty_list(self):
+        self.assertEqual(extract_function_calls({}), [])
+        self.assertEqual(extract_function_calls({"candidates": []}), [])
+        self.assertEqual(
+            extract_function_calls({"candidates": [{"content": {"parts": [{"text": "no tools"}]}}]}),
+            [],
+        )
+        self.assertEqual(extract_function_calls(None), [])
 
 
 class TestExtractFinishReasonAndUsage(unittest.TestCase):

@@ -3,6 +3,7 @@
 import json
 import time
 from typing import Any
+import uuid
 
 from bridge.client import (
     AuthenticationError,
@@ -407,6 +408,100 @@ def extract_text_delta(event_dict: dict[str, Any]) -> str | None:
     if clean_texts:
         return "".join(clean_texts)
     return None
+
+
+def extract_thought_delta(event_dict: dict[str, Any]) -> str | None:
+    """Extracts text chunk from candidates[0].parts where thought is True."""
+    if not isinstance(event_dict, dict):
+        return None
+    resp_obj = (
+        event_dict.get("response")
+        if isinstance(event_dict.get("response"), dict)
+        else event_dict
+    )
+    candidates = resp_obj.get("candidates")
+    if not candidates or not isinstance(candidates, list) or len(candidates) == 0:
+        return None
+
+    candidate = candidates[0]
+    if not isinstance(candidate, dict):
+        return None
+
+    content = candidate.get("content")
+    if isinstance(content, dict):
+        parts = content.get("parts")
+    else:
+        parts = candidate.get("parts")
+
+    if not parts or not isinstance(parts, list):
+        return None
+
+    thought_texts: list[str] = []
+    for part in parts:
+        if not isinstance(part, dict):
+            continue
+        if part.get("thought") is True:
+            text = part.get("text")
+            if text:
+                thought_texts.append(text)
+
+    if thought_texts:
+        return "".join(thought_texts)
+    return None
+
+
+def extract_function_calls(event_dict: dict[str, Any]) -> list[dict[str, Any]]:
+    """Extracts function calls from candidates[0].parts.
+
+    Returns a list of dicts: [{"id": ..., "name": ..., "args": ...}]
+    """
+    if not isinstance(event_dict, dict):
+        return []
+    resp_obj = (
+        event_dict.get("response")
+        if isinstance(event_dict.get("response"), dict)
+        else event_dict
+    )
+    candidates = resp_obj.get("candidates")
+    if not candidates or not isinstance(candidates, list) or len(candidates) == 0:
+        return []
+
+    candidate = candidates[0]
+    if not isinstance(candidate, dict):
+        return []
+
+    content = candidate.get("content")
+    if isinstance(content, dict):
+        parts = content.get("parts")
+    else:
+        parts = candidate.get("parts")
+
+    if not parts or not isinstance(parts, list):
+        return []
+
+    calls: list[dict[str, Any]] = []
+    for part in parts:
+        if not isinstance(part, dict):
+            continue
+        fc = part.get("functionCall")
+        if fc and isinstance(fc, dict):
+            name = fc.get("name")
+            if name:
+                call_id = fc.get("id") or part.get("id") or f"toolu_{uuid.uuid4().hex[:16]}"
+                args = fc.get("args")
+                if args is None:
+                    args = {}
+                elif isinstance(args, str):
+                    try:
+                        args = json.loads(args)
+                    except Exception:
+                        pass
+                calls.append({
+                    "id": call_id,
+                    "name": name,
+                    "args": args,
+                })
+    return calls
 
 
 def check_sse_error(event_dict: dict[str, Any]) -> None:

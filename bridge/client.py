@@ -218,6 +218,8 @@ class CloudCodeClient:
         contents: list[dict[str, Any]],
         system_instruction: dict[str, Any] | None = None,
         generation_config: dict[str, Any] | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_config: dict[str, Any] | None = None,
     ) -> Iterator[str]:
         """Streams Server-Sent Events from streamGenerateContent endpoint."""
         req_body: dict[str, Any] = {"contents": contents}
@@ -225,6 +227,10 @@ class CloudCodeClient:
             req_body["systemInstruction"] = system_instruction
         if generation_config is not None:
             req_body["generationConfig"] = generation_config
+        if tools is not None:
+            req_body["tools"] = tools
+        if tool_config is not None:
+            req_body["toolConfig"] = tool_config
 
         payload: dict[str, Any] = {
             "project": project,

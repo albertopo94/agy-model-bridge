@@ -12,7 +12,9 @@ from bridge.transform import (
     build_thinking_config,
     check_sse_error,
     extract_finish_reason,
+    extract_function_calls,
     extract_text_delta,
+    extract_thought_delta,
     extract_usage,
     parse_cloudcode_sse_event,
     resolve_model_and_thinking,
@@ -21,7 +23,13 @@ from bridge.transform import (
 
 def anthropic_to_cloudcode_request(
     payload: dict[str, Any], project: str
-) -> tuple[str, list[dict[str, Any]], dict[str, Any] | None, dict[str, Any] | None]:
+) -> tuple[
+    str,
+    list[dict[str, Any]],
+    dict[str, Any] | None,
+    dict[str, Any] | None,
+    list[dict[str, Any]] | None,
+]:
     """Validates Anthropic Messages payload and transforms to Cloud Code parameters.
 
     Args:
@@ -29,7 +37,7 @@ def anthropic_to_cloudcode_request(
         project: Upstream project identifier.
 
     Returns:
-        tuple of (model_name, contents_list, system_instruction_dict_or_None, generation_config_dict_or_None)
+        tuple of (model_name, contents_list, system_instruction_dict_or_None, generation_config_dict_or_None, tools_list_or_None)
 
     Raises:
         ValueError: If model or messages are missing or invalid.
@@ -169,18 +177,46 @@ def anthropic_to_cloudcode_request(
 
     generation_config: dict[str, Any] | None = gen_config if gen_config else None
 
-    return model, contents, system_instruction, generation_config
+    # Tools translation
+    raw_tools = payload.get("tools")
+    tools: list[dict[str, Any]] | None = None
+    if isinstance(raw_tools, list) and len(raw_tools) > 0:
+        function_declarations: list[dict[str, Any]] = []
+        for t in raw_tools:
+            if not isinstance(t, dict):
+                continue
+            name = t.get("name")
+            if not name:
+                continue
+            decl: dict[str, Any] = {"name": name}
+            desc = t.get("description")
+            if desc is not None:
+                decl["description"] = desc
+            params = t.get("input_schema") or t.get("parameters")
+            if params is not None and isinstance(params, dict):
+                decl["parameters"] = params
+            else:
+                decl["parameters"] = {"type": "object", "properties": {}}
+            function_declarations.append(decl)
+        if function_declarations:
+            tools = [{"functionDeclarations": function_declarations}]
+
+    return model, contents, system_instruction, generation_config, tools
 
 
 def build_anthropic_message(
     message_id: str,
     model: str,
-    text: str,
+    text: str = "",
     usage: dict[str, int] | None = None,
     stop_reason: str = "end_turn",
+    thinking: str | None = None,
+    tool_calls: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Constructs non-streaming Anthropic Messages response dictionary."""
-    if stop_reason in ("length", "max_tokens"):
+    if tool_calls and stop_reason == "end_turn":
+        stop_reason = "tool_use"
+    elif stop_reason in ("length", "max_tokens"):
         stop_reason = "max_tokens"
     elif stop_reason in ("stop_sequence", "tool_use"):
         pass
@@ -193,12 +229,45 @@ def build_anthropic_message(
         input_tokens = int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
         output_tokens = int(usage.get("completion_tokens") or usage.get("output_tokens") or 0)
 
+    content: list[dict[str, Any]] = []
+    if thinking:
+        content.append({
+            "type": "thinking",
+            "thinking": thinking,
+            "signature": "",
+        })
+    if text:
+        content.append({
+            "type": "text",
+            "text": text,
+        })
+    if tool_calls:
+        for call in tool_calls:
+            call_id = call.get("id") or f"toolu_{uuid.uuid4().hex[:16]}"
+            call_name = call.get("name", "")
+            call_args = call.get("args")
+            if call_args is None:
+                call_args = {}
+            elif isinstance(call_args, str):
+                try:
+                    call_args = json.loads(call_args)
+                except Exception:
+                    pass
+            content.append({
+                "type": "tool_use",
+                "id": call_id,
+                "name": call_name,
+                "input": call_args,
+            })
+    if not content:
+        content.append({"type": "text", "text": ""})
+
     return {
         "id": message_id,
         "type": "message",
         "role": "assistant",
         "model": model,
-        "content": [{"type": "text", "text": text}],
+        "content": content,
         "stop_reason": stop_reason,
         "stop_sequence": None,
         "usage": {
@@ -213,7 +282,16 @@ def build_anthropic_sse_events(lines_gen: Iterator[str], model: str) -> Iterator
     message_id = f"msg_{uuid.uuid4().hex[:16]}"
     input_tokens = 0
     output_tokens = 0
-    stop_reason = "end_turn"
+    upstream_stop_reason: str | None = None
+    next_index = 0
+
+    thinking_block_open = False
+    thinking_block_index = -1
+
+    text_block_open = False
+    text_block_index = -1
+
+    accumulated_tool_calls: list[dict[str, Any]] = []
 
     # 1. message_start
     start_payload = {
@@ -234,15 +312,7 @@ def build_anthropic_sse_events(lines_gen: Iterator[str], model: str) -> Iterator
     }
     yield f"event: message_start\ndata: {json.dumps(start_payload)}\n\n"
 
-    # 2. content_block_start
-    block_start_payload = {
-        "type": "content_block_start",
-        "index": 0,
-        "content_block": {"type": "text", "text": ""},
-    }
-    yield f"event: content_block_start\ndata: {json.dumps(block_start_payload)}\n\n"
-
-    # 3. Stream content deltas
+    # 2. Stream content deltas
     for line in lines_gen:
         parsed = parse_cloudcode_sse_event(line)
         if parsed is None:
@@ -258,36 +328,118 @@ def build_anthropic_sse_events(lines_gen: Iterator[str], model: str) -> Iterator
         finish_reason = extract_finish_reason(parsed)
         if finish_reason:
             if finish_reason in ("length", "max_tokens"):
-                stop_reason = "max_tokens"
+                upstream_stop_reason = "max_tokens"
             elif finish_reason in ("stop_sequence", "tool_use"):
-                stop_reason = finish_reason
+                upstream_stop_reason = finish_reason
             else:
-                stop_reason = "end_turn"
+                upstream_stop_reason = "end_turn"
 
-        delta_text = extract_text_delta(parsed)
-        if delta_text:
-            delta_payload = {
-                "type": "content_block_delta",
-                "index": 0,
-                "delta": {
-                    "type": "text_delta",
-                    "text": delta_text,
-                },
-            }
-            yield f"event: content_block_delta\ndata: {json.dumps(delta_payload)}\n\n"
+        thought_delta = extract_thought_delta(parsed)
+        if thought_delta:
+            if text_block_open:
+                yield f"event: content_block_stop\ndata: {json.dumps({'type': 'content_block_stop', 'index': text_block_index})}\n\n"
+                text_block_open = False
 
-    # 4. content_block_stop
-    block_stop_payload = {
-        "type": "content_block_stop",
-        "index": 0,
-    }
-    yield f"event: content_block_stop\ndata: {json.dumps(block_stop_payload)}\n\n"
+            if not thinking_block_open:
+                thinking_block_index = next_index
+                next_index += 1
+                yield f"event: content_block_start\ndata: {json.dumps({'type': 'content_block_start', 'index': thinking_block_index, 'content_block': {'type': 'thinking', 'thinking': ''}})}\n\n"
+                thinking_block_open = True
 
-    # 5. message_delta
+            yield f"event: content_block_delta\ndata: {json.dumps({'type': 'content_block_delta', 'index': thinking_block_index, 'delta': {'type': 'thinking_delta', 'thinking': thought_delta}})}\n\n"
+
+        text_delta = extract_text_delta(parsed)
+        if text_delta:
+            if thinking_block_open:
+                yield f"event: content_block_stop\ndata: {json.dumps({'type': 'content_block_stop', 'index': thinking_block_index})}\n\n"
+                thinking_block_open = False
+
+            if not text_block_open:
+                text_block_index = next_index
+                next_index += 1
+                yield f"event: content_block_start\ndata: {json.dumps({'type': 'content_block_start', 'index': text_block_index, 'content_block': {'type': 'text', 'text': ''}})}\n\n"
+                text_block_open = True
+
+            yield f"event: content_block_delta\ndata: {json.dumps({'type': 'content_block_delta', 'index': text_block_index, 'delta': {'type': 'text_delta', 'text': text_delta}})}\n\n"
+
+        fc_list = extract_function_calls(parsed)
+        if fc_list:
+            if thinking_block_open:
+                yield f"event: content_block_stop\ndata: {json.dumps({'type': 'content_block_stop', 'index': thinking_block_index})}\n\n"
+                thinking_block_open = False
+
+            if text_block_open:
+                yield f"event: content_block_stop\ndata: {json.dumps({'type': 'content_block_stop', 'index': text_block_index})}\n\n"
+                text_block_open = False
+
+            accumulated_tool_calls.extend(fc_list)
+
+    # 3. Close open blocks
+    if thinking_block_open:
+        yield f"event: content_block_stop\ndata: {json.dumps({'type': 'content_block_stop', 'index': thinking_block_index})}\n\n"
+        thinking_block_open = False
+
+    if text_block_open:
+        yield f"event: content_block_stop\ndata: {json.dumps({'type': 'content_block_stop', 'index': text_block_index})}\n\n"
+        text_block_open = False
+
+    # 4. Emit accumulated tool calls
+    for call in accumulated_tool_calls:
+        tool_index = next_index
+        next_index += 1
+        call_id = call.get("id") or f"toolu_{uuid.uuid4().hex[:16]}"
+        call_name = call.get("name", "")
+        call_args = call.get("args")
+        if call_args is None:
+            call_args = {}
+        json_args = json.dumps(call_args) if not isinstance(call_args, str) else call_args
+
+        block_start = {
+            "type": "content_block_start",
+            "index": tool_index,
+            "content_block": {
+                "type": "tool_use",
+                "id": call_id,
+                "name": call_name,
+                "input": {},
+            },
+        }
+        yield f"event: content_block_start\ndata: {json.dumps(block_start)}\n\n"
+
+        block_delta = {
+            "type": "content_block_delta",
+            "index": tool_index,
+            "delta": {
+                "type": "input_json_delta",
+                "partial_json": json_args,
+            },
+        }
+        yield f"event: content_block_delta\ndata: {json.dumps(block_delta)}\n\n"
+
+        block_stop = {
+            "type": "content_block_stop",
+            "index": tool_index,
+        }
+        yield f"event: content_block_stop\ndata: {json.dumps(block_stop)}\n\n"
+
+    # If stream produced no thinking, text, or tools, ensure at least one empty text block
+    if next_index == 0:
+        yield f"event: content_block_start\ndata: {json.dumps({'type': 'content_block_start', 'index': 0, 'content_block': {'type': 'text', 'text': ''}})}\n\n"
+        yield f"event: content_block_stop\ndata: {json.dumps({'type': 'content_block_stop', 'index': 0})}\n\n"
+
+    # 5. Determine stop_reason
+    if accumulated_tool_calls:
+        final_stop_reason = "tool_use"
+    elif upstream_stop_reason:
+        final_stop_reason = upstream_stop_reason
+    else:
+        final_stop_reason = "end_turn"
+
+    # 6. message_delta
     msg_delta_payload = {
         "type": "message_delta",
         "delta": {
-            "stop_reason": stop_reason,
+            "stop_reason": final_stop_reason,
             "stop_sequence": None,
         },
         "usage": {
@@ -297,7 +449,7 @@ def build_anthropic_sse_events(lines_gen: Iterator[str], model: str) -> Iterator
     }
     yield f"event: message_delta\ndata: {json.dumps(msg_delta_payload)}\n\n"
 
-    # 6. message_stop
+    # 7. message_stop
     msg_stop_payload = {"type": "message_stop"}
     yield f"event: message_stop\ndata: {json.dumps(msg_stop_payload)}\n\n"
 

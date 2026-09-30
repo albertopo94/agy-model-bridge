@@ -21,7 +21,7 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
             "max_tokens": 1024,
             "temperature": 0.5,
         }
-        model, contents, system_inst, gen_config = anthropic_to_cloudcode_request(
+        model, contents, system_inst, gen_config, tools = anthropic_to_cloudcode_request(
             payload, project="test-project"
         )
         self.assertEqual(model, "gemini-2.5-pro")
@@ -31,6 +31,49 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
         self.assertEqual(gen_config["maxOutputTokens"], 1024)
         self.assertEqual(gen_config["temperature"], 0.5)
         self.assertNotIn("thinkingConfig", gen_config)
+        self.assertIsNone(tools)
+
+    def test_request_translation_with_tools(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [{"role": "user", "content": "What is the weather?"}],
+            "tools": [
+                {
+                    "name": "get_weather",
+                    "description": "Get current weather in location",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {"location": {"type": "string"}},
+                        "required": ["location"],
+                    },
+                }
+            ],
+        }
+        _, _, _, _, tools = anthropic_to_cloudcode_request(payload, "test-project")
+        self.assertIsNotNone(tools)
+        self.assertEqual(len(tools), 1)
+        self.assertIn("functionDeclarations", tools[0])
+        decls = tools[0]["functionDeclarations"]
+        self.assertEqual(len(decls), 1)
+        self.assertEqual(decls[0]["name"], "get_weather")
+        self.assertEqual(decls[0]["description"], "Get current weather in location")
+        self.assertEqual(
+            decls[0]["parameters"],
+            {
+                "type": "object",
+                "properties": {"location": {"type": "string"}},
+                "required": ["location"],
+            },
+        )
+
+    def test_request_translation_empty_tools_returns_none(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [{"role": "user", "content": "Hi"}],
+            "tools": [],
+        }
+        _, _, _, _, tools = anthropic_to_cloudcode_request(payload, "test-project")
+        self.assertIsNone(tools)
 
     def test_system_as_content_blocks(self):
         payload = {
@@ -41,7 +84,7 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
             ],
             "messages": [{"role": "user", "content": "Hi"}],
         }
-        _, _, system_inst, _ = anthropic_to_cloudcode_request(payload, "test-project")
+        _, _, system_inst, _, _ = anthropic_to_cloudcode_request(payload, "test-project")
         self.assertEqual(
             system_inst,
             {"parts": [{"text": "First instruction.\nSecond instruction."}]},
@@ -55,7 +98,7 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
                 {"role": "user", "content": "hola"},
             ],
         }
-        _, contents, system_inst, _ = anthropic_to_cloudcode_request(payload, "test-project")
+        _, contents, system_inst, _, _ = anthropic_to_cloudcode_request(payload, "test-project")
         self.assertEqual(
             system_inst,
             {"parts": [{"text": "You are Claude Code assistant."}]},
@@ -70,7 +113,7 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
             "messages": [{"role": "user", "content": "hola"}],
             "thinking": {"type": "adaptive"},
         }
-        model, contents, _, gen_config = anthropic_to_cloudcode_request(payload, "test-project")
+        model, contents, _, gen_config, _ = anthropic_to_cloudcode_request(payload, "test-project")
         self.assertEqual(model, "gemini-3.8-flash-tiered")
         self.assertIsNotNone(gen_config)
         self.assertEqual(gen_config.get("thinkingConfig"), {"thinkingLevel": "HIGH"})
@@ -85,7 +128,7 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
                 {"role": "user", "content": "Thanks!"},
             ],
         }
-        _, contents, _, _ = anthropic_to_cloudcode_request(payload, "test-project")
+        _, contents, _, _, _ = anthropic_to_cloudcode_request(payload, "test-project")
         self.assertEqual(len(contents), 3)
         self.assertEqual(contents[0]["role"], "user")
         self.assertEqual(contents[0]["parts"], [{"text": "What is 2+2?"}])
@@ -118,7 +161,7 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
                 },
             ],
         }
-        _, contents, _, _ = anthropic_to_cloudcode_request(payload, "test-project")
+        _, contents, _, _, _ = anthropic_to_cloudcode_request(payload, "test-project")
         # Starts with assistant turn, so "Hello" user turn prepended
         self.assertEqual(contents[0]["role"], "user")
         self.assertEqual(contents[0]["parts"], [{"text": "Hello"}])
@@ -141,7 +184,7 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
             "model": "gemini-3.1-pro-high",
             "messages": [{"role": "user", "content": "Think deeply"}],
         }
-        _, _, _, gen_config_high = anthropic_to_cloudcode_request(payload_high, "test-project")
+        _, _, _, gen_config_high, _ = anthropic_to_cloudcode_request(payload_high, "test-project")
         self.assertEqual(gen_config_high["thinkingConfig"], {"thinkingLevel": "HIGH"})
 
         # Explicit client thinking override
@@ -150,26 +193,26 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
             "messages": [{"role": "user", "content": "Think deeply"}],
             "thinking": {"type": "enabled", "budget_tokens": 4096},
         }
-        _, _, _, gen_config_ovr = anthropic_to_cloudcode_request(payload_override, "test-project")
+        _, _, _, gen_config_ovr, _ = anthropic_to_cloudcode_request(payload_override, "test-project")
         self.assertEqual(gen_config_ovr["thinkingConfig"], {"thinkingBudget": 4096})
 
     def test_omitted_or_aliased_model_resolves_to_flash_tiered(self):
         # Omitted model defaults to flash-tiered with HIGH thinking
-        model, _, _, gen_config = anthropic_to_cloudcode_request(
+        model, _, _, gen_config, _ = anthropic_to_cloudcode_request(
             {"messages": [{"role": "user", "content": "Hi"}]}, "p"
         )
         self.assertEqual(model, "gemini-3.8-flash-tiered")
         self.assertEqual(gen_config.get("thinkingConfig"), {"thinkingLevel": "HIGH"})
 
         # "auto" model
-        model_auto, _, _, gen_config_auto = anthropic_to_cloudcode_request(
+        model_auto, _, _, gen_config_auto, _ = anthropic_to_cloudcode_request(
             {"model": "auto", "messages": [{"role": "user", "content": "Hi"}]}, "p"
         )
         self.assertEqual(model_auto, "gemini-3.8-flash-tiered")
         self.assertEqual(gen_config_auto.get("thinkingConfig"), {"thinkingLevel": "HIGH"})
 
         # "gemini-3.8-flash-high"
-        model_fh, _, _, gen_config_fh = anthropic_to_cloudcode_request(
+        model_fh, _, _, gen_config_fh, _ = anthropic_to_cloudcode_request(
             {"model": "gemini-3.8-flash-high", "messages": [{"role": "user", "content": "Hi"}]}, "p"
         )
         self.assertEqual(model_fh, "gemini-3.8-flash-tiered")
@@ -222,6 +265,44 @@ class TestAnthropicResponseBuilder(unittest.TestCase):
         )
         self.assertEqual(resp["stop_reason"], "end_turn")
 
+    def test_build_anthropic_message_with_thinking(self):
+        resp = build_anthropic_message(
+            message_id="msg_think",
+            model="gemini-2.5-pro",
+            text="Done",
+            thinking="Thinking carefully...",
+        )
+        self.assertEqual(len(resp["content"]), 2)
+        self.assertEqual(resp["content"][0], {"type": "thinking", "thinking": "Thinking carefully...", "signature": ""})
+        self.assertEqual(resp["content"][1], {"type": "text", "text": "Done"})
+
+    def test_build_anthropic_message_with_tool_use(self):
+        resp = build_anthropic_message(
+            message_id="msg_tool",
+            model="gemini-2.5-pro",
+            tool_calls=[{"id": "toolu_abc", "name": "run_command", "args": {"command": "ls"}}],
+        )
+        self.assertEqual(resp["stop_reason"], "tool_use")
+        self.assertEqual(len(resp["content"]), 1)
+        self.assertEqual(
+            resp["content"][0],
+            {"type": "tool_use", "id": "toolu_abc", "name": "run_command", "input": {"command": "ls"}},
+        )
+
+    def test_build_anthropic_message_combined_thinking_text_tool_use(self):
+        resp = build_anthropic_message(
+            message_id="msg_comb",
+            model="gemini-2.5-pro",
+            text="Running now",
+            thinking="I should run bash",
+            tool_calls=[{"id": "toolu_xyz", "name": "bash", "args": {"cmd": "pwd"}}],
+        )
+        self.assertEqual(resp["stop_reason"], "tool_use")
+        self.assertEqual(len(resp["content"]), 3)
+        self.assertEqual(resp["content"][0]["type"], "thinking")
+        self.assertEqual(resp["content"][1]["type"], "text")
+        self.assertEqual(resp["content"][2]["type"], "tool_use")
+
 
 class TestAnthropicSSEEvents(unittest.TestCase):
     def test_build_anthropic_sse_events_sequence(self):
@@ -250,10 +331,7 @@ class TestAnthropicSSEEvents(unittest.TestCase):
                 parsed_events.append((event_name, data_dict))
 
         event_names = [e[0] for e in parsed_events]
-        # Strict sequence: message_start, content_block_start, content_block_delta..., content_block_stop, message_delta, message_stop
         self.assertEqual(event_names[0], "message_start")
-        self.assertEqual(event_names[1], "content_block_start")
-        self.assertEqual(event_names[-3], "content_block_stop")
         self.assertEqual(event_names[-2], "message_delta")
         self.assertEqual(event_names[-1], "message_stop")
 
@@ -263,19 +341,132 @@ class TestAnthropicSSEEvents(unittest.TestCase):
         self.assertTrue(msg_start_data["message"]["id"].startswith("msg_"))
         self.assertEqual(msg_start_data["message"]["model"], "gemini-2.5-pro")
 
-        # Verify text deltas exclude thoughts
-        delta_texts = []
-        for name, data in parsed_events:
-            if name == "content_block_delta":
-                self.assertEqual(data["delta"]["type"], "text_delta")
-                delta_texts.append(data["delta"]["text"])
-        self.assertEqual("".join(delta_texts), "Hello world!")
+        # Verify block 0 is thinking
+        block_0_starts = [d for n, d in parsed_events if n == "content_block_start" and d["index"] == 0]
+        self.assertEqual(len(block_0_starts), 1)
+        self.assertEqual(block_0_starts[0]["content_block"]["type"], "thinking")
+
+        thinking_deltas = [d["delta"]["thinking"] for n, d in parsed_events if n == "content_block_delta" and d["index"] == 0]
+        self.assertEqual("".join(thinking_deltas), "hidden")
+
+        # Verify block 1 is text
+        block_1_starts = [d for n, d in parsed_events if n == "content_block_start" and d["index"] == 1]
+        self.assertEqual(len(block_1_starts), 1)
+        self.assertEqual(block_1_starts[0]["content_block"]["type"], "text")
+
+        text_deltas = [d["delta"]["text"] for n, d in parsed_events if n == "content_block_delta" and d["index"] == 1]
+        self.assertEqual("".join(text_deltas), "Hello world!")
 
         # Verify message_delta has stop_reason and usage
         msg_delta_data = parsed_events[-2][1]
         self.assertEqual(msg_delta_data["type"], "message_delta")
         self.assertEqual(msg_delta_data["delta"]["stop_reason"], "end_turn")
         self.assertEqual(msg_delta_data["usage"]["output_tokens"], 12)
+
+    def test_build_anthropic_sse_events_pure_text(self):
+        mock_upstream_lines = [
+            'data: {"candidates": [{"content": {"parts": [{"text": "Hello "}]}}]}\n',
+            'data: {"candidates": [{"content": {"parts": [{"text": "world!"}]}}], "usageMetadata": {"promptTokenCount": 5, "candidatesTokenCount": 10, "totalTokenCount": 15}}\n',
+            'data: {"candidates": [{"finishReason": "STOP"}]}\n',
+        ]
+        events = list(build_anthropic_sse_events(iter(mock_upstream_lines), "gemini-2.5-flash"))
+        parsed_events = []
+        for raw in events:
+            lines = [l for l in raw.strip().split("\n") if l]
+            event_name = None
+            data_dict = None
+            for l in lines:
+                if l.startswith("event:"):
+                    event_name = l[6:].strip()
+                elif l.startswith("data:"):
+                    data_dict = json.loads(l[5:].strip())
+            if event_name and data_dict:
+                parsed_events.append((event_name, data_dict))
+
+        # Block 0 starts immediately with text
+        self.assertEqual(parsed_events[1][0], "content_block_start")
+        self.assertEqual(parsed_events[1][1]["index"], 0)
+        self.assertEqual(parsed_events[1][1]["content_block"]["type"], "text")
+
+        # Deltas
+        deltas = [d["delta"]["text"] for n, d in parsed_events if n == "content_block_delta"]
+        self.assertEqual("".join(deltas), "Hello world!")
+
+        # Stop reason
+        msg_delta = [d for n, d in parsed_events if n == "message_delta"][0]
+        self.assertEqual(msg_delta["delta"]["stop_reason"], "end_turn")
+
+    def test_build_anthropic_sse_events_tool_use(self):
+        mock_upstream_lines = [
+            'data: {"candidates": [{"content": {"parts": [{"functionCall": {"id": "toolu_123", "name": "run_command", "args": {"command": "ls"}}}]}}]}\n',
+            'data: {"candidates": [{"finishReason": "STOP"}]}\n',
+        ]
+        events = list(build_anthropic_sse_events(iter(mock_upstream_lines), "gemini-2.5-pro"))
+        parsed_events = []
+        for raw in events:
+            lines = [l for l in raw.strip().split("\n") if l]
+            event_name = None
+            data_dict = None
+            for l in lines:
+                if l.startswith("event:"):
+                    event_name = l[6:].strip()
+                elif l.startswith("data:"):
+                    data_dict = json.loads(l[5:].strip())
+            if event_name and data_dict:
+                parsed_events.append((event_name, data_dict))
+
+        # Block 0 is tool_use
+        tool_starts = [d for n, d in parsed_events if n == "content_block_start"]
+        self.assertEqual(len(tool_starts), 1)
+        self.assertEqual(tool_starts[0]["content_block"]["type"], "tool_use")
+        self.assertEqual(tool_starts[0]["content_block"]["id"], "toolu_123")
+        self.assertEqual(tool_starts[0]["content_block"]["name"], "run_command")
+
+        # Delta is input_json_delta
+        tool_deltas = [d for n, d in parsed_events if n == "content_block_delta"]
+        self.assertEqual(len(tool_deltas), 1)
+        self.assertEqual(tool_deltas[0]["delta"]["type"], "input_json_delta")
+        self.assertEqual(json.loads(tool_deltas[0]["delta"]["partial_json"]), {"command": "ls"})
+
+        # Stop reason is tool_use
+        msg_delta = [d for n, d in parsed_events if n == "message_delta"][0]
+        self.assertEqual(msg_delta["delta"]["stop_reason"], "tool_use")
+
+    def test_build_anthropic_sse_events_combined_thinking_text_tools(self):
+        mock_upstream_lines = [
+            'data: {"candidates": [{"content": {"parts": [{"thought": true, "text": "Need to list directory"}]}}]}\n',
+            'data: {"candidates": [{"content": {"parts": [{"text": "Executing ls"}]}}]}\n',
+            'data: {"candidates": [{"content": {"parts": [{"functionCall": {"id": "toolu_456", "name": "bash", "args": {"cmd": "ls"}}}]}}]}\n',
+            'data: {"candidates": [{"finishReason": "STOP"}]}\n',
+        ]
+        events = list(build_anthropic_sse_events(iter(mock_upstream_lines), "gemini-2.5-pro"))
+        parsed_events = []
+        for raw in events:
+            lines = [l for l in raw.strip().split("\n") if l]
+            event_name = None
+            data_dict = None
+            for l in lines:
+                if l.startswith("event:"):
+                    event_name = l[6:].strip()
+                elif l.startswith("data:"):
+                    data_dict = json.loads(l[5:].strip())
+            if event_name and data_dict:
+                parsed_events.append((event_name, data_dict))
+
+        # Check block starts
+        starts = [d for n, d in parsed_events if n == "content_block_start"]
+        self.assertEqual(len(starts), 3)
+        self.assertEqual(starts[0]["index"], 0)
+        self.assertEqual(starts[0]["content_block"]["type"], "thinking")
+        self.assertEqual(starts[1]["index"], 1)
+        self.assertEqual(starts[1]["content_block"]["type"], "text")
+        self.assertEqual(starts[2]["index"], 2)
+        self.assertEqual(starts[2]["content_block"]["type"], "tool_use")
+        self.assertEqual(starts[2]["content_block"]["name"], "bash")
+
+        # Check stop reason
+        msg_delta = [d for n, d in parsed_events if n == "message_delta"][0]
+        self.assertEqual(msg_delta["delta"]["stop_reason"], "tool_use")
 
     def test_sse_events_content_filter_maps_to_end_turn(self):
         mock_upstream_lines = [
