@@ -15,6 +15,88 @@ from bridge.client import (
     RateLimitError,
 )
 
+UNSUPPORTED_SCHEMA_KEYS = frozenset({
+    "$schema",
+    "$id",
+    "$ref",
+    "$defs",
+    "$comment",
+    "definitions",
+    "exclusiveMinimum",
+    "exclusiveMaximum",
+    "patternProperties",
+    "unevaluatedProperties",
+    "unevaluatedItems",
+    "if",
+    "then",
+    "else",
+    "contentEncoding",
+    "contentMediaType",
+    "contentSchema",
+    "dependentRequired",
+    "dependentSchemas",
+    "dependencies",
+    "additionalProperties",
+    "examples",
+    "const",
+    "readOnly",
+    "writeOnly",
+    "uniqueItems",
+    "not",
+    "allOf",
+    "oneOf",
+    "prefixItems",
+    "contains",
+    "minContains",
+    "maxContains",
+    "propertyNames",
+    "multipleOf",
+    "deprecated",
+})
+
+
+def sanitize_schema_for_gemini(schema: Any, inside_properties_map: bool = False, root: Any = None) -> Any:
+    """Recursively sanitizes a JSON schema to ensure compatibility with Google Gemini OpenAPI 3.0 protobuf schema."""
+    if root is None:
+        root = schema
+
+    if isinstance(schema, list):
+        return [sanitize_schema_for_gemini(item, False, root) for item in schema]
+
+    if not isinstance(schema, dict):
+        return schema
+
+    out: dict[str, Any] = {}
+    nullable = False
+
+    for key, value in schema.items():
+        if inside_properties_map:
+            out[key] = sanitize_schema_for_gemini(value, False, root)
+            continue
+
+        if key.lower().startswith("x-"):
+            continue
+
+        if key in UNSUPPORTED_SCHEMA_KEYS:
+            continue
+
+        if key == "type" and isinstance(value, list):
+            names = [str(x) for x in value if isinstance(x, str)]
+            is_null = any(n.lower() == "null" for n in names)
+            concrete = next((n for n in names if n.lower() != "null"), None)
+            if concrete:
+                out["type"] = concrete
+            if is_null:
+                nullable = True
+            continue
+
+        out[key] = sanitize_schema_for_gemini(value, key == "properties", root)
+
+    if nullable:
+        out["nullable"] = True
+
+    return out
+
 
 def build_thinking_config(model: str, payload: dict[str, Any]) -> dict[str, Any] | None:
     """Builds Cloud Code thinkingConfig based on model heuristics and payload overrides.

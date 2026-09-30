@@ -66,6 +66,48 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
             },
         )
 
+    def test_request_translation_sanitizes_tool_schema(self):
+        payload = {
+            "model": "gemini-3.8-flash-high",
+            "messages": [{"role": "user", "content": "Run command"}],
+            "tools": [
+                {
+                    "name": "Bash",
+                    "description": "Execute bash command",
+                    "input_schema": {
+                        "$schema": "http://json-schema.org/draft-07/schema#",
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "command": {
+                                "type": "string",
+                                "description": "The command to run",
+                            },
+                            "env": {
+                                "type": "object",
+                                "propertyNames": {"pattern": "^[A-Z_]+$"},
+                                "anyOf": [
+                                    {"const": "prod", "type": "string"},
+                                    {"type": "string", "propertyNames": {"pattern": "^[a-z]+$"}},
+                                ],
+                            },
+                        },
+                        "required": ["command"],
+                    },
+                }
+            ],
+        }
+        _, _, _, _, tools = anthropic_to_cloudcode_request(payload, "test-project")
+        self.assertIsNotNone(tools)
+        decls = tools[0]["functionDeclarations"]
+        params = decls[0]["parameters"]
+        self.assertNotIn("$schema", params)
+        self.assertNotIn("additionalProperties", params)
+        self.assertNotIn("propertyNames", params["properties"]["env"])
+        self.assertNotIn("const", params["properties"]["env"]["anyOf"][0])
+        self.assertNotIn("propertyNames", params["properties"]["env"]["anyOf"][1])
+
+
     def test_request_translation_empty_tools_returns_none(self):
         payload = {
             "model": "gemini-2.5-pro",

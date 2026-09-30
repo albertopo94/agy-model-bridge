@@ -15,6 +15,7 @@ from bridge.transform import (
     check_sse_error,
     build_thinking_config,
     resolve_model_and_thinking,
+    sanitize_schema_for_gemini,
 )
 from bridge.client import (
     BridgeError,
@@ -1351,6 +1352,71 @@ class TestResolveModelAndThinking(unittest.TestCase):
         self.assertEqual(thinking2, {"thinkingLevel": "HIGH"})
 
 
+class TestSanitizeSchemaForGemini(unittest.TestCase):
+    def test_strips_unsupported_json_schema_root_keywords(self):
+        schema = {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "$id": "http://example.com/schema",
+            "title": "BashTool",
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "command": {"type": "string", "description": "Command"},
+            },
+            "required": ["command"],
+        }
+        sanitized = sanitize_schema_for_gemini(schema)
+        self.assertNotIn("$schema", sanitized)
+        self.assertNotIn("$id", sanitized)
+        self.assertNotIn("additionalProperties", sanitized)
+        self.assertEqual(sanitized["type"], "object")
+        self.assertEqual(sanitized["required"], ["command"])
+        self.assertEqual(sanitized["properties"]["command"], {"type": "string", "description": "Command"})
+
+    def test_strips_nested_property_names_and_const(self):
+        schema = {
+            "type": "object",
+            "properties": {
+                "env": {
+                    "type": "object",
+                    "propertyNames": {"pattern": "^[A-Z_]+$"},
+                    "anyOf": [
+                        {"const": "val", "type": "string"},
+                        {"type": "string", "propertyNames": {"pattern": "^[a-z]+$"}},
+                    ],
+                }
+            },
+        }
+        sanitized = sanitize_schema_for_gemini(schema)
+        env_prop = sanitized["properties"]["env"]
+        self.assertNotIn("propertyNames", env_prop)
+        self.assertNotIn("const", env_prop["anyOf"][0])
+        self.assertNotIn("propertyNames", env_prop["anyOf"][1])
+
+    def test_collapses_type_union_with_null(self):
+        schema = {
+            "type": ["string", "null"],
+            "description": "Optional string",
+        }
+        sanitized = sanitize_schema_for_gemini(schema)
+        self.assertEqual(sanitized["type"], "string")
+        self.assertTrue(sanitized["nullable"])
+
+    def test_preserves_custom_property_names_under_properties_map(self):
+        # A property named "const" or "not" inside the properties map must not be deleted
+        schema = {
+            "type": "object",
+            "properties": {
+                "const": {"type": "string"},
+                "not": {"type": "boolean"},
+            },
+        }
+        sanitized = sanitize_schema_for_gemini(schema)
+        self.assertIn("const", sanitized["properties"])
+        self.assertIn("not", sanitized["properties"])
+
+
 if __name__ == "__main__":
     unittest.main()
+
 

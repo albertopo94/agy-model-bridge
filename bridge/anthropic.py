@@ -18,6 +18,7 @@ from bridge.transform import (
     extract_usage,
     parse_cloudcode_sse_event,
     resolve_model_and_thinking,
+    sanitize_schema_for_gemini,
 )
 
 
@@ -194,7 +195,7 @@ def anthropic_to_cloudcode_request(
                 decl["description"] = desc
             params = t.get("input_schema") or t.get("parameters")
             if params is not None and isinstance(params, dict):
-                decl["parameters"] = params
+                decl["parameters"] = sanitize_schema_for_gemini(params)
             else:
                 decl["parameters"] = {"type": "object", "properties": {}}
             function_declarations.append(decl)
