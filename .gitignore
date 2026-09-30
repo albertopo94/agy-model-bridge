@@ -1,8 +1,15 @@
-# Local AI runtime state
+# Local AI runtime state & agent memory
 .atl/
 .codegraph/
 .engram/
+openspec/
+
+# Internal notes
+*criterio*.md
+
+# Python artifacts
 __pycache__/
 *.py[cod]
 *.egg-info/
 .DS_Store
+
