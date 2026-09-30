@@ -127,6 +127,35 @@ class ConfigPath(type(Path())):
     backup_path: Path | None = None
 
 
+DEFAULT_CLAUDE_MODEL_PICKER_OPTIONS: list[dict[str, str]] = [
+    {
+        "model": "gemini-3.8-flash-high",
+        "label": "Gemini 3.8 Flash · high (1M)",
+        "behavesAs": "claude-3-7-sonnet",
+    },
+    {
+        "model": "gemini-3.7-flash-tiered",
+        "label": "Gemini 3.7 Flash",
+        "behavesAs": "claude-3-7-sonnet",
+    },
+    {
+        "model": "gemini-3.6-flash-tiered",
+        "label": "Gemini 3.6 Flash",
+        "behavesAs": "claude-3-7-sonnet",
+    },
+    {
+        "model": "claude-sonnet-4-6",
+        "label": "Claude Sonnet 4.6 (Cloud Code)",
+        "behavesAs": "claude-3-7-sonnet",
+    },
+    {
+        "model": "claude-opus-4-6-thinking",
+        "label": "Claude Opus 4.6 Thinking (Cloud Code)",
+        "behavesAs": "claude-3-7-sonnet",
+    },
+]
+
+
 def setup_claude(
     settings_path: Path | None = None,
     base_url: str | None = None,
@@ -137,8 +166,8 @@ def setup_claude(
     """Configures Claude Code settings.json with agy-model-bridge environment variables.
 
     Creates a timestamped backup if settings.json exists, surgically merges bridge
-    keys into 'env', preserves user keys and top-level settings, and writes atomically
-    with mode 0o600.
+    keys into 'env', sets curated modelPicker options for /model, preserves user keys
+    and top-level settings, and writes atomically with mode 0o600.
 
     Args:
         settings_path: Path to settings.json (defaults to ~/.claude/settings.json).
@@ -189,6 +218,22 @@ def setup_claude(
     env_dict["ANTHROPIC_DEFAULT_OPUS_MODEL"] = model
     env_dict["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = "1048576"
     env_dict["CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"] = "1"
+
+    model_options = [dict(opt) for opt in DEFAULT_CLAUDE_MODEL_PICKER_OPTIONS]
+    if not any(opt.get("model") == model for opt in model_options):
+        model_options.insert(
+            0,
+            {
+                "model": model,
+                "label": f"Custom ({model})",
+                "behavesAs": "claude-3-7-sonnet",
+            },
+        )
+
+    settings["modelPicker"] = {
+        "options": model_options,
+        "replaceBuiltInOptions": False,
+    }
 
     formatted_json = json.dumps(settings, indent=2) + "\n"
     atomic_write_file(target, formatted_json, mode=0o600)

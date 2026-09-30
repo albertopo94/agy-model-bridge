@@ -243,6 +243,22 @@ class TestSetupClaude(unittest.TestCase):
         self.assertEqual(env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"], "1048576")
         self.assertEqual(env["CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"], "1")
 
+        # modelPicker options for Claude Code /model menu
+        self.assertIn("modelPicker", data)
+        model_options = data["modelPicker"].get("options", [])
+        option_models = [opt["model"] for opt in model_options]
+        self.assertEqual(
+            option_models,
+            [
+                "gemini-3.8-flash-high",
+                "gemini-3.7-flash-tiered",
+                "gemini-3.6-flash-tiered",
+                "claude-sonnet-4-6",
+                "claude-opus-4-6-thinking",
+            ],
+        )
+        self.assertFalse(data["modelPicker"].get("replaceBuiltInOptions", True))
+
         # Indentation should be 2 spaces
         raw_text = target.read_text(encoding="utf-8")
         self.assertIn('  "env": {', raw_text)
@@ -251,6 +267,16 @@ class TestSetupClaude(unittest.TestCase):
         # No backup should have been created for a fresh file
         backups = list(self.dir_path.glob("settings.json.backup-*"))
         self.assertEqual(len(backups), 0)
+
+    def test_model_picker_with_custom_model_prepends_option(self):
+        target = self.dir_path / "settings.json"
+        setup_claude(settings_path=target, model="my-special-model")
+
+        data = json.loads(target.read_text(encoding="utf-8"))
+        options = data.get("modelPicker", {}).get("options", [])
+        self.assertEqual(options[0]["model"], "my-special-model")
+        self.assertIn("my-special-model", options[0]["label"])
+        self.assertEqual(options[1]["model"], "gemini-3.8-flash-high")
 
     def test_surgical_merge_preserves_existing_keys_and_creates_backup(self):
         target = self.dir_path / "settings.json"
