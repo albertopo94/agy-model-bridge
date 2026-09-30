@@ -13,10 +13,14 @@ def main(argv: list[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
 
+    prog_base = Path(sys.argv[0]).name if sys.argv and sys.argv[0] else "agy-bridge"
+    if prog_base.endswith(".py"):
+        prog_base = "python3 -m bridge"
+
     # Dispatch client setup subcommands
     if argv and argv[0] == "setup-claude":
         parser = argparse.ArgumentParser(
-            prog="python3 -m bridge setup-claude",
+            prog=f"{prog_base} setup-claude",
             description="Configure Claude Code settings.json for agy-model-bridge gateway.",
         )
         parser.add_argument(
@@ -66,7 +70,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if argv and argv[0] == "setup-codex":
         parser = argparse.ArgumentParser(
-            prog="python3 -m bridge setup-codex",
+            prog=f"{prog_base} setup-codex",
             description="Configure Codex CLI config.toml for agy-model-bridge gateway.",
         )
         parser.add_argument(
@@ -107,7 +111,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Fallback to daemon server runner
     parser = argparse.ArgumentParser(
-        prog="python3 -m bridge",
+        prog=prog_base,
         description="Antigravity Model Bridge - Local AI Gateway",
     )
     parser.add_argument(
