@@ -106,6 +106,8 @@ CLIENT_CARDS: list[dict[str, Any]] = [
         "id": "claude",
         "title": "Claude Code",
         "desc": "Anthropic Messages API CLI (Base URL without /v1)",
+        "desc_en": "Anthropic Messages API CLI (Base URL without /v1)",
+        "desc_es": "CLI con Anthropic Messages API (URL base sin /v1)",
         "icon_svg": CLAUDE_ICON_SVG,
         "auto_cmd": lambda addr: (
             f"python3 -m bridge setup-claude --port {addr.rsplit(':', 1)[1]}"
@@ -120,6 +122,8 @@ CLIENT_CARDS: list[dict[str, Any]] = [
         "id": "codex",
         "title": "Codex CLI",
         "desc": "OpenAI Responses API CLI (wire_api = 'responses')",
+        "desc_en": "OpenAI Responses API CLI (wire_api = 'responses')",
+        "desc_es": "CLI con OpenAI Responses API (wire_api = 'responses')",
         "auto_cmd": lambda addr: (
             f"python3 -m bridge setup-codex --port {addr.rsplit(':', 1)[1]}"
             if ":" in addr and addr.rsplit(":", 1)[1].isdigit() and addr.rsplit(":", 1)[1] != "24980"
@@ -133,6 +137,8 @@ CLIENT_CARDS: list[dict[str, Any]] = [
         "id": "hermes",
         "title": "Hermes Agent",
         "desc": "NousResearch Hermes Agent CLI (Base URL with /v1)",
+        "desc_en": "NousResearch Hermes Agent CLI (Base URL with /v1)",
+        "desc_es": "CLI de Hermes Agent de NousResearch (URL base con /v1)",
         "auto_cmd": lambda addr: f'export OPENAI_BASE_URL="http://{addr}/v1" OPENAI_API_KEY="local-bridge" && hermes',
         "manual_snippet": lambda addr: f'export OPENAI_BASE_URL="http://{addr}/v1"\nexport OPENAI_API_KEY="local-bridge"',
         "docs_url": "https://hermes-agent.nousresearch.com",
@@ -141,6 +147,8 @@ CLIENT_CARDS: list[dict[str, Any]] = [
         "id": "freellmapi",
         "title": "FreeLLMAPI",
         "desc": "Custom Provider & Aider integration (Base URL with /v1)",
+        "desc_en": "Custom Provider & Aider integration (Base URL with /v1)",
+        "desc_es": "Integración para Custom Provider y Aider (URL base con /v1)",
         "auto_cmd": lambda addr: f"http://{addr}/v1",
         "manual_snippet": lambda addr: f'BASE_URL=http://{addr}/v1\nAPI_KEY=local-bridge',
         "docs_url": "https://github.com/tashfeenahmed/freellmapi",
@@ -153,8 +161,14 @@ def render_dashboard(
     port: int,
     auth_status: dict[str, Any],
     models_count: int,
+    lang: str = "en",
 ) -> str:
     """Renders the self-contained dark-mode HTML dashboard for the local AI gateway."""
+    is_es = bool(lang and str(lang).strip().lower().startswith("es"))
+    html_lang = "es" if is_es else "en"
+    active_en = " active" if not is_es else ""
+    active_es = " active" if is_es else ""
+
     safe_host = html.escape(str(host))
     safe_port = html.escape(str(port))
     address = f"{safe_host}:{safe_port}"
@@ -166,15 +180,34 @@ def render_dashboard(
     email = auth_status.get("email")
     message = auth_status.get("message", "")
 
+    subtitle_text = (
+        "Gateway multiprotocolo sin dependencias para Google Cloud Code Assist"
+        if is_es
+        else "Zero-dependency multi-protocol gateway to Google Cloud Code Assist"
+    )
+
     if status_name == "Valid":
         auth_badge_class = "badge-success"
-        auth_label = f"Valid ({email})" if email else "Valid"
+        auth_word = "Válido" if is_es else "Valid"
+        auth_label = f"{auth_word} ({email})" if email else auth_word
     elif status_name == "Expired":
         auth_badge_class = "badge-warning"
-        auth_label = f"Expired — {message}"
+        auth_label = "Expirado — Abrí Antigravity para renovar" if is_es else f"Expired — {message}"
     else:
         auth_badge_class = "badge-danger"
-        auth_label = f"Missing — {message}"
+        auth_label = "Faltante — Abrí Antigravity para renovar" if is_es else f"Missing — {message}"
+
+    models_label = f"{models_count} Modelos Descubiertos" if is_es else f"{models_count} Models Discovered"
+    setup_auto_title = "Configuración automática" if is_es else "Automatic configuration"
+    setup_manual_title = "Conexión manual" if is_es else "Manual connection"
+    setup_restore_title = "Restaurar configuración" if is_es else "Restore configuration"
+    copy_btn_title = "Copiar" if is_es else "Copy"
+    docs_link_title = "Documentación ↗" if is_es else "Documentation ↗"
+    footer_text = (
+        "AGY Model Bridge &bull; Potenciado por Google Cloud Code Assist &bull; Gateway local"
+        if is_es
+        else "AGY Model Bridge &bull; Powered by Google Cloud Code Assist &bull; Local Gateway"
+    )
 
     cards_html_parts: list[str] = []
     for card in CLIENT_CARDS:
@@ -182,6 +215,7 @@ def render_dashboard(
         manual_text = card["manual_snippet"](snippet_address)
         card_id = card["id"]
         icon_html = card.get("icon_svg", "")
+        desc_text = card.get("desc_es" if is_es else "desc_en", card.get("desc", ""))
 
         restore_block_html = ""
         if "restore_cmd" in card:
@@ -189,8 +223,8 @@ def render_dashboard(
             restore_block_html = f"""
         <div class="setup-block">
           <div class="setup-header">
-            <span class="setup-title">Restaurar configuración</span>
-            <button class="copy-btn" onclick="copySnippet(this, '{card_id}-restore')">Copy</button>
+            <span class="setup-title" data-i18n="setup_restore">{setup_restore_title}</span>
+            <button class="copy-btn" data-i18n="btn_copy" onclick="copySnippet(this, '{card_id}-restore')">{copy_btn_title}</button>
           </div>
           <pre id="{card_id}-restore"><code>{html.escape(restore_text)}</code></pre>
         </div>"""
@@ -199,32 +233,32 @@ def render_dashboard(
         <div class="card-header">
           <h2 class="card-title">{icon_html}{html.escape(card["title"])}</h2>
         </div>
-        <p class="card-desc">{html.escape(card["desc"])}</p>
+        <p class="card-desc" data-i18n="desc_{card_id}">{html.escape(desc_text)}</p>
 
         <div class="setup-block">
           <div class="setup-header">
-            <span class="setup-title">Configuración automática</span>
-            <button class="copy-btn" onclick="copySnippet(this, '{card_id}-auto')">Copy</button>
+            <span class="setup-title" data-i18n="setup_auto">{setup_auto_title}</span>
+            <button class="copy-btn" data-i18n="btn_copy" onclick="copySnippet(this, '{card_id}-auto')">{copy_btn_title}</button>
           </div>
           <pre id="{card_id}-auto"><code>{html.escape(auto_text)}</code></pre>
         </div>
 
         <div class="setup-block">
           <div class="setup-header">
-            <span class="setup-title">Conexión manual</span>
-            <button class="copy-btn" onclick="copySnippet(this, '{card_id}-manual')">Copy</button>
+            <span class="setup-title" data-i18n="setup_manual">{setup_manual_title}</span>
+            <button class="copy-btn" data-i18n="btn_copy" onclick="copySnippet(this, '{card_id}-manual')">{copy_btn_title}</button>
           </div>
           <pre id="{card_id}-manual"><code>{html.escape(manual_text)}</code></pre>
         </div>{restore_block_html}
 
         <div class="card-footer">
-          <a href="{html.escape(card["docs_url"])}" target="_blank" rel="noopener noreferrer" class="docs-link">Documentación ↗</a>
+          <a href="{html.escape(card["docs_url"])}" target="_blank" rel="noopener noreferrer" class="docs-link" data-i18n="docs_link">{docs_link_title}</a>
         </div>
       </section>""")
     cards_html = "\n".join(cards_html_parts)
 
     return f"""<!DOCTYPE html>
-<html lang="en">
+<html lang="{html_lang}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -271,6 +305,45 @@ def render_dashboard(
       justify-content: space-between;
       align-items: flex-start;
       gap: 1.5rem;
+    }}
+    .header-actions {{
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      flex-shrink: 0;
+      margin-top: 0.15rem;
+    }}
+    .lang-switcher {{
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      padding: 0.25rem 0.5rem;
+    }}
+    .lang-btn {{
+      background: transparent;
+      border: none;
+      color: var(--text-secondary);
+      cursor: pointer;
+      padding: 0.2rem 0.45rem;
+      border-radius: 6px;
+      font-family: var(--font-sans);
+      font-size: 0.75rem;
+      font-weight: 600;
+      transition: color 0.15s ease, background 0.15s ease;
+    }}
+    .lang-btn:hover {{
+      color: var(--text-primary);
+    }}
+    .lang-btn.active {{
+      color: var(--accent);
+      background: rgba(56, 189, 248, 0.12);
+    }}
+    .lang-divider {{
+      color: var(--card-border);
+      font-size: 0.75rem;
     }}
     .github-link {{
       display: inline-flex;
@@ -474,16 +547,23 @@ def render_dashboard(
       <div class="header-top">
         <div>
           <h1>AGY Model Bridge</h1>
-          <p class="subtitle">Zero-dependency multi-protocol gateway to Google Cloud Code Assist</p>
+          <p class="subtitle" data-i18n="subtitle">{subtitle_text}</p>
         </div>
-        <a href="https://github.com/albertopo94/agy-model-bridge" target="_blank" rel="noopener noreferrer" class="github-link" title="GitHub Repository">
-          {GITHUB_ICON_SVG}
-        </a>
+        <div class="header-actions">
+          <div class="lang-switcher" role="group" aria-label="Language switcher">
+            <button type="button" id="btn-lang-en" class="lang-btn{active_en}" onclick="setLanguage('en')">EN</button>
+            <span class="lang-divider">|</span>
+            <button type="button" id="btn-lang-es" class="lang-btn{active_es}" onclick="setLanguage('es')">ES</button>
+          </div>
+          <a href="https://github.com/albertopo94/agy-model-bridge" target="_blank" rel="noopener noreferrer" class="github-link" title="GitHub Repository">
+            {GITHUB_ICON_SVG}
+          </a>
+        </div>
       </div>
       <div class="badges">
         <span class="badge">🌐 {address}</span>
-        <span class="badge {auth_badge_class}">🛡️ {html.escape(auth_label)}</span>
-        <span class="badge badge-models">⚡ {models_count} Models Discovered</span>
+        <span class="badge {auth_badge_class}" data-i18n="auth" data-status="{html.escape(status_name)}" data-email="{html.escape(email or '')}">🛡️ {html.escape(auth_label)}</span>
+        <span class="badge badge-models" data-i18n="models" data-count="{models_count}">⚡ {models_label}</span>
       </div>
     </header>
 
@@ -492,11 +572,115 @@ def render_dashboard(
     </main>
 
     <footer>
-      <p>AGY Model Bridge &bull; Powered by Google Cloud Code Assist &bull; Local Gateway</p>
+      <p data-i18n="footer">{footer_text}</p>
     </footer>
   </div>
 
   <script>
+    var currentLang = "{html_lang}";
+
+    var I18N = {{
+      en: {{
+        subtitle: "Zero-dependency multi-protocol gateway to Google Cloud Code Assist",
+        models: "{{count}} Models Discovered",
+        auth_valid: "Valid",
+        auth_expired: "Expired — Open Antigravity to refresh",
+        auth_missing: "Missing — Open Antigravity to refresh",
+        setup_auto: "Automatic configuration",
+        setup_manual: "Manual connection",
+        setup_restore: "Restore configuration",
+        docs_link: "Documentation ↗",
+        btn_copy: "Copy",
+        btn_copied: "Copied!",
+        desc_claude: "Anthropic Messages API CLI (Base URL without /v1)",
+        desc_codex: "OpenAI Responses API CLI (wire_api = 'responses')",
+        desc_hermes: "NousResearch Hermes Agent CLI (Base URL with /v1)",
+        desc_freellmapi: "Custom Provider & Aider integration (Base URL with /v1)",
+        footer: "AGY Model Bridge &bull; Powered by Google Cloud Code Assist &bull; Local Gateway"
+      }},
+      es: {{
+        subtitle: "Gateway multiprotocolo sin dependencias para Google Cloud Code Assist",
+        models: "{{count}} Modelos Descubiertos",
+        auth_valid: "V\u00e1lido",
+        auth_expired: "Expirado \u2014 Abr\u00ed Antigravity para renovar",
+        auth_missing: "Faltante \u2014 Abr\u00ed Antigravity para renovar",
+        setup_auto: "Configuraci\u00f3n autom\u00e1tica",
+        setup_manual: "Conexi\u00f3n manual",
+        setup_restore: "Restaurar configuraci\u00f3n",
+        docs_link: "Documentaci\u00f3n \u2197",
+        btn_copy: "Copiar",
+        btn_copied: "\u00a1Copiado!",
+        desc_claude: "CLI con Anthropic Messages API (URL base sin /v1)",
+        desc_codex: "CLI con OpenAI Responses API (wire_api = 'responses')",
+        desc_hermes: "CLI de Hermes Agent de NousResearch (URL base con /v1)",
+        desc_freellmapi: "Integraci\u00f3n para Custom Provider y Aider (URL base con /v1)",
+        footer: "AGY Model Bridge &bull; Potenciado por Google Cloud Code Assist &bull; Gateway local"
+      }}
+    }};
+
+    function setLanguage(lang) {{
+      var effectiveLang = (lang === "es") ? "es" : "en";
+      currentLang = effectiveLang;
+      try {{
+        localStorage.setItem("agy_lang", effectiveLang);
+      }} catch(e) {{}}
+      document.documentElement.lang = effectiveLang;
+
+      var btnEn = document.getElementById("btn-lang-en");
+      var btnEs = document.getElementById("btn-lang-es");
+      if (btnEn && btnEs) {{
+        if (effectiveLang === "es") {{
+          btnEs.classList.add("active");
+          btnEn.classList.remove("active");
+        }} else {{
+          btnEn.classList.add("active");
+          btnEs.classList.remove("active");
+        }}
+      }}
+
+      var dict = I18N[effectiveLang] || I18N.en;
+
+      var elements = document.querySelectorAll("[data-i18n]");
+      for (var i = 0; i < elements.length; i++) {{
+        var el = elements[i];
+        var key = el.getAttribute("data-i18n");
+        if (key === "models") {{
+          var count = el.getAttribute("data-count") || "0";
+          var tpl = dict.models || "{{count}} Models Discovered";
+          el.innerHTML = "⚡ " + tpl.replace("{{count}}", count);
+        }} else if (key === "auth") {{
+          var st = el.getAttribute("data-status");
+          var email = el.getAttribute("data-email");
+          var label = "";
+          if (st === "Valid") {{
+            var validText = dict.auth_valid || "Valid";
+            label = email ? (validText + " (" + email + ")") : validText;
+          }} else if (st === "Expired") {{
+            label = dict.auth_expired || "Expired — Open Antigravity to refresh";
+          }} else {{
+            label = dict.auth_missing || "Missing — Open Antigravity to refresh";
+          }}
+          el.innerHTML = "🛡️ " + label;
+        }} else if (key === "btn_copy") {{
+          if (!el.classList.contains("copied")) {{
+            el.innerText = dict.btn_copy || "Copy";
+          }}
+        }} else if (dict[key]) {{
+          el.innerHTML = dict[key];
+        }}
+      }}
+    }}
+
+    (function initLang() {{
+      var saved = null;
+      try {{
+        saved = localStorage.getItem("agy_lang");
+      }} catch(e) {{}}
+      if (saved === "es" || saved === "en") {{
+        setLanguage(saved);
+      }}
+    }})();
+
     function copySnippet(btn, elementId) {{
       var el = document.getElementById(elementId);
       if (!el) return;
@@ -525,22 +709,19 @@ def render_dashboard(
         if (successful) {{
           setCopied(btn);
         }}
-      }} catch (e) {{
-        // Selection remains active for manual copy
-      }}
+      }} catch (e) {{}}
     }}
 
     function setCopied(btn) {{
       if (btn.classList.contains("copied")) return;
-      var original = btn.innerText;
-      btn.innerText = "Copied!";
+      var dict = I18N[currentLang] || I18N.en;
+      btn.innerText = dict.btn_copied || "Copied!";
       btn.classList.add("copied");
       setTimeout(function() {{
-        btn.innerText = original;
+        btn.innerText = dict.btn_copy || "Copy";
         btn.classList.remove("copied");
       }}, 2000);
     }}
-
   </script>
 </body>
 </html>"""

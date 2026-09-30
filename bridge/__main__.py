@@ -11,6 +11,7 @@ from bridge.daemon import (
     start_daemon,
     stop_daemon,
 )
+from bridge.i18n import get_locale, is_yes, set_locale, t
 from bridge.server import run_server
 from bridge.setup import (
     describe_backup,
@@ -51,14 +52,20 @@ def _handle_restore_cli(
         action="store_true",
         help="Restore the most recent backup directly without interactive prompt",
     )
+    parser.add_argument(
+        "--lang",
+        type=str,
+        default=None,
+        help=t("cli_help_lang"),
+    )
     args = parser.parse_args(argv)
     target = args.path
 
     if args.backup is not None:
         try:
             restored = restore_backup(target, backup_path=args.backup)
-            print(f"Restaurada configuración desde: {restored.name}")
-            print(f"{client_name} listo en {target}")
+            print(t("restore_restored_from", name=restored.name))
+            print(t("restore_client_ready", client_name=client_name, target=target))
             return 0
         except FileNotFoundError as exc:
             print(f"Error: {exc}")
@@ -66,36 +73,36 @@ def _handle_restore_cli(
 
     backups = list_backups(target)
     if not backups:
-        print(f"No se encontraron backups para {client_name} en {target.parent}")
+        print(t("restore_no_backups", client_name=client_name, parent=target.parent))
         return 1
 
     if args.latest:
         restored = restore_backup(target, backup_path=backups[0])
-        print(f"Restaurada configuración desde: {restored.name}")
-        print(f"{client_name} listo en {target}")
+        print(t("restore_restored_from", name=restored.name))
+        print(t("restore_client_ready", client_name=client_name, target=target))
         return 0
 
-    print(f"\nBackups disponibles para {client_name}:")
+    print(t("restore_available_title", client_name=client_name))
     for i, b in enumerate(backups, 1):
         tag = describe_backup(b)
         tag_str = f"  [{tag}]"
         if i == 1:
-            print(f"  [{i}] {b.name}{tag_str}  <-- Anterior inmediata")
+            print(f"  [{i}] {b.name}{tag_str}  {t('restore_immediate_prev')}")
         else:
             print(f"  [{i}] {b.name}{tag_str}")
 
     count = len(backups)
     range_str = f"1-{count}" if count > 1 else "1"
-    prompt_str = f"\nIngrese un número ({range_str}), presione Enter para [1], o 'q' para cancelar: "
+    prompt_str = t("restore_prompt", range_str=range_str)
 
     try:
         choice = input(prompt_str).strip()
     except (EOFError, KeyboardInterrupt):
-        print("\nOperación cancelada.")
+        print("\n" + t("restore_cancelled"))
         return 0
 
     if choice.lower() in ("q", "quit", "cancel"):
-        print("Operación cancelada.")
+        print(t("restore_cancelled"))
         return 0
 
     if not choice:
@@ -103,12 +110,12 @@ def _handle_restore_cli(
     elif choice.isdigit() and 1 <= int(choice) <= count:
         selected_index = int(choice) - 1
     else:
-        print("Opción inválida.")
+        print(t("restore_invalid_choice"))
         return 1
 
     restored = restore_backup(target, backup_path=backups[selected_index])
-    print(f"\nRestaurada configuración desde: {restored.name}")
-    print(f"{client_name} listo en {target}")
+    print("\n" + t("restore_restored_from", name=restored.name))
+    print(t("restore_client_ready", client_name=client_name, target=target))
     return 0
 
 
@@ -116,6 +123,25 @@ def main(argv: list[str] | None = None) -> int:
     """Entry point for agy-model-bridge daemon and client setup subcommands."""
     if argv is None:
         argv = sys.argv[1:]
+
+    # Parse and extract optional --lang flag from argv
+    clean_argv: list[str] = []
+    lang_flag: str | None = None
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg == "--lang" and i + 1 < len(argv):
+            lang_flag = argv[i + 1]
+            i += 2
+        elif arg.startswith("--lang="):
+            lang_flag = arg.split("=", 1)[1]
+            i += 1
+        else:
+            clean_argv.append(arg)
+            i += 1
+    argv = clean_argv
+    if lang_flag is not None:
+        set_locale(lang_flag)
 
     prog_base = Path(sys.argv[0]).name if sys.argv and sys.argv[0] else "agy-bridge"
     if prog_base.endswith(".py"):
@@ -144,6 +170,12 @@ def main(argv: list[str] | None = None) -> int:
             default=None,
             help="Directory of the core repository to update",
         )
+        parser.add_argument(
+            "--lang",
+            type=str,
+            default=None,
+            help=t("cli_help_lang"),
+        )
         args = parser.parse_args(argv[1:])
 
         res = update_installation(
@@ -153,15 +185,15 @@ def main(argv: list[str] | None = None) -> int:
         status = res.get("status")
         ver = res.get("version", __version__)
         if status == "updated":
-            print(f"✔ Repositorio actualizado a la versión v{ver}.")
+            print(t("update_success", ver=ver))
             if res.get("restarted_daemon"):
-                print("✔ Servicio en segundo plano reiniciado con el nuevo código.")
+                print(t("update_daemon_restarted"))
             return 0
         elif status == "already_up_to_date":
-            print(f"✔ Ya tenés la versión más reciente (v{ver}).")
+            print(t("update_already_latest", ver=ver))
             return 0
         else:
-            print(f"Error: {res.get('message', 'Fallo al actualizar el repositorio')}")
+            print(f"Error: {res.get('message', t('update_failed'))}")
             return 1
 
     # Dispatch daemon lifecycle subcommands
@@ -175,6 +207,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.add_argument("--no-open", action="store_true", help="Do not open web browser automatically")
         parser.add_argument("--project", type=str, default=None, help="Google Cloud project ID override")
         parser.add_argument("--base-url", type=str, default=None, help="Upstream API base URL override")
+        parser.add_argument("--lang", type=str, default=None, help=t("cli_help_lang"))
         args = parser.parse_args(argv[1:])
 
         res = start_daemon(
@@ -186,19 +219,19 @@ def main(argv: list[str] | None = None) -> int:
         )
         st = res.get("status")
         if st == "started":
-            browser_hint = " (abierto en el navegador)" if res.get("opened_browser") else ""
-            print(f"✔ AGY Model Bridge corriendo en segundo plano (PID {res['pid']})")
-            print(f"➜ Dashboard: {res['url']}{browser_hint}")
-            print(f"➜ Para detener el servicio: {prog_base} stop")
+            browser_hint = t("daemon_browser_opened") if res.get("opened_browser") else ""
+            print(t("daemon_running_bg", pid=res['pid']))
+            print(t("daemon_dashboard_url", url=res['url'], browser_hint=browser_hint))
+            print(t("daemon_stop_hint", prog_base=prog_base))
             return 0
         elif st == "already_running":
             pid_str = f" (PID {res['pid']})" if res.get("pid") else ""
-            print(f"AGY Model Bridge ya está corriendo{pid_str}")
-            print(f"➜ Dashboard: {res['url']}")
-            print(f"➜ Para detener el servicio: {prog_base} stop")
+            print(t("daemon_already_running", pid_str=pid_str))
+            print(t("daemon_dashboard_url", url=res['url'], browser_hint=""))
+            print(t("daemon_stop_hint", prog_base=prog_base))
             return 0
         else:
-            print(f"Error: {res.get('error', 'Fallo al iniciar el daemon')}")
+            print(f"Error: {res.get('error', t('daemon_start_failed'))}")
             return 1
 
     if argv and argv[0] == "stop":
@@ -208,13 +241,14 @@ def main(argv: list[str] | None = None) -> int:
         )
         parser.add_argument("--port", type=int, default=24980, help="Gateway port (default: 24980)")
         parser.add_argument("--host", type=str, default="127.0.0.1", help="Host address (default: 127.0.0.1)")
+        parser.add_argument("--lang", type=str, default=None, help=t("cli_help_lang"))
         args = parser.parse_args(argv[1:])
         res = stop_daemon(port=args.port, host=args.host)
         if res.get("status") == "stopped":
             pid_str = f" (PID {res['pid']})" if res.get("pid") else ""
-            print(f"✔ AGY Model Bridge detenido{pid_str}")
+            print(t("daemon_stopped", pid_str=pid_str))
         else:
-            print("AGY Model Bridge no está corriendo.")
+            print(t("daemon_not_running"))
         return 0
 
     if argv and argv[0] == "status":
@@ -224,18 +258,19 @@ def main(argv: list[str] | None = None) -> int:
         )
         parser.add_argument("--port", type=int, default=24980, help="Gateway port (default: 24980)")
         parser.add_argument("--host", type=str, default="127.0.0.1", help="Host address (default: 127.0.0.1)")
+        parser.add_argument("--lang", type=str, default=None, help=t("cli_help_lang"))
         args = parser.parse_args(argv[1:])
         st = get_daemon_status(port=args.port, host=args.host)
         if st.get("running"):
             auth_st = st.get("auth", {}).get("status", "Valid")
             pid_str = f" (PID {st['pid']})" if st.get("pid") else ""
-            print(f"✔ Estado: Activo{pid_str}")
-            print(f"➜ Dirección: {st['url']}")
-            print(f"➜ Modelos disponibles: {st.get('models_count', 0)}")
-            print(f"➜ Autenticación Keychain: {auth_st}")
+            print(t("status_active", pid_str=pid_str))
+            print(t("status_address", url=st['url']))
+            print(t("status_models", count=st.get('models_count', 0)))
+            print(t("status_auth", status=auth_st))
         else:
-            print("Estado: Detenido")
-            print(f"Ejecute '{prog_base} start' para iniciar el servicio en segundo plano.")
+            print(t("status_stopped"))
+            print(t("status_start_hint", prog_base=prog_base))
         return 0
 
     if argv and argv[0] in ("dashboard", "open"):
@@ -245,12 +280,13 @@ def main(argv: list[str] | None = None) -> int:
         )
         parser.add_argument("--port", type=int, default=24980, help="Gateway port (default: 24980)")
         parser.add_argument("--host", type=str, default="127.0.0.1", help="Host address (default: 127.0.0.1)")
+        parser.add_argument("--lang", type=str, default=None, help=t("cli_help_lang"))
         args = parser.parse_args(argv[1:])
         st = get_daemon_status(port=args.port, host=args.host)
         if not st.get("running"):
-            print(f"Aviso: El bridge no parece estar activo en {st['url']}")
-            print(f"Ejecute '{prog_base} start' para iniciarlo.")
-        print(f"Abriendo dashboard en {st['url']}...")
+            print(t("dashboard_not_active", url=st['url']))
+            print(t("status_start_hint", prog_base=prog_base))
+        print(t("dashboard_opening", url=st['url']))
         open_dashboard(port=args.port, host=args.host)
         return 0
 
@@ -294,6 +330,7 @@ def main(argv: list[str] | None = None) -> int:
             default=None,
             help="Path to Claude settings.json (default: ~/.claude/settings.json)",
         )
+        parser.add_argument("--lang", type=str, default=None, help=t("cli_help_lang"))
         args = parser.parse_args(argv[1:])
         target = setup_claude(
             settings_path=args.path,
@@ -303,10 +340,10 @@ def main(argv: list[str] | None = None) -> int:
             auth_token=args.auth_token,
         )
         if getattr(target, "backup_path", None):
-            print(f"Backup: {target.backup_path}")
-        print(f"Claude Code configured successfully at {target}\n")
-        print("Claude Code will read this configuration automatically.")
-        print("Run 'claude' to start coding with Gemini 3.8 Flash · high (1M context).")
+            print(t("setup_backup_label", path=target.backup_path))
+        print(t("setup_claude_success", target=target))
+        print(t("setup_claude_auto_read"))
+        print(t("setup_claude_run_hint"))
         return 0
 
     if argv and argv[0] == "setup-codex":
@@ -340,6 +377,7 @@ def main(argv: list[str] | None = None) -> int:
             default=None,
             help="Path to Codex config.toml (default: ~/.codex/config.toml)",
         )
+        parser.add_argument("--lang", type=str, default=None, help=t("cli_help_lang"))
         args = parser.parse_args(argv[1:])
         target = setup_codex(
             config_path=args.path,
@@ -348,10 +386,10 @@ def main(argv: list[str] | None = None) -> int:
             model=args.model,
         )
         if getattr(target, "backup_path", None):
-            print(f"Backup: {target.backup_path}")
-        print(f"Codex CLI configured successfully at {target}\n")
-        print("Codex CLI will read this configuration automatically.")
-        print("Run 'codex' to start coding with Gemini 3.8 Flash · high (1M context).")
+            print(t("setup_backup_label", path=target.backup_path))
+        print(t("setup_codex_success", target=target))
+        print(t("setup_codex_auto_read"))
+        print(t("setup_codex_run_hint"))
         return 0
 
     if argv and argv[0] == "restore-claude":
@@ -391,17 +429,20 @@ def main(argv: list[str] | None = None) -> int:
             action="store_true",
             help="Do not restore Claude/Codex configurations",
         )
+        parser.add_argument("--lang", type=str, default=None, help=t("cli_help_lang"))
         args = parser.parse_args(argv[1:])
 
         if not args.yes:
+            choice_label = "s/N" if get_locale() == "es" else "y/N"
+            prompt_str = t("uninstall_confirm_prompt", choice=choice_label)
             try:
-                confirm = input("¿Estás seguro de que deseas desinstalar AGY Model Bridge? [s/N]: ").strip().lower()
+                confirm = input(prompt_str).strip()
             except (EOFError, KeyboardInterrupt):
-                print("\nOperación de desinstalación cancelada.")
+                print("\n" + t("uninstall_cancelled"))
                 return 0
 
-            if confirm not in ("s", "si", "sí", "y", "yes"):
-                print("Operación de desinstalación cancelada.")
+            if not is_yes(confirm):
+                print(t("uninstall_cancelled"))
                 return 0
 
         res = uninstall(
@@ -409,25 +450,25 @@ def main(argv: list[str] | None = None) -> int:
             purge_backups=args.purge,
         )
 
-        print("✔ AGY Model Bridge desinstalado correctamente.")
+        print(t("uninstall_success"))
         if res.get("daemon_stopped"):
-            print("  - Servicio en segundo plano detenido.")
+            print(t("uninstall_daemon_stopped"))
         if res.get("binaries_removed"):
-            print(f"  - Binarios eliminados: {', '.join(res['binaries_removed'])}")
+            print(t("uninstall_binaries_removed", binaries=", ".join(res["binaries_removed"])))
         if res.get("daemon_dir_removed"):
-            print("  - Directorio ~/.agy-bridge eliminado.")
+            print(t("uninstall_daemon_dir_removed"))
         if res.get("claude_restored"):
-            print("  - Configuración de Claude Code restaurada.")
+            print(t("uninstall_claude_restored"))
         if res.get("codex_restored"):
-            print("  - Configuración de Codex CLI restaurada.")
+            print(t("uninstall_codex_restored"))
         if res.get("backups_purged"):
-            print("  - Historial de backups purgado.")
+            print(t("uninstall_backups_purged"))
         return 0
 
     # Fallback to daemon server runner
     parser = argparse.ArgumentParser(
         prog=prog_base,
-        description="Antigravity Model Bridge - Local AI Gateway",
+        description=t("cli_description"),
     )
     parser.add_argument(
         "-v",
@@ -439,25 +480,31 @@ def main(argv: list[str] | None = None) -> int:
         "--host",
         type=str,
         default="127.0.0.1",
-        help="Host address to bind server (default: 127.0.0.1)",
+        help=t("cli_help_host"),
     )
     parser.add_argument(
         "--port",
         type=int,
         default=24980,
-        help="Port number to bind server (default: 24980)",
+        help=t("cli_help_port"),
     )
     parser.add_argument(
         "--project",
         type=str,
         default=None,
-        help="Google Cloud project ID override",
+        help=t("cli_help_project"),
     )
     parser.add_argument(
         "--base-url",
         type=str,
         default=None,
-        help="Upstream Google Cloud Code Assist base URL override",
+        help=t("cli_help_base_url"),
+    )
+    parser.add_argument(
+        "--lang",
+        type=str,
+        default=None,
+        help=t("cli_help_lang"),
     )
     args = parser.parse_args(argv)
     run_server(host=args.host, port=args.port, project=args.project, base_url=args.base_url)

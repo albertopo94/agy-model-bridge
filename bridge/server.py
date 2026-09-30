@@ -35,6 +35,7 @@ from bridge.transform import (
     check_sse_error,
 )
 from bridge.dashboard import render_dashboard, get_status_data
+from bridge.i18n import parse_accept_language
 from bridge.anthropic import (
     anthropic_to_cloudcode_request,
     build_anthropic_message,
@@ -127,11 +128,20 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
         self._send_json(code, err_payload)
 
     def do_GET(self) -> None:
-        path = urllib.parse.urlparse(self.path).path.rstrip("/")
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path.rstrip("/")
         if not path:
             path = "/"
 
         if path == "/":
+            query_params = urllib.parse.parse_qs(parsed.query)
+            if "lang" in query_params and query_params["lang"]:
+                param_lang = query_params["lang"][0].strip().lower()
+                client_lang = "es" if param_lang.startswith("es") else "en"
+            else:
+                accept_lang = self.headers.get("Accept-Language", "")
+                client_lang = parse_accept_language(accept_lang)
+
             host = self.server.server_address[0] if hasattr(self.server, "server_address") else "127.0.0.1"
             port = self.server.server_address[1] if hasattr(self.server, "server_address") else 24980
             status_data = get_status_data(self.client, self.project, host, port)
@@ -140,6 +150,7 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                 port=status_data["port"],
                 auth_status=status_data["auth"],
                 models_count=status_data["models_count"],
+                lang=client_lang,
             )
             encoded = html_content.encode("utf-8")
             self.send_response(200)

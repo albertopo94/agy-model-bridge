@@ -637,7 +637,10 @@ class TestCLIRestore(unittest.TestCase):
         with unittest.mock.patch("sys.stdout", out):
             exit_code = main(["restore-claude", "--path", str(target)])
         self.assertEqual(exit_code, 1)
-        self.assertIn("No se encontraron backups", out.getvalue())
+        self.assertTrue(
+            "No se encontraron backups" in out.getvalue()
+            or "No backups found" in out.getvalue()
+        )
 
     def test_cli_restore_claude_with_latest_flag(self):
         import io
@@ -658,7 +661,10 @@ class TestCLIRestore(unittest.TestCase):
             exit_code = main(["restore-claude", "--path", str(target), "--latest"])
         self.assertEqual(exit_code, 0)
         self.assertEqual(target.read_text(encoding="utf-8"), '{"env": "immediate_previous"}')
-        self.assertIn("Restaurada configuración desde:", out.getvalue())
+        self.assertTrue(
+            "Restaurada configuración desde:" in out.getvalue()
+            or "Restored configuration from:" in out.getvalue()
+        )
         self.assertIn("Claude Code", out.getvalue())
 
     def test_cli_restore_claude_with_backup_flag(self):
@@ -694,12 +700,15 @@ class TestCLIRestore(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(target.read_text(encoding="utf-8"), '{"env": "immediate_previous"}')
         output = out.getvalue()
-        self.assertIn("[1] settings.json.backup-2026-09-30T12-00-00  [Anthropic Original]  <-- Anterior inmediata", output)
+        self.assertTrue(
+            "[1] settings.json.backup-2026-09-30T12-00-00  [Anthropic Original]  <-- Anterior inmediata" in output
+            or "[1] settings.json.backup-2026-09-30T12-00-00  [Anthropic Original]  <-- Immediate previous" in output
+        )
         self.assertIn("[2] settings.json.backup-2026-09-20T10-00-00  [Anthropic Original]", output)
         prompt_arg = mock_input.call_args[0][0]
-        self.assertIn("Ingrese un número (1-2)", prompt_arg)
-        self.assertIn("presione Enter para [1]", prompt_arg)
-        self.assertIn("'q' para cancelar", prompt_arg)
+        self.assertTrue("1-2" in prompt_arg)
+        self.assertTrue("Enter" in prompt_arg)
+        self.assertTrue("'q'" in prompt_arg)
 
     def test_cli_restore_claude_interactive_displays_distinct_provenance_tags(self):
         import io
@@ -735,7 +744,10 @@ class TestCLIRestore(unittest.TestCase):
                 main(["restore-claude", "--path", str(target)])
 
         output = out.getvalue()
-        self.assertIn("[1] settings.json.backup-2026-09-30T12-00-00  [AGY Bridge]  <-- Anterior inmediata", output)
+        self.assertTrue(
+            "[1] settings.json.backup-2026-09-30T12-00-00  [AGY Bridge]  <-- Anterior inmediata" in output
+            or "[1] settings.json.backup-2026-09-30T12-00-00  [AGY Bridge]  <-- Immediate previous" in output
+        )
         self.assertIn("[2] settings.json.backup-2026-09-25T10-00-00  [FreeLLMAPI]", output)
         self.assertIn("[3] settings.json.backup-2026-09-20T10-00-00  [Anthropic Original]", output)
 
@@ -754,7 +766,10 @@ class TestCLIRestore(unittest.TestCase):
                 exit_code = main(["restore-claude", "--path", str(target)])
         self.assertEqual(exit_code, 0)
         self.assertEqual(target.read_text(encoding="utf-8"), '{"env": "bridge"}')
-        self.assertIn("Operación cancelada", out.getvalue())
+        self.assertTrue(
+            "Operación cancelada" in out.getvalue()
+            or "Operation cancelled" in out.getvalue()
+        )
 
     def test_cli_restore_claude_interactive_selects_specific_number(self):
         import io
@@ -817,7 +832,10 @@ class TestCLIRestore(unittest.TestCase):
                 main(["restore-codex", "--path", str(target)])
 
         output = out.getvalue()
-        self.assertIn("[1] config.toml.backup-2026-09-30T12-00-00  [AGY Bridge]  <-- Anterior inmediata", output)
+        self.assertTrue(
+            "[1] config.toml.backup-2026-09-30T12-00-00  [AGY Bridge]  <-- Anterior inmediata" in output
+            or "[1] config.toml.backup-2026-09-30T12-00-00  [AGY Bridge]  <-- Immediate previous" in output
+        )
         self.assertIn("[2] config.toml.backup-2026-09-25T10-00-00  [FreeLLMAPI]", output)
         self.assertIn("[3] config.toml.backup-2026-09-20T10-00-00  [Codex Original]", output)
 
@@ -1056,7 +1074,10 @@ class TestCLIUninstall(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         mock_uninstall.assert_not_called()
-        self.assertIn("cancelada", out.getvalue().lower())
+        self.assertTrue(
+            "cancelada" in out.getvalue().lower()
+            or "cancelled" in out.getvalue().lower()
+        )
 
     @unittest.mock.patch("bridge.__main__.uninstall")
     def test_cli_uninstall_interactive_confirm_on_s(self, mock_uninstall):
@@ -1079,7 +1100,10 @@ class TestCLIUninstall(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         mock_uninstall.assert_called_once_with(restore_configs=True, purge_backups=False)
-        self.assertIn("desinstalado correctamente", out.getvalue())
+        self.assertTrue(
+            "desinstalado correctamente" in out.getvalue().lower()
+            or "uninstalled successfully" in out.getvalue().lower()
+        )
 
     @unittest.mock.patch("bridge.__main__.uninstall")
     def test_cli_uninstall_yes_flag_skips_prompt(self, mock_uninstall):
@@ -1186,7 +1210,7 @@ class TestUpdateInstallation(unittest.TestCase):
 
         self.assertEqual(result["status"], "updated")
         self.assertTrue(result["restarted_daemon"])
-        self.assertEqual(result["version"], "0.3.0")
+        self.assertEqual(result["version"], "0.4.0")
         mock_run.assert_called_once_with(
             ["git", "-C", str(self.repo_dir), "pull", "--ff-only"],
             capture_output=True,
@@ -1312,7 +1336,7 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             "status": "updated",
             "message": "Repository updated successfully.",
             "restarted_daemon": True,
-            "version": "0.3.0",
+            "version": "0.4.0",
         }
 
         f = io.StringIO()
@@ -1321,8 +1345,8 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         output = f.getvalue()
-        self.assertIn("0.3.0", output)
-        self.assertIn("actualizado", output.lower())
+        self.assertIn("0.4.0", output)
+        self.assertTrue("actualizado" in output.lower() or "updated" in output.lower())
         mock_update.assert_called_once_with(core_dir=None, restart_daemon_if_running=True)
 
     @unittest.mock.patch("bridge.__main__.update_installation")
@@ -1335,7 +1359,7 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             "status": "already_up_to_date",
             "message": "Already up to date.",
             "restarted_daemon": False,
-            "version": "0.3.0",
+            "version": "0.4.0",
         }
 
         f = io.StringIO()
@@ -1344,7 +1368,7 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         output = f.getvalue()
-        self.assertIn("0.3.0", output)
+        self.assertIn("0.4.0", output)
         mock_update.assert_called_once_with(core_dir=None, restart_daemon_if_running=True)
 
     @unittest.mock.patch("bridge.__main__.update_installation")
@@ -1357,7 +1381,7 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             "status": "error",
             "message": "git pull failed due to conflict",
             "restarted_daemon": False,
-            "version": "0.3.0",
+            "version": "0.4.0",
         }
 
         f = io.StringIO()
@@ -1378,7 +1402,7 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main([flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.3.0")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.4.0")
 
     def test_cli_subcommand_version_flags(self):
         from bridge.__main__ import main
@@ -1390,19 +1414,19 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main(["update", flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.3.0")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.4.0")
 
     def test_version_unification(self):
         import bridge
         from pathlib import Path
         import re
 
-        self.assertEqual(bridge.__version__, "0.3.0")
+        self.assertEqual(bridge.__version__, "0.4.0")
         pyproject_path = Path(__file__).resolve().parent.parent / "pyproject.toml"
         pyproject_text = pyproject_path.read_text(encoding="utf-8")
         match = re.search(r'version\s*=\s*"([^"]+)"', pyproject_text)
         self.assertIsNotNone(match)
-        self.assertEqual(match.group(1), "0.3.0")
+        self.assertEqual(match.group(1), "0.4.0")
 
 
 if __name__ == "__main__":

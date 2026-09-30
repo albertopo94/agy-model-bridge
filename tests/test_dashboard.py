@@ -357,6 +357,50 @@ class TestDashboardStatusData(unittest.TestCase):
         self.assertAlmostEqual(entry[0], now - 45.0, delta=2.0)
 
 
+class TestDashboardBilingual(unittest.TestCase):
+    def test_render_dashboard_language_switcher_markup(self):
+        auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
+        html = render_dashboard("127.0.0.1", 24980, auth_status, models_count=10, lang="en")
+
+        # Language switcher buttons
+        self.assertIn("lang-switcher", html)
+        self.assertIn('id="btn-lang-en"', html)
+        self.assertIn('id="btn-lang-es"', html)
+        self.assertIn("setLanguage('en')", html)
+        self.assertIn("setLanguage('es')", html)
+
+    def test_render_dashboard_english(self):
+        auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
+        html = render_dashboard("127.0.0.1", 24980, auth_status, models_count=10, lang="en")
+
+        self.assertIn('<html lang="en">', html)
+        self.assertIn("Zero-dependency multi-protocol gateway", html)
+        self.assertIn("Automatic configuration", html)
+        self.assertIn("Manual connection", html)
+        self.assertIn("Restore configuration", html)
+        self.assertIn("10 Models Discovered", html)
+
+    def test_render_dashboard_spanish(self):
+        auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
+        html = render_dashboard("127.0.0.1", 24980, auth_status, models_count=10, lang="es")
+
+        self.assertIn('<html lang="es">', html)
+        self.assertIn("Gateway multiprotocolo sin dependencias", html)
+        self.assertIn("Configuración automática", html)
+        self.assertIn("Conexión manual", html)
+        self.assertIn("Restaurar configuración", html)
+        self.assertIn("10 Modelos Descubiertos", html)
+
+    def test_render_dashboard_client_side_i18n_script(self):
+        auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
+        html = render_dashboard("127.0.0.1", 24980, auth_status, models_count=10)
+
+        # Client-side dynamic language switcher
+        self.assertIn("localStorage.getItem(\"agy_lang\")", html)
+        self.assertIn("localStorage.setItem(\"agy_lang\"", html)
+        self.assertIn("setLanguage", html)
+        self.assertIn("I18N", html)
+
 
 if __name__ == "__main__":
     unittest.main()

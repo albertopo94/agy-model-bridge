@@ -277,9 +277,21 @@ class TestDaemonCLI(unittest.TestCase):
 
         self.assertEqual(code, 0)
         output = out.getvalue()
-        self.assertIn("Activo", output)
+        self.assertTrue("Activo" in output or "Active" in output)
         self.assertIn("11111", output)
         self.assertIn("27", output)
+
+        out_es = io.StringIO()
+        with patch("sys.stdout", out_es):
+            code_es = main(["status", "--lang", "es"])
+        self.assertEqual(code_es, 0)
+        self.assertIn("Activo", out_es.getvalue())
+
+        out_en = io.StringIO()
+        with patch("sys.stdout", out_en):
+            code_en = main(["status", "--lang", "en"])
+        self.assertEqual(code_en, 0)
+        self.assertIn("Active", out_en.getvalue())
 
     @patch("bridge.__main__.open_dashboard")
     @patch("bridge.__main__.get_daemon_status")

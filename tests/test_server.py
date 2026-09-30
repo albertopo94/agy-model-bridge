@@ -88,9 +88,9 @@ class TestServerEndpoints(unittest.TestCase):
             body = resp.read().decode("utf-8")
             return resp.status, resp.headers, json.loads(body)
 
-    def _http_get_raw(self, path: str):
+    def _http_get_raw(self, path: str, headers: dict | None = None):
         url = f"{self.base_url}{path}"
-        req = urllib.request.Request(url, method="GET")
+        req = urllib.request.Request(url, method="GET", headers=headers or {})
         with urllib.request.urlopen(req, timeout=5.0) as resp:
             body = resp.read().decode("utf-8")
             return resp.status, resp.headers, body
@@ -741,6 +741,27 @@ class TestServerEndpoints(unittest.TestCase):
         self.assertIn("Conexión manual", body)
         self.assertIn("Documentación ↗", body)
         self.assertIn("border-radius: 16px", body)
+
+    def test_root_dashboard_accept_language_spanish(self):
+        status, headers, body = self._http_get_raw("/", headers={"Accept-Language": "es-ES,es;q=0.9,en;q=0.8"})
+        self.assertEqual(status, 200)
+        self.assertIn('<html lang="es">', body)
+        self.assertIn("Gateway multiprotocolo sin dependencias", body)
+
+    def test_root_dashboard_accept_language_english(self):
+        status, headers, body = self._http_get_raw("/", headers={"Accept-Language": "en-US,en;q=0.9"})
+        self.assertEqual(status, 200)
+        self.assertIn('<html lang="en">', body)
+        self.assertIn("Zero-dependency multi-protocol gateway", body)
+
+    def test_root_dashboard_query_param_lang(self):
+        status, headers, body = self._http_get_raw("/?lang=es")
+        self.assertEqual(status, 200)
+        self.assertIn('<html lang="es">', body)
+
+        status, headers, body = self._http_get_raw("/?lang=en")
+        self.assertEqual(status, 200)
+        self.assertIn('<html lang="en">', body)
 
     def test_api_status_endpoint(self):
         status, headers, body = self._http_get("/api/status")

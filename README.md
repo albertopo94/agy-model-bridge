@@ -244,7 +244,7 @@ Execute the complete test suite:
 python3 -m unittest discover -s tests -v
 ```
 
-All 365 tests run in ~1 second with zero external dependencies and zero network access.
+All 397 tests run in ~1 second with zero external dependencies and zero network access.
 
 ### End-to-End Smoke Test
 
@@ -253,3 +253,4 @@ Run the 9-stage live verification script against a running bridge server:
 ```bash
 python3 scripts/smoke_test.py --host 127.0.0.1 --port 24980
 ```
+

@@ -15,34 +15,72 @@ YELLOW="\033[33m"
 RED="\033[31m"
 RESET="\033[0m"
 
-echo -e "${BOLD}${BLUE}==> Instalando AGY Model Bridge...${RESET}"
+# Language detection (default English, Spanish if es/ES)
+IS_ES=0
+case "${AGY_LANG:-${LC_ALL:-${LANG:-}}}" in
+    es*|ES*) IS_ES=1 ;;
+    *) IS_ES=0 ;;
+esac
+
+for arg in "$@"; do
+    case "$arg" in
+        --lang=es*|--lang=ES*) IS_ES=1 ;;
+        --lang=en*|--lang=EN*) IS_ES=0 ;;
+    esac
+done
+
+if [ "$IS_ES" = "1" ]; then
+    echo -e "${BOLD}${BLUE}==> Instalando AGY Model Bridge...${RESET}"
+else
+    echo -e "${BOLD}${BLUE}==> Installing AGY Model Bridge...${RESET}"
+fi
 
 # 1. Check Python version (>= 3.10 required)
 if ! command -v python3 >/dev/null 2>&1; then
-    echo -e "${RED}Error: python3 no está instalado. Se requiere Python 3.10 o superior.${RESET}"
+    if [ "$IS_ES" = "1" ]; then
+        echo -e "${RED}Error: python3 no está instalado. Se requiere Python 3.10 o superior.${RESET}"
+    else
+        echo -e "${RED}Error: python3 is not installed. Python 3.10 or higher is required.${RESET}"
+    fi
     exit 1
 fi
 
 PYTHON_OK=$(python3 -c "import sys; print(1 if sys.version_info >= (3, 10) else 0)" 2>/dev/null || echo 0)
 if [ "$PYTHON_OK" != "1" ]; then
     PYTHON_VER=$(python3 -V 2>&1)
-    echo -e "${RED}Error: $PYTHON_VER no soportado. Se requiere Python 3.10+.${RESET}"
+    if [ "$IS_ES" = "1" ]; then
+        echo -e "${RED}Error: $PYTHON_VER no soportado. Se requiere Python 3.10+.${RESET}"
+    else
+        echo -e "${RED}Error: $PYTHON_VER not supported. Python 3.10+ required.${RESET}"
+    fi
     exit 1
 fi
 
 # 2. Check Git
 if ! command -v git >/dev/null 2>&1; then
-    echo -e "${RED}Error: git no está instalado.${RESET}"
+    if [ "$IS_ES" = "1" ]; then
+        echo -e "${RED}Error: git no está instalado.${RESET}"
+    else
+        echo -e "${RED}Error: git is not installed.${RESET}"
+    fi
     exit 1
 fi
 
 # 3. Clone or update repository
 mkdir -p "$(dirname "$INSTALL_DIR")"
 if [ -d "$INSTALL_DIR/.git" ]; then
-    echo -e "Actualizando repositorio existente en ${INSTALL_DIR}..."
+    if [ "$IS_ES" = "1" ]; then
+        echo -e "Actualizando repositorio existente en ${INSTALL_DIR}..."
+    else
+        echo -e "Updating existing repository in ${INSTALL_DIR}..."
+    fi
     git -C "$INSTALL_DIR" pull --quiet || true
 else
-    echo -e "Descargando en ${INSTALL_DIR}..."
+    if [ "$IS_ES" = "1" ]; then
+        echo -e "Descargando en ${INSTALL_DIR}..."
+    else
+        echo -e "Downloading to ${INSTALL_DIR}..."
+    fi
     git clone --quiet "$REPO_URL" "$INSTALL_DIR"
 fi
 
@@ -71,29 +109,58 @@ case ":$PATH:" in
 esac
 
 echo ""
-echo -e "${GREEN}${BOLD}✔ AGY Model Bridge instalado correctamente!${RESET}"
-echo -e "  Binario disponible en: ${BOLD}$LAUNCHER${RESET}"
+if [ "$IS_ES" = "1" ]; then
+    echo -e "${GREEN}${BOLD}✔ AGY Model Bridge instalado correctamente!${RESET}"
+    echo -e "  Binario disponible en: ${BOLD}$LAUNCHER${RESET}"
 
-if [ -n "$PATH_NOTICE" ]; then
+    if [ -n "$PATH_NOTICE" ]; then
+        echo ""
+        echo -e "${YELLOW}Nota: ${BIN_DIR} no está actualmente en tu PATH.${RESET}"
+        echo -e "Agregalo a tu shell ejecutando:"
+        echo -e "  ${BOLD}echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.zshrc && source ~/.zshrc${RESET}"
+    fi
+
     echo ""
-    echo -e "${YELLOW}Nota: ${BIN_DIR} no está actualmente en tu PATH.${RESET}"
-    echo -e "Agregalo a tu shell ejecutando:"
-    echo -e "  ${BOLD}echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.zshrc && source ~/.zshrc${RESET}"
-fi
+    echo -e "${BOLD}Comandos para empezar:${RESET}"
+    echo -e "  1. Arrancar el bridge en segundo plano:"
+    echo -e "     ${GREEN}agy-bridge start${RESET}"
+    echo ""
+    echo -e "  2. Configurar tu cliente favorito:"
+    echo -e "     ${BLUE}agy-bridge setup-claude${RESET}   # para Claude Code"
+    echo -e "     ${BLUE}agy-bridge setup-codex${RESET}    # para Codex CLI"
+    echo ""
+    echo -e "  3. Ver estado o abrir el dashboard:"
+    echo -e "     ${BLUE}agy-bridge status${RESET}"
+    echo -e "     ${BLUE}agy-bridge dashboard${RESET}"
+    echo ""
+    echo -e "  4. Detener el servicio cuando termines:"
+    echo -e "     ${YELLOW}agy-bridge stop${RESET}"
+    echo ""
+else
+    echo -e "${GREEN}${BOLD}✔ AGY Model Bridge installed successfully!${RESET}"
+    echo -e "  Binary available at: ${BOLD}$LAUNCHER${RESET}"
 
-echo ""
-echo -e "${BOLD}Comandos para empezar:${RESET}"
-echo -e "  1. Arrancar el bridge en segundo plano:"
-echo -e "     ${GREEN}agy-bridge start${RESET}"
-echo ""
-echo -e "  2. Configurar tu cliente favorito:"
-echo -e "     ${BLUE}agy-bridge setup-claude${RESET}   # para Claude Code"
-echo -e "     ${BLUE}agy-bridge setup-codex${RESET}    # para Codex CLI"
-echo ""
-echo -e "  3. Ver estado o abrir el dashboard:"
-echo -e "     ${BLUE}agy-bridge status${RESET}"
-echo -e "     ${BLUE}agy-bridge dashboard${RESET}"
-echo ""
-echo -e "  4. Detener el servicio cuando termines:"
-echo -e "     ${YELLOW}agy-bridge stop${RESET}"
-echo ""
+    if [ -n "$PATH_NOTICE" ]; then
+        echo ""
+        echo -e "${YELLOW}Note: ${BIN_DIR} is not currently in your PATH.${RESET}"
+        echo -e "Add it to your shell by running:"
+        echo -e "  ${BOLD}echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.zshrc && source ~/.zshrc${RESET}"
+    fi
+
+    echo ""
+    echo -e "${BOLD}Commands to get started:${RESET}"
+    echo -e "  1. Start the bridge in the background:"
+    echo -e "     ${GREEN}agy-bridge start${RESET}"
+    echo ""
+    echo -e "  2. Configure your favorite client:"
+    echo -e "     ${BLUE}agy-bridge setup-claude${RESET}   # for Claude Code"
+    echo -e "     ${BLUE}agy-bridge setup-codex${RESET}    # for Codex CLI"
+    echo ""
+    echo -e "  3. Check status or open the dashboard:"
+    echo -e "     ${BLUE}agy-bridge status${RESET}"
+    echo -e "     ${BLUE}agy-bridge dashboard${RESET}"
+    echo ""
+    echo -e "  4. Stop the service when done:"
+    echo -e "     ${YELLOW}agy-bridge stop${RESET}"
+    echo ""
+fi

@@ -17,6 +17,7 @@ import uuid
 
 from bridge import __version__
 import bridge.daemon
+from bridge.i18n import t
 
 
 def atomic_write_file(path: Path, content: str, mode: int = 0o600) -> None:
@@ -622,7 +623,7 @@ def update_installation(
     if not target_dir.exists() or not (target_dir / ".git").exists():
         return {
             "status": "error",
-            "message": f"Directorio no es un repositorio Git válido: {target_dir}",
+            "message": t("update_not_git_repo", target_dir=target_dir),
             "restarted_daemon": False,
             "version": _get_installed_version(target_dir),
         }
@@ -633,14 +634,14 @@ def update_installation(
     except FileNotFoundError:
         return {
             "status": "error",
-            "message": "Comando 'git' no encontrado en el sistema.",
+            "message": t("update_git_not_found"),
             "restarted_daemon": False,
             "version": _get_installed_version(target_dir),
         }
     except OSError as exc:
         return {
             "status": "error",
-            "message": f"Error ejecutando git pull: {exc}",
+            "message": t("update_git_error", exc=exc),
             "restarted_daemon": False,
             "version": _get_installed_version(target_dir),
         }
@@ -658,7 +659,7 @@ def update_installation(
     if "already up to date" in stdout_lower or "already up-to-date" in stdout_lower:
         return {
             "status": "already_up_to_date",
-            "message": "Repositorio ya está actualizado.",
+            "message": t("update_up_to_date"),
             "restarted_daemon": False,
             "version": _get_installed_version(target_dir),
         }
@@ -674,7 +675,7 @@ def update_installation(
 
     return {
         "status": "updated",
-        "message": "Repositorio actualizado correctamente.",
+        "message": t("update_completed"),
         "restarted_daemon": restarted_daemon,
         "version": _get_installed_version(target_dir),
     }
