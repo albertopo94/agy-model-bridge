@@ -65,7 +65,11 @@ def main(argv: list[str] | None = None) -> int:
             model=args.model,
             auth_token=args.auth_token,
         )
-        print(f"Claude Code configured successfully at {target}")
+        if getattr(target, "backup_path", None):
+            print(f"Backup: {target.backup_path}")
+        print(f"Claude Code configured successfully at {target}\n")
+        print("Claude Code will read this configuration automatically.")
+        print("Run 'claude' to start coding with Gemini 3.8 Flash · high (1M context).")
         return 0
 
     if argv and argv[0] == "setup-codex":
@@ -106,7 +110,11 @@ def main(argv: list[str] | None = None) -> int:
             port=args.port,
             model=args.model,
         )
-        print(f"Codex CLI configured successfully at {target}")
+        if getattr(target, "backup_path", None):
+            print(f"Backup: {target.backup_path}")
+        print(f"Codex CLI configured successfully at {target}\n")
+        print("Codex CLI will read this configuration automatically.")
+        print("Run 'codex' to start coding with Gemini 3.8 Flash · high (1M context).")
         return 0
 
     # Fallback to daemon server runner

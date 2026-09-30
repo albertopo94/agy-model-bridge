@@ -69,6 +69,11 @@ def create_backup(path: Path) -> Path | None:
     return backup_path
 
 
+class ConfigPath(type(Path())):
+    """Path subclass that carries an optional backup_path attribute."""
+    backup_path: Path | None = None
+
+
 def setup_claude(
     settings_path: Path | None = None,
     base_url: str | None = None,
@@ -104,9 +109,10 @@ def setup_claude(
     else:
         resolved_url = "http://127.0.0.1:24980"
 
+    backup_path = None
     settings: dict[str, Any] = {}
     if target.exists():
-        create_backup(target)
+        backup_path = create_backup(target)
         try:
             with open(target, "r", encoding="utf-8") as f:
                 content = f.read().strip()
@@ -133,7 +139,9 @@ def setup_claude(
 
     formatted_json = json.dumps(settings, indent=2) + "\n"
     atomic_write_file(target, formatted_json, mode=0o600)
-    return target
+    res = ConfigPath(target)
+    res.backup_path = backup_path
+    return res
 
 
 CODEX_BLOCK_REGEX = re.compile(
@@ -194,8 +202,9 @@ def setup_codex(
 
     block = build_codex_block(model=model, base_url=resolved_url)
 
+    backup_path = None
     if target.exists():
-        create_backup(target)
+        backup_path = create_backup(target)
         existing_content = target.read_text(encoding="utf-8")
         if CODEX_BLOCK_REGEX.search(existing_content):
             new_content = CODEX_BLOCK_REGEX.sub(block + "\n", existing_content)
@@ -216,6 +225,8 @@ def setup_codex(
         new_content = block + "\n"
 
     atomic_write_file(target, new_content, mode=0o600)
-    return target
+    res = ConfigPath(target)
+    res.backup_path = backup_path
+    return res
 
 

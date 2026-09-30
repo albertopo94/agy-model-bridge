@@ -115,6 +115,7 @@ class TestSetupClaude(unittest.TestCase):
         res_path = setup_claude(settings_path=target)
 
         self.assertEqual(res_path, target)
+        self.assertIsNone(getattr(res_path, "backup_path", None))
         self.assertTrue(target.exists())
         file_mode = stat.S_IMODE(target.stat().st_mode)
         self.assertEqual(file_mode, 0o600)
@@ -152,11 +153,12 @@ class TestSetupClaude(unittest.TestCase):
         }
         target.write_text(json.dumps(initial_data, indent=2), encoding="utf-8")
 
-        setup_claude(settings_path=target)
+        res_path = setup_claude(settings_path=target)
 
         # Backup was created with initial contents
         backups = list(self.dir_path.glob("settings.json.backup-*"))
         self.assertEqual(len(backups), 1)
+        self.assertEqual(res_path.backup_path, backups[0])
         backup_data = json.loads(backups[0].read_text(encoding="utf-8"))
         self.assertEqual(backup_data["env"]["ANTHROPIC_BASE_URL"], "http://old-url.local")
 
@@ -220,6 +222,7 @@ class TestSetupCodex(unittest.TestCase):
         res_path = setup_codex(config_path=target)
 
         self.assertEqual(res_path, target)
+        self.assertIsNone(getattr(res_path, "backup_path", None))
         self.assertTrue(target.exists())
         file_mode = stat.S_IMODE(target.stat().st_mode)
         self.assertEqual(file_mode, 0o600)
@@ -263,11 +266,12 @@ class TestSetupCodex(unittest.TestCase):
         )
         target.write_text(initial_content, encoding="utf-8")
 
-        setup_codex(config_path=target)
+        res_path = setup_codex(config_path=target)
 
         # Backup created
         backups = list(self.dir_path.glob("config.toml.backup-*"))
         self.assertEqual(len(backups), 1)
+        self.assertEqual(res_path.backup_path, backups[0])
         self.assertEqual(backups[0].read_text(encoding="utf-8"), initial_content)
 
         # Target updated in-place
@@ -353,6 +357,21 @@ class TestCLIParsing(unittest.TestCase):
         self.assertEqual(data["env"]["ANTHROPIC_BASE_URL"], "http://127.0.0.1:9090")
         self.assertEqual(data["env"]["ANTHROPIC_MODEL"], "gemini-3.8-flash")
 
+    def test_cli_setup_claude_outputs_backup_and_guidance(self):
+        import io
+        from bridge.__main__ import main
+        target = self.dir_path / "claude_settings.json"
+        target.write_text('{"env": {}}', encoding="utf-8")
+        out = io.StringIO()
+        with unittest.mock.patch("sys.stdout", out):
+            exit_code = main(["setup-claude", "--path", str(target)])
+        self.assertEqual(exit_code, 0)
+        output = out.getvalue()
+        self.assertIn("Backup: ", output)
+        self.assertIn(f"Claude Code configured successfully at {target}", output)
+        self.assertIn("Claude Code will read this configuration automatically.", output)
+        self.assertIn("Run 'claude' to start coding with Gemini 3.8 Flash · high (1M context).", output)
+
     def test_cli_setup_codex_dispatches_with_flags(self):
         from bridge.__main__ import main
         target = self.dir_path / "codex_config.toml"
@@ -362,6 +381,21 @@ class TestCLIParsing(unittest.TestCase):
         content = target.read_text(encoding="utf-8")
         self.assertIn('model = "gemini-3.8-flash-low"', content)
         self.assertIn('base_url = "http://127.0.0.1:7070/v1"', content)
+
+    def test_cli_setup_codex_outputs_backup_and_guidance(self):
+        import io
+        from bridge.__main__ import main
+        target = self.dir_path / "codex_config.toml"
+        target.write_text('model = "old"', encoding="utf-8")
+        out = io.StringIO()
+        with unittest.mock.patch("sys.stdout", out):
+            exit_code = main(["setup-codex", "--path", str(target)])
+        self.assertEqual(exit_code, 0)
+        output = out.getvalue()
+        self.assertIn("Backup: ", output)
+        self.assertIn(f"Codex CLI configured successfully at {target}", output)
+        self.assertIn("Codex CLI will read this configuration automatically.", output)
+        self.assertIn("Run 'codex' to start coding with Gemini 3.8 Flash · high (1M context).", output)
 
     @unittest.mock.patch("bridge.__main__.run_server")
     def test_cli_daemon_mode_invokes_run_server(self, mock_run_server):
