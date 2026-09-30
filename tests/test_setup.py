@@ -16,6 +16,7 @@ from bridge.setup import (
     setup_claude,
     setup_codex,
     uninstall,
+    update_installation,
 )
 
 
@@ -1148,6 +1149,260 @@ class TestCLIUninstall(unittest.TestCase):
             with unittest.mock.patch("sys.stdout"):
                 main(["uninstall", "--help"])
         self.assertEqual(cm.exception.code, 0)
+
+
+class TestUpdateInstallation(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.repo_dir = Path(self.temp_dir.name) / "core"
+        self.repo_dir.mkdir(parents=True)
+        (self.repo_dir / ".git").mkdir()
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    @unittest.mock.patch("bridge.setup.subprocess.run")
+    @unittest.mock.patch("bridge.daemon.start_daemon")
+    @unittest.mock.patch("bridge.daemon.stop_daemon")
+    @unittest.mock.patch("bridge.daemon.is_pid_alive")
+    @unittest.mock.patch("bridge.daemon.read_pid")
+    def test_update_success_with_daemon_restart(
+        self, mock_read_pid, mock_is_alive, mock_stop, mock_start, mock_run
+    ):
+        mock_run.return_value = unittest.mock.MagicMock(
+            returncode=0,
+            stdout="Updating 1234abc..5678def\nFast-forward\n bridge/setup.py | 10 +\n 1 file changed\n",
+            stderr="",
+        )
+        mock_read_pid.return_value = 4242
+        mock_is_alive.return_value = True
+        mock_stop.return_value = {"status": "stopped", "pid": 4242}
+        mock_start.return_value = {"status": "started", "pid": 4243}
+
+        result = update_installation(
+            core_dir=self.repo_dir,
+            restart_daemon_if_running=True,
+        )
+
+        self.assertEqual(result["status"], "updated")
+        self.assertTrue(result["restarted_daemon"])
+        self.assertEqual(result["version"], "0.3.0")
+        mock_run.assert_called_once_with(
+            ["git", "-C", str(self.repo_dir), "pull", "--ff-only"],
+            capture_output=True,
+            text=True,
+        )
+        mock_stop.assert_called_once()
+        mock_start.assert_called_once_with(no_open=True)
+
+    @unittest.mock.patch("bridge.setup.subprocess.run")
+    @unittest.mock.patch("bridge.daemon.start_daemon")
+    @unittest.mock.patch("bridge.daemon.stop_daemon")
+    @unittest.mock.patch("bridge.daemon.is_pid_alive")
+    @unittest.mock.patch("bridge.daemon.read_pid")
+    def test_update_success_daemon_not_running(
+        self, mock_read_pid, mock_is_alive, mock_stop, mock_start, mock_run
+    ):
+        mock_run.return_value = unittest.mock.MagicMock(
+            returncode=0,
+            stdout="Updating 1234abc..5678def\nFast-forward\n",
+            stderr="",
+        )
+        mock_read_pid.return_value = None
+        mock_is_alive.return_value = False
+
+        result = update_installation(
+            core_dir=self.repo_dir,
+            restart_daemon_if_running=True,
+        )
+
+        self.assertEqual(result["status"], "updated")
+        self.assertFalse(result["restarted_daemon"])
+        mock_stop.assert_not_called()
+        mock_start.assert_not_called()
+
+    @unittest.mock.patch("bridge.setup.subprocess.run")
+    @unittest.mock.patch("bridge.daemon.stop_daemon")
+    def test_update_already_up_to_date(self, mock_stop, mock_run):
+        mock_run.return_value = unittest.mock.MagicMock(
+            returncode=0,
+            stdout="Already up to date.\n",
+            stderr="",
+        )
+
+        result = update_installation(
+            core_dir=self.repo_dir,
+            restart_daemon_if_running=True,
+        )
+
+        self.assertEqual(result["status"], "already_up_to_date")
+        self.assertFalse(result["restarted_daemon"])
+        mock_stop.assert_not_called()
+
+    def test_update_nonexistent_or_non_git_directory(self):
+        non_git_dir = Path(self.temp_dir.name) / "not_a_repo"
+        non_git_dir.mkdir()
+
+        result = update_installation(
+            core_dir=non_git_dir,
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertFalse(result["restarted_daemon"])
+        self.assertIn("git", result["message"].lower())
+
+    @unittest.mock.patch("bridge.setup.subprocess.run")
+    def test_update_git_pull_failure(self, mock_run):
+        mock_run.return_value = unittest.mock.MagicMock(
+            returncode=1,
+            stdout="",
+            stderr="fatal: unable to access: Could not resolve host\n",
+        )
+
+        result = update_installation(
+            core_dir=self.repo_dir,
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("Could not resolve host", result["message"])
+        self.assertFalse(result["restarted_daemon"])
+
+    @unittest.mock.patch("bridge.setup.subprocess.run")
+    def test_update_git_command_missing(self, mock_run):
+        mock_run.side_effect = FileNotFoundError("git not found")
+
+        result = update_installation(
+            core_dir=self.repo_dir,
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("git", result["message"].lower())
+        self.assertFalse(result["restarted_daemon"])
+
+    @unittest.mock.patch("bridge.setup.subprocess.run")
+    def test_update_discovers_default_core_dir(self, mock_run):
+        mock_run.return_value = unittest.mock.MagicMock(
+            returncode=0,
+            stdout="Already up to date.\n",
+            stderr="",
+        )
+        fake_home = Path(self.temp_dir.name) / "fake_home"
+        core_dir = fake_home / ".agy-bridge" / "core"
+        (core_dir / ".git").mkdir(parents=True)
+
+        with unittest.mock.patch("pathlib.Path.home", return_value=fake_home):
+            result = update_installation(core_dir=None)
+
+        self.assertEqual(result["status"], "already_up_to_date")
+        mock_run.assert_called_once_with(
+            ["git", "-C", str(core_dir), "pull", "--ff-only"],
+            capture_output=True,
+            text=True,
+        )
+
+
+class TestCLIUpdateAndVersion(unittest.TestCase):
+    @unittest.mock.patch("bridge.__main__.update_installation")
+    def test_cli_update_success(self, mock_update):
+        from bridge.__main__ import main
+        import io
+        from contextlib import redirect_stdout
+
+        mock_update.return_value = {
+            "status": "updated",
+            "message": "Repository updated successfully.",
+            "restarted_daemon": True,
+            "version": "0.3.0",
+        }
+
+        f = io.StringIO()
+        with redirect_stdout(f):
+            exit_code = main(["update"])
+
+        self.assertEqual(exit_code, 0)
+        output = f.getvalue()
+        self.assertIn("0.3.0", output)
+        self.assertIn("actualizado", output.lower())
+        mock_update.assert_called_once_with(core_dir=None, restart_daemon_if_running=True)
+
+    @unittest.mock.patch("bridge.__main__.update_installation")
+    def test_cli_upgrade_alias(self, mock_update):
+        from bridge.__main__ import main
+        import io
+        from contextlib import redirect_stdout
+
+        mock_update.return_value = {
+            "status": "already_up_to_date",
+            "message": "Already up to date.",
+            "restarted_daemon": False,
+            "version": "0.3.0",
+        }
+
+        f = io.StringIO()
+        with redirect_stdout(f):
+            exit_code = main(["upgrade"])
+
+        self.assertEqual(exit_code, 0)
+        output = f.getvalue()
+        self.assertIn("0.3.0", output)
+        mock_update.assert_called_once_with(core_dir=None, restart_daemon_if_running=True)
+
+    @unittest.mock.patch("bridge.__main__.update_installation")
+    def test_cli_update_error(self, mock_update):
+        from bridge.__main__ import main
+        import io
+        from contextlib import redirect_stdout
+
+        mock_update.return_value = {
+            "status": "error",
+            "message": "git pull failed due to conflict",
+            "restarted_daemon": False,
+            "version": "0.3.0",
+        }
+
+        f = io.StringIO()
+        with redirect_stdout(f):
+            exit_code = main(["update"])
+
+        self.assertEqual(exit_code, 1)
+        output = f.getvalue()
+        self.assertIn("git pull failed", output)
+
+    def test_cli_version_flags(self):
+        from bridge.__main__ import main
+        import io
+        from contextlib import redirect_stdout
+
+        for flag in ("--version", "-v"):
+            f = io.StringIO()
+            with redirect_stdout(f):
+                exit_code = main([flag])
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.3.0")
+
+    def test_cli_subcommand_version_flags(self):
+        from bridge.__main__ import main
+        import io
+        from contextlib import redirect_stdout
+
+        for flag in ("--version", "-v"):
+            f = io.StringIO()
+            with redirect_stdout(f):
+                exit_code = main(["update", flag])
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.3.0")
+
+    def test_version_unification(self):
+        import bridge
+        from pathlib import Path
+        import re
+
+        self.assertEqual(bridge.__version__, "0.3.0")
+        pyproject_path = Path(__file__).resolve().parent.parent / "pyproject.toml"
+        pyproject_text = pyproject_path.read_text(encoding="utf-8")
+        match = re.search(r'version\s*=\s*"([^"]+)"', pyproject_text)
+        self.assertIsNotNone(match)
+        self.assertEqual(match.group(1), "0.3.0")
 
 
 if __name__ == "__main__":

@@ -96,6 +96,12 @@ agy-bridge status
 # Open or re-open the web dashboard at any time
 agy-bridge dashboard
 
+# Update agy-bridge in-place to the latest version (and auto-reload daemon)
+agy-bridge update
+
+# Check installed version
+agy-bridge --version
+
 # Stop the running background service
 agy-bridge stop
 ```
@@ -218,6 +224,8 @@ curl -fsSL https://raw.githubusercontent.com/albertopo94/agy-model-bridge/main/u
 | `agy-bridge stop` | Stops the running background daemon |
 | `agy-bridge status` | Checks daemon status, port, models count, and auth |
 | `agy-bridge dashboard` (or `open`) | Opens the local dashboard in your default browser |
+| `agy-bridge update` (or `upgrade`) | Updates installation in-place via git pull and reloads daemon |
+| `agy-bridge --version` (or `-v`) | Prints the bridge version |
 | `agy-bridge setup-claude` | Surgically configures Claude Code (`~/.claude/settings.json`) |
 | `agy-bridge restore-claude` | Interactively restores a Claude Code configuration backup |
 | `agy-bridge setup-codex` | Surgically configures Codex CLI (`~/.codex/config.toml`) |
@@ -236,7 +244,7 @@ Execute the complete test suite:
 python3 -m unittest discover -s tests -v
 ```
 
-All 352 tests run in ~1 second with zero external dependencies and zero network access.
+All 365 tests run in ~1 second with zero external dependencies and zero network access.
 
 ### End-to-End Smoke Test
 

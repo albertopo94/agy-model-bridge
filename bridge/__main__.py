@@ -4,6 +4,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from bridge import __version__
 from bridge.daemon import (
     get_daemon_status,
     open_dashboard,
@@ -18,6 +19,7 @@ from bridge.setup import (
     setup_claude,
     setup_codex,
     uninstall,
+    update_installation,
 )
 
 
@@ -118,6 +120,49 @@ def main(argv: list[str] | None = None) -> int:
     prog_base = Path(sys.argv[0]).name if sys.argv and sys.argv[0] else "agy-bridge"
     if prog_base.endswith(".py"):
         prog_base = "python3 -m bridge"
+
+    if argv and any(a in ("--version", "-v") for a in argv):
+        print(f"agy-bridge v{__version__}")
+        return 0
+
+    if argv and argv[0] in ("update", "upgrade"):
+        subcmd = argv[0]
+        parser = argparse.ArgumentParser(
+            prog=f"{prog_base} {subcmd}",
+            description="Update AGY Model Bridge in-place and optionally restart the daemon.",
+        )
+        parser.add_argument(
+            "--no-restart",
+            action="store_true",
+            help="Do not restart the background daemon if running",
+        )
+        parser.add_argument(
+            "--dir",
+            "--core-dir",
+            dest="core_dir",
+            type=Path,
+            default=None,
+            help="Directory of the core repository to update",
+        )
+        args = parser.parse_args(argv[1:])
+
+        res = update_installation(
+            core_dir=args.core_dir,
+            restart_daemon_if_running=not args.no_restart,
+        )
+        status = res.get("status")
+        ver = res.get("version", __version__)
+        if status == "updated":
+            print(f"✔ Repositorio actualizado a la versión v{ver}.")
+            if res.get("restarted_daemon"):
+                print("✔ Servicio en segundo plano reiniciado con el nuevo código.")
+            return 0
+        elif status == "already_up_to_date":
+            print(f"✔ Ya tenés la versión más reciente (v{ver}).")
+            return 0
+        else:
+            print(f"Error: {res.get('message', 'Fallo al actualizar el repositorio')}")
+            return 1
 
     # Dispatch daemon lifecycle subcommands
     if argv and argv[0] == "start":
@@ -383,6 +428,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog=prog_base,
         description="Antigravity Model Bridge - Local AI Gateway",
+    )
+    parser.add_argument(
+        "-v",
+        "--version",
+        action="version",
+        version=f"agy-bridge v{__version__}",
     )
     parser.add_argument(
         "--host",

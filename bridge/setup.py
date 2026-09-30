@@ -11,9 +11,11 @@ import os
 from pathlib import Path
 import re
 import shutil
+import subprocess
 from typing import Any
 import uuid
 
+from bridge import __version__
 import bridge.daemon
 
 
@@ -562,6 +564,121 @@ def uninstall(
         "daemon_dir_removed": daemon_dir_removed,
         "backups_purged": backups_purged,
     }
+
+
+def _get_installed_version(target_dir: Path | None = None) -> str:
+    """Reads the installed version from target_dir/bridge/__init__.py or falls back to __version__."""
+    if target_dir is not None:
+        init_file = target_dir / "bridge" / "__init__.py"
+        if init_file.is_file():
+            try:
+                match = re.search(r'__version__\s*=\s*["\']([^"\']+)["\']', init_file.read_text(encoding="utf-8"))
+                if match:
+                    return match.group(1)
+            except OSError:
+                pass
+    return __version__
+
+
+def update_installation(
+    core_dir: Path | None = None,
+    restart_daemon_if_running: bool = True,
+) -> dict[str, Any]:
+    """Updates the AGY Model Bridge installation in-place via git pull.
+
+    Discovers core repo location:
+    If core_dir is None: checks Path.home() / ".agy-bridge" / "core".
+    If that does not exist or lacks .git, falls back to checking current working directory / repo parent.
+
+    Runs git -C <dir> pull --ff-only.
+    Detects if changes were pulled or if already up to date.
+    If restart_daemon_if_running and changes were pulled:
+      Checks if daemon is currently running via bridge.daemon.read_pid() and bridge.daemon.is_pid_alive().
+      If running: calls bridge.daemon.stop_daemon(), then bridge.daemon.start_daemon(no_open=True).
+
+    Returns:
+        dict[str, Any]: {
+            "status": "updated" | "already_up_to_date" | "error",
+            "message": str,
+            "restarted_daemon": bool,
+            "version": str,
+        }
+    """
+    if core_dir is not None:
+        target_dir = Path(core_dir)
+    else:
+        default_dir = Path.home() / ".agy-bridge" / "core"
+        if (default_dir / ".git").exists():
+            target_dir = default_dir
+        elif (Path.cwd() / ".git").exists():
+            target_dir = Path.cwd()
+        else:
+            repo_root = Path(__file__).resolve().parent.parent
+            if (repo_root / ".git").exists():
+                target_dir = repo_root
+            else:
+                target_dir = default_dir
+
+    if not target_dir.exists() or not (target_dir / ".git").exists():
+        return {
+            "status": "error",
+            "message": f"Directorio no es un repositorio Git válido: {target_dir}",
+            "restarted_daemon": False,
+            "version": _get_installed_version(target_dir),
+        }
+
+    cmd = ["git", "-C", str(target_dir), "pull", "--ff-only"]
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True)
+    except FileNotFoundError:
+        return {
+            "status": "error",
+            "message": "Comando 'git' no encontrado en el sistema.",
+            "restarted_daemon": False,
+            "version": _get_installed_version(target_dir),
+        }
+    except OSError as exc:
+        return {
+            "status": "error",
+            "message": f"Error ejecutando git pull: {exc}",
+            "restarted_daemon": False,
+            "version": _get_installed_version(target_dir),
+        }
+
+    if res.returncode != 0:
+        err_msg = res.stderr.strip() or res.stdout.strip() or f"git pull falló con código {res.returncode}"
+        return {
+            "status": "error",
+            "message": err_msg,
+            "restarted_daemon": False,
+            "version": _get_installed_version(target_dir),
+        }
+
+    stdout_lower = res.stdout.lower()
+    if "already up to date" in stdout_lower or "already up-to-date" in stdout_lower:
+        return {
+            "status": "already_up_to_date",
+            "message": "Repositorio ya está actualizado.",
+            "restarted_daemon": False,
+            "version": _get_installed_version(target_dir),
+        }
+
+    restarted_daemon = False
+    if restart_daemon_if_running:
+        pid = bridge.daemon.read_pid()
+        if pid is not None and bridge.daemon.is_pid_alive(pid):
+            bridge.daemon.stop_daemon()
+            start_res = bridge.daemon.start_daemon(no_open=True)
+            if start_res.get("status") == "started":
+                restarted_daemon = True
+
+    return {
+        "status": "updated",
+        "message": "Repositorio actualizado correctamente.",
+        "restarted_daemon": restarted_daemon,
+        "version": _get_installed_version(target_dir),
+    }
+
 
 
 

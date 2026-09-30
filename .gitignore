@@ -4,8 +4,10 @@
 .engram/
 openspec/
 
-# Internal notes
+# Internal notes & AI instructions
 *criterio*.md
+AGENTS.md
+CLAUDE.md
 
 # Python artifacts
 __pycache__/
