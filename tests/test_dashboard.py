@@ -116,7 +116,8 @@ class TestDashboardRendering(unittest.TestCase):
 
         # Claude Code mascot icon
         self.assertIn('class="card-icon"', html)
-        self.assertIn("#D4562F", html)
+        self.assertIn("#d77757", html)
+        self.assertIn("#ffc400", html)
         self.assertIn("export OPENAI_BASE_URL", html)
         self.assertNotIn("npx freellmapi setup", html)
         self.assertIn("BASE_URL", html)

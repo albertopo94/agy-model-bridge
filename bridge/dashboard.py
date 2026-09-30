@@ -72,11 +72,24 @@ def get_status_data(client: Any, project: str, host: str, port: int) -> dict[str
 
 
 CLAUDE_ICON_SVG = (
-    '<svg class="card-icon" width="22" height="18" viewBox="0 0 16 12" fill="none" '
-    'xmlns="http://www.w3.org/2000/svg" aria-hidden="true">'
-    '<path fill-rule="evenodd" clip-rule="evenodd" '
-    'd="M1 1h3v3H1V1zm11 0h3v3h-3V1zM1 4h14v5H1V4zm2 1h2v2H3V5zm8 0h2v2h-2V5zM2 9h2v2H2V9zm10 0h2v2h-2V9z" '
-    'fill="#D4562F"/>'
+    '<svg class="card-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="24" height="24" aria-hidden="true">'
+    '<rect width="3" height="12" x="22.5" y="-4.5" fill="#ffc400" transform="rotate(90 24 1.5)"/>'
+    '<rect width="3" height="3" x="36" y="6" fill="#ffc400" transform="rotate(90 37.5 7.5)"/>'
+    '<rect width="3" height="6" x="31.5" y="1.5" fill="#ffc400" transform="rotate(90 33 4.5)"/>'
+    '<rect width="3" height="3" x="9" y="6" fill="#ffc400" transform="rotate(90 10.5 7.5)"/>'
+    '<rect width="3" height="6" x="13.5" y="1.5" fill="#ffc400" transform="rotate(90 15 4.5)"/>'
+    '<rect width="3" height="12" x="22.5" y="7.5" fill="#ffc400" transform="rotate(-90 24 13.5)"/>'
+    '<rect width="3" height="6" x="13.5" y="7.5" fill="#ffc400" transform="rotate(-90 15 10.5)"/>'
+    '<rect width="3" height="6" x="31.5" y="7.5" fill="#ffc400" transform="rotate(-90 33 10.5)"/>'
+    '<rect width="36" height="24" x="6" y="18" fill="#d77757"/>'
+    '<rect width="3" height="9" x="9" y="39" fill="#d77757"/>'
+    '<rect width="3" height="9" x="15" y="39" fill="#d77757"/>'
+    '<rect width="3" height="9" x="30" y="39" fill="#d77757"/>'
+    '<rect width="3" height="9" x="36" y="39" fill="#d77757"/>'
+    '<rect width="7.5" height="6" y="33" fill="#d77757"/>'
+    '<rect width="7.5" height="6" x="40.5" y="33" fill="#d77757"/>'
+    '<rect width="3" height="6" x="12" y="24" fill="#111111"/>'
+    '<rect width="3" height="6" x="33" y="24" fill="#111111"/>'
     '</svg>'
 )
 
