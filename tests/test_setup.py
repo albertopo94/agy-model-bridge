@@ -497,6 +497,27 @@ class TestSetupCodex(unittest.TestCase):
         self.assertIn("[projects]\nactive = \"my-project\"", updated)
         self.assertIn('model = "gemini-3.8-flash-high"', updated)
 
+    def test_codex_setup_avoids_duplicate_root_keys(self):
+        target = self.dir_path / "config.toml"
+        initial_content = (
+            'personality = "pragmatic"\n'
+            'model = "gpt-6-sol"\n'
+            'model_reasoning_effort = "medium"\n\n'
+            "[projects]\n"
+            'active = "test"\n'
+        )
+        target.write_text(initial_content, encoding="utf-8")
+
+        setup_codex(config_path=target)
+
+        updated = target.read_text(encoding="utf-8")
+        import tomllib
+        parsed = tomllib.loads(updated)
+        self.assertEqual(parsed.get("model"), "gemini-3.8-flash-high")
+        self.assertEqual(parsed.get("model_provider"), "agy")
+        self.assertEqual(parsed.get("personality"), "pragmatic")
+        self.assertIn('# model = "gpt-6-sol"  # agy-override', updated)
+
     def test_codex_cli_flags_port_and_model(self):
         target = self.dir_path / "config.toml"
         setup_codex(
@@ -955,6 +976,8 @@ class TestUninstall(unittest.TestCase):
         codex_initial = (
             "[projects]\n"
             'active = "my-project"\n\n'
+            '# model = "old-model"  # agy-override\n'
+            '# model_provider = "old-provider"  # agy-override\n'
             "# agy:start\n"
             'model = "gemini-3.8-flash-high"\n'
             'model_provider = "agy"\n\n'
@@ -992,6 +1015,8 @@ class TestUninstall(unittest.TestCase):
         self.assertNotIn("model_providers.agy", codex_cleaned)
         self.assertIn("[projects]\nactive = \"my-project\"", codex_cleaned)
         self.assertIn("[mcp_servers]\ns1 = \"url\"", codex_cleaned)
+        self.assertIn('model = "old-model"', codex_cleaned)
+        self.assertIn('model_provider = "old-provider"', codex_cleaned)
 
     def test_uninstall_restore_configs_false_leaves_configs_untouched(self):
         claude_content = '{\n  "env": {\n    "ANTHROPIC_MODEL": "gemini"\n  }\n}\n'
@@ -1210,7 +1235,7 @@ class TestUpdateInstallation(unittest.TestCase):
 
         self.assertEqual(result["status"], "updated")
         self.assertTrue(result["restarted_daemon"])
-        self.assertEqual(result["version"], "0.4.1")
+        self.assertEqual(result["version"], "0.4.2")
         mock_run.assert_called_once_with(
             ["git", "-C", str(self.repo_dir), "pull", "--ff-only"],
             capture_output=True,
@@ -1402,7 +1427,7 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main([flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.4.1")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.4.2")
 
     def test_cli_subcommand_version_flags(self):
         from bridge.__main__ import main
@@ -1414,19 +1439,19 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main(["update", flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.4.1")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.4.2")
 
     def test_version_unification(self):
         import bridge
         from pathlib import Path
         import re
 
-        self.assertEqual(bridge.__version__, "0.4.1")
+        self.assertEqual(bridge.__version__, "0.4.2")
         pyproject_path = Path(__file__).resolve().parent.parent / "pyproject.toml"
         pyproject_text = pyproject_path.read_text(encoding="utf-8")
         match = re.search(r'version\s*=\s*"([^"]+)"', pyproject_text)
         self.assertIsNotNone(match)
-        self.assertEqual(match.group(1), "0.4.1")
+        self.assertEqual(match.group(1), "0.4.2")
 
 
 if __name__ == "__main__":

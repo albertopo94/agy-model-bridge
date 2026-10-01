@@ -314,6 +314,11 @@ CODEX_BLOCK_REGEX = re.compile(
     re.MULTILINE,
 )
 
+CODEX_ROOT_CONFLICT_REGEX = re.compile(
+    r"^[ \t]*(model|model_provider|model_context_window|model_auto_compact_token_limit)[ \t]*=.*$",
+    re.MULTILINE,
+)
+
 
 def build_codex_block(model: str, base_url: str) -> str:
     """Constructs the delimited agy configuration block for Codex config.toml."""
@@ -372,20 +377,25 @@ def setup_codex(
         backup_path = create_backup(target)
         existing_content = target.read_text(encoding="utf-8")
         if CODEX_BLOCK_REGEX.search(existing_content):
-            new_content = CODEX_BLOCK_REGEX.sub(block + "\n", existing_content)
-        else:
-            table_match = re.search(r"^[ \t]*\[", existing_content, re.MULTILINE)
-            if table_match:
-                prefix = existing_content[:table_match.start()]
-                suffix = existing_content[table_match.start():]
-                if prefix.strip():
-                    new_content = prefix.rstrip() + "\n\n" + block + "\n\n" + suffix.lstrip()
-                else:
-                    new_content = block + "\n\n" + suffix.lstrip()
-            elif existing_content.strip():
-                new_content = block + "\n\n" + existing_content.lstrip()
+            existing_content = CODEX_BLOCK_REGEX.sub("", existing_content)
+
+        table_match = re.search(r"^[ \t]*\[", existing_content, re.MULTILINE)
+        if table_match:
+            prefix = existing_content[:table_match.start()]
+            suffix = existing_content[table_match.start():]
+            cleaned_prefix = CODEX_ROOT_CONFLICT_REGEX.sub(r"# \g<0>  # agy-override", prefix)
+            if cleaned_prefix.strip():
+                new_content = cleaned_prefix.rstrip() + "\n\n" + block + "\n\n" + suffix.lstrip()
+            else:
+                new_content = block + "\n\n" + suffix.lstrip()
+        elif existing_content.strip():
+            cleaned_prefix = CODEX_ROOT_CONFLICT_REGEX.sub(r"# \g<0>  # agy-override", existing_content)
+            if cleaned_prefix.strip():
+                new_content = cleaned_prefix.rstrip() + "\n\n" + block + "\n"
             else:
                 new_content = block + "\n"
+        else:
+            new_content = block + "\n"
     else:
         new_content = block + "\n"
 
@@ -515,6 +525,12 @@ def uninstall(
                 content = resolved_codex.read_text(encoding="utf-8")
                 if CODEX_BLOCK_REGEX.search(content):
                     cleaned = CODEX_BLOCK_REGEX.sub("", content).strip()
+                    cleaned = re.sub(
+                        r"^[ \t]*#[ \t]*(.*?)[ \t]*#[ \t]*agy-override\s*$",
+                        r"\1",
+                        cleaned,
+                        flags=re.MULTILINE,
+                    )
                     if cleaned:
                         cleaned += "\n"
                     atomic_write_file(resolved_codex, cleaned, mode=0o600)
