@@ -1,5 +1,6 @@
 import unittest
 import json
+import uuid
 from bridge.transform import (
     openai_to_cloudcode_request,
     parse_cloudcode_sse_event,
@@ -300,7 +301,12 @@ class TestOpenAIToCloudCodeRequest(unittest.TestCase):
         self.assertEqual(contents[1]["role"], "model")
         self.assertEqual(
             contents[1]["parts"],
-            [{"functionCall": {"name": "get_weather", "args": {"location": "Tokyo"}}}],
+            [
+                {
+                    "thoughtSignature": "context_engineering_is_the_way_to_go",
+                    "functionCall": {"name": "get_weather", "args": {"location": "Tokyo"}},
+                }
+            ],
         )
 
     def test_only_system_messages_raises_value_error(self):
@@ -1701,10 +1707,11 @@ class TestOpenAIToolCallingAndAliasing(unittest.TestCase):
             [
                 {"text": "Checking the weather now."},
                 {
+                    "thoughtSignature": "context_engineering_is_the_way_to_go",
                     "functionCall": {
                         "name": "get_weather",
                         "args": {"location": "Tokyo"},
-                    }
+                    },
                 },
             ],
         )
@@ -1749,7 +1756,12 @@ class TestOpenAIToolCallingAndAliasing(unittest.TestCase):
         self.assertEqual(contents[1]["role"], "model")
         self.assertEqual(
             contents[1]["parts"],
-            [{"functionCall": {"name": "my_calc", "args": {"x": 5}}}],
+            [
+                {
+                    "thoughtSignature": "context_engineering_is_the_way_to_go",
+                    "functionCall": {"name": "my_calc", "args": {"x": 5}},
+                }
+            ],
         )
         self.assertEqual(contents[2]["role"], "user")
         self.assertEqual(
@@ -1765,7 +1777,77 @@ class TestOpenAIToolCallingAndAliasing(unittest.TestCase):
         )
 
 
+class TestThoughtSignatureManagement(unittest.TestCase):
+    def test_default_sentinel_fallback(self):
+        from bridge.transform import get_thought_signature, DUMMY_THOUGHT_SIGNATURE
+
+        self.assertEqual(
+            get_thought_signature("nonexistent_call_id"),
+            DUMMY_THOUGHT_SIGNATURE,
+        )
+        self.assertEqual(
+            get_thought_signature(None, "nonexistent_fn", {"a": 1}),
+            DUMMY_THOUGHT_SIGNATURE,
+        )
+
+    def test_cache_and_retrieve_by_call_id(self):
+        from bridge.transform import cache_thought_signature, get_thought_signature
+
+        call_id = f"test_call_{uuid.uuid4().hex}"
+        sig = "sig_token_12345"
+        cache_thought_signature(call_id=call_id, signature=sig)
+        self.assertEqual(get_thought_signature(call_id=call_id), sig)
+
+    def test_cache_and_retrieve_by_name_and_args(self):
+        from bridge.transform import cache_thought_signature, get_thought_signature
+
+        sig = "sig_calc_98765"
+        fn_name = "calculate_tax"
+        fn_args = {"amount": 100, "rate": 0.21}
+        cache_thought_signature(signature=sig, name=fn_name, args=fn_args)
+        # Check retrieval with same args
+        self.assertEqual(
+            get_thought_signature(call_id=None, name=fn_name, args=fn_args),
+            sig,
+        )
+        # Check retrieval when args is json string
+        self.assertEqual(
+            get_thought_signature(call_id=None, name=fn_name, args='{"amount": 100, "rate": 0.21}'),
+            sig,
+        )
+
+    def test_openai_request_preserves_explicit_thought_signature(self):
+        sig = "custom_user_sig_555"
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [
+                {"role": "user", "content": "Run tool"},
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "call_custom_sig",
+                            "type": "function",
+                            "function": {"name": "run", "arguments": "{}"},
+                            "thought_signature": sig,
+                        }
+                    ],
+                },
+            ],
+        }
+        _, contents, _, _, _ = openai_to_cloudcode_request(payload, "test-project")
+        self.assertEqual(
+            contents[1]["parts"][0],
+            {
+                "thoughtSignature": sig,
+                "functionCall": {"name": "run", "args": {}},
+            },
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
+
 
 

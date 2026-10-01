@@ -33,6 +33,7 @@ from bridge.transform import (
     build_openai_model_list,
     build_openai_error_response,
     check_sse_error,
+    cache_thought_signature,
 )
 from bridge.dashboard import render_dashboard, get_status_data
 from bridge.i18n import parse_accept_language
@@ -699,7 +700,10 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                             tc_id = f"call_{tc_id[6:]}"
                         args = fc.get("args", {})
                         args_str = json.dumps(args) if isinstance(args, (dict, list)) else str(args or "{}")
-                        delta_tool_calls.append({
+                        thought_sig = fc.get("thought_signature") or fc.get("thoughtSignature")
+                        if thought_sig:
+                            cache_thought_signature(call_id=tc_id, signature=thought_sig, name=fc.get("name"), args=args)
+                        call_dict: dict[str, Any] = {
                             "index": tc_index,
                             "id": tc_id,
                             "type": "function",
@@ -707,7 +711,10 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                                 "name": fc.get("name", ""),
                                 "arguments": args_str,
                             },
-                        })
+                        }
+                        if thought_sig:
+                            call_dict["thought_signature"] = thought_sig
+                        delta_tool_calls.append(call_dict)
                         tc_index += 1
 
                 if delta_text or delta_tool_calls:
@@ -803,14 +810,20 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                                 tc_id = f"call_{tc_id[6:]}"
                             args = fc.get("args", {})
                             args_str = json.dumps(args) if isinstance(args, (dict, list)) else str(args or "{}")
-                            formatted_tool_calls.append({
+                            thought_sig = fc.get("thought_signature") or fc.get("thoughtSignature")
+                            if thought_sig:
+                                cache_thought_signature(call_id=tc_id, signature=thought_sig, name=fc.get("name"), args=args)
+                            call_dict: dict[str, Any] = {
                                 "id": tc_id,
                                 "type": "function",
                                 "function": {
                                     "name": fc.get("name", ""),
                                     "arguments": args_str,
                                 },
-                            })
+                            }
+                            if thought_sig:
+                                call_dict["thought_signature"] = thought_sig
+                            formatted_tool_calls.append(call_dict)
 
                     full_text = "".join(text_parts)
                     completion_obj = build_openai_completion(

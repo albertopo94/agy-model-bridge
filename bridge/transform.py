@@ -1,9 +1,83 @@
 """Pure transformation functions between OpenAI and Google Cloud Code Assist schemas."""
 
 import json
+import threading
 import time
 from typing import Any
 import uuid
+
+DUMMY_THOUGHT_SIGNATURE: str = "context_engineering_is_the_way_to_go"
+_THOUGHT_SIG_CACHE: dict[str, str] = {}
+_THOUGHT_SIG_LOCK = threading.Lock()
+_THOUGHT_SIG_MAX = 2048
+
+
+def cache_thought_signature(
+    call_id: str | None = None,
+    signature: str | None = None,
+    name: str | None = None,
+    args: Any = None,
+) -> None:
+    """Stores a thought signature associated with a tool call ID and/or function signature."""
+    if not signature:
+        return
+    with _THOUGHT_SIG_LOCK:
+        while len(_THOUGHT_SIG_CACHE) >= _THOUGHT_SIG_MAX:
+            first_key = next(iter(_THOUGHT_SIG_CACHE))
+            _THOUGHT_SIG_CACHE.pop(first_key, None)
+        if call_id:
+            _THOUGHT_SIG_CACHE[f"id:{call_id}"] = signature
+        if name:
+            args_key = ""
+            if isinstance(args, dict):
+                try:
+                    args_key = json.dumps(args, sort_keys=True)
+                except Exception:
+                    args_key = str(args)
+            elif isinstance(args, str):
+                try:
+                    parsed = json.loads(args)
+                    if isinstance(parsed, dict):
+                        args_key = json.dumps(parsed, sort_keys=True)
+                    else:
+                        args_key = args
+                except Exception:
+                    args_key = args
+            _THOUGHT_SIG_CACHE[f"call:{name}:{args_key}"] = signature
+
+
+def get_thought_signature(
+    call_id: str | None = None,
+    name: str | None = None,
+    args: Any = None,
+) -> str:
+    """Retrieves a cached thought signature, or returns the documented skip-validation sentinel."""
+    with _THOUGHT_SIG_LOCK:
+        if call_id:
+            sig = _THOUGHT_SIG_CACHE.get(f"id:{call_id}")
+            if sig:
+                return sig
+        if name:
+            args_key = ""
+            if isinstance(args, dict):
+                try:
+                    args_key = json.dumps(args, sort_keys=True)
+                except Exception:
+                    args_key = str(args)
+            elif isinstance(args, str):
+                try:
+                    parsed = json.loads(args)
+                    if isinstance(parsed, dict):
+                        args_key = json.dumps(parsed, sort_keys=True)
+                    else:
+                        args_key = args
+                except Exception:
+                    args_key = args
+            sig = _THOUGHT_SIG_CACHE.get(f"call:{name}:{args_key}")
+            if sig:
+                return sig
+    return DUMMY_THOUGHT_SIGNATURE
+
 
 from bridge.client import (
     AuthenticationError,
@@ -425,7 +499,17 @@ def openai_to_cloudcode_request(
                             args_dict = {"raw": args_raw} if args_raw else {}
                     else:
                         args_dict = {}
-                    turn_parts.append({"functionCall": {"name": fn_name, "args": args_dict}})
+                    sig = (
+                        tc.get("thoughtSignature")
+                        or tc.get("thought_signature")
+                        or (fn.get("thoughtSignature") if isinstance(fn, dict) else None)
+                        or (fn.get("thought_signature") if isinstance(fn, dict) else None)
+                        or get_thought_signature(call_id, fn_name, args_dict)
+                    )
+                    turn_parts.append({
+                        "thoughtSignature": sig,
+                        "functionCall": {"name": fn_name, "args": args_dict},
+                    })
             elif msg.get("function_call") and isinstance(msg.get("function_call"), dict):
                 fc = msg.get("function_call")
                 fn_name = fc.get("name") or "unknown"
@@ -444,7 +528,15 @@ def openai_to_cloudcode_request(
                         args_dict = {"raw": args_raw} if args_raw else {}
                 else:
                     args_dict = {}
-                turn_parts.append({"functionCall": {"name": fn_name, "args": args_dict}})
+                sig = (
+                    fc.get("thoughtSignature")
+                    or fc.get("thought_signature")
+                    or get_thought_signature(call_id, fn_name, args_dict)
+                )
+                turn_parts.append({
+                    "thoughtSignature": sig,
+                    "functionCall": {"name": fn_name, "args": args_dict},
+                })
             if not turn_parts:
                 part_text = content if content and content.strip() else " "
                 turn_parts = [{"text": part_text}]

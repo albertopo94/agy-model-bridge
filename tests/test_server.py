@@ -1261,6 +1261,38 @@ class TestServerEndpoints(unittest.TestCase):
         self.assertEqual(resp["output"][0]["type"], "function_call")
         self.assertEqual(resp["output"][0]["name"], "mem_current_project")
 
+    def test_chat_completions_caches_thought_signature_in_streaming_and_non_streaming(self):
+        from bridge.transform import get_thought_signature
+
+        # 1. Non-streaming
+        handler = self.server.RequestHandlerClass.__new__(self.server.RequestHandlerClass)
+        handler.client = MagicMock()
+        sig = "sig_stream_chat_12345"
+        handler.client.stream_generate_content.return_value = iter([
+            f'data: {{"candidates": [{{"content": {{"parts": [{{"thoughtSignature": "{sig}", "functionCall": {{"name": "terminal", "args": {{"cmd": "date"}}}}}}]}}}}]}}\n'
+        ])
+        handler.project = "test-project"
+        handler._send_json = MagicMock()
+
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [{"role": "user", "content": "What day is today?"}],
+            "stream": False,
+        }
+        handler._handle_chat_completion(payload)
+
+        handler._send_json.assert_called_once()
+        code, resp = handler._send_json.call_args[0]
+        self.assertEqual(code, 200)
+        tc = resp["choices"][0]["message"]["tool_calls"][0]
+        self.assertEqual(tc["function"]["name"], "terminal")
+        self.assertEqual(tc["thought_signature"], sig)
+
+        # Verify signature was cached
+        self.assertEqual(get_thought_signature(call_id=tc["id"]), sig)
+        self.assertEqual(get_thought_signature(name="terminal", args={"cmd": "date"}), sig)
+
 
 if __name__ == "__main__":
     unittest.main()
+

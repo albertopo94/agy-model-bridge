@@ -17,34 +17,17 @@ from bridge.transform import (
     extract_function_calls,
     extract_text_delta,
     extract_usage,
+    DUMMY_THOUGHT_SIGNATURE,
+    cache_thought_signature,
+    get_thought_signature,
     parse_cloudcode_sse_event,
     resolve_model_and_thinking,
     sanitize_schema_for_gemini,
 )
 
 _CACHE_LOCK = threading.Lock()
-_THOUGHT_SIGNATURES: dict[str, str] = {}
 _TOOL_NAMES: dict[str, str] = {}
 _MAX_CACHE_SIZE = 2048
-
-
-def cache_thought_signature(call_id: str, signature: str) -> None:
-    """Stores a thought signature associated with a tool call ID."""
-    if not call_id or not signature:
-        return
-    with _CACHE_LOCK:
-        if len(_THOUGHT_SIGNATURES) >= _MAX_CACHE_SIZE:
-            first_key = next(iter(_THOUGHT_SIGNATURES))
-            _THOUGHT_SIGNATURES.pop(first_key, None)
-        _THOUGHT_SIGNATURES[call_id] = signature
-
-
-def get_thought_signature(call_id: str) -> str | None:
-    """Retrieves a cached thought signature for a tool call ID."""
-    if not call_id:
-        return None
-    with _CACHE_LOCK:
-        return _THOUGHT_SIGNATURES.get(call_id)
 
 
 def cache_tool_name(call_id: str, name: str) -> None:
@@ -151,10 +134,9 @@ def responses_to_cloudcode_request(
                 sig = (
                     item.get("thoughtSignature")
                     or item.get("thought_signature")
-                    or get_thought_signature(call_id)
+                    or get_thought_signature(call_id, name, args_dict)
                 )
-                if sig:
-                    part["thoughtSignature"] = sig
+                part["thoughtSignature"] = sig
                 turn_parts = [part]
                 turn_role = "model"
             elif item_type == "function_call_output":

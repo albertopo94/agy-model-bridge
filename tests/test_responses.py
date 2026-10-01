@@ -154,7 +154,12 @@ class TestResponsesRequestTranslation(unittest.TestCase):
         self.assertEqual(contents[1]["role"], "model")
         self.assertEqual(
             contents[1]["parts"],
-            [{"functionCall": {"name": "search", "args": {"query": "weather", "days": 3}}}],
+            [
+                {
+                    "thoughtSignature": "context_engineering_is_the_way_to_go",
+                    "functionCall": {"name": "search", "args": {"query": "weather", "days": 3}},
+                }
+            ],
         )
         self.assertEqual(contents[2]["role"], "user")
         self.assertIsNone(tools)
@@ -198,8 +203,14 @@ class TestResponsesRequestTranslation(unittest.TestCase):
         self.assertEqual(
             contents[1]["parts"],
             [
-                {"functionCall": {"name": "exec_command", "args": {"cmd": "ls"}}},
-                {"functionCall": {"name": "read_file", "args": {"path": "a.txt"}}},
+                {
+                    "thoughtSignature": "context_engineering_is_the_way_to_go",
+                    "functionCall": {"name": "exec_command", "args": {"cmd": "ls"}},
+                },
+                {
+                    "thoughtSignature": "context_engineering_is_the_way_to_go",
+                    "functionCall": {"name": "read_file", "args": {"path": "a.txt"}},
+                },
             ],
         )
         # Turn 2: user tool outputs grouped together with resolved function names
@@ -245,7 +256,10 @@ class TestResponsesRequestTranslation(unittest.TestCase):
             contents[1]["parts"],
             [
                 {"text": "Checking status now..."},
-                {"functionCall": {"name": "check_status", "args": {"service": "api"}}},
+                {
+                    "thoughtSignature": "context_engineering_is_the_way_to_go",
+                    "functionCall": {"name": "check_status", "args": {"service": "api"}},
+                },
             ],
         )
 
