@@ -8,6 +8,11 @@ from bridge.anthropic import (
     build_anthropic_sse_events,
     build_anthropic_error_response,
 )
+from bridge.transform import (
+    DUMMY_THOUGHT_SIGNATURE,
+    get_thought_signature,
+    get_tool_name,
+)
 
 
 class TestAnthropicRequestTranslation(unittest.TestCase):
@@ -207,17 +212,104 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
         # Starts with assistant turn, so "Hello" user turn prepended
         self.assertEqual(contents[0]["role"], "user")
         self.assertEqual(contents[0]["parts"], [{"text": "Hello"}])
-        # Tool call
+        # Tool call in model turn
         self.assertEqual(contents[1]["role"], "model")
-        self.assertEqual(contents[1]["parts"], [{"text": '[Tool Call]: get_weather({"location": "Paris"})'}])
-        # Tool results merged or sequenced
+        self.assertEqual(len(contents[1]["parts"]), 1)
+        part = contents[1]["parts"][0]
+        self.assertEqual(part.get("functionCall"), {"name": "get_weather", "args": {"location": "Paris"}})
+        self.assertTrue(part.get("thoughtSignature"))
+        # Tool results merged into user turn
+        self.assertEqual(contents[2]["role"], "user")
+        self.assertEqual(len(contents[2]["parts"]), 2)
+        self.assertEqual(
+            contents[2]["parts"][0],
+            {"functionResponse": {"name": "get_weather", "response": {"output": "Sunny, 22C"}}},
+        )
+        self.assertEqual(
+            contents[2]["parts"][1],
+            {"functionResponse": {"name": "tool", "response": {"temperature": 22}}},
+        )
+
+    def test_mixed_text_and_tool_use_in_assistant_turn(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [
+                {"role": "user", "content": "What is the weather in Tokyo?"},
+                {
+                    "role": "assistant",
+                    "content": [
+                        {"type": "text", "text": "I will check the weather for Tokyo."},
+                        {"type": "tool_use", "id": "t_tokyo", "name": "get_weather", "input": {"city": "Tokyo"}},
+                    ],
+                },
+            ],
+        }
+        _, contents, _, _, _ = anthropic_to_cloudcode_request(payload, "test-project")
+        # Turn 0: user
+        self.assertEqual(contents[0]["role"], "user")
+        self.assertEqual(contents[0]["parts"], [{"text": "What is the weather in Tokyo?"}])
+        # Turn 1: model with both text and functionCall parts
+        self.assertEqual(contents[1]["role"], "model")
+        self.assertEqual(len(contents[1]["parts"]), 2)
+        self.assertEqual(contents[1]["parts"][0], {"text": "I will check the weather for Tokyo."})
+        self.assertEqual(contents[1]["parts"][1]["functionCall"], {"name": "get_weather", "args": {"city": "Tokyo"}})
+        self.assertTrue(contents[1]["parts"][1].get("thoughtSignature"))
+        # Since last turn was model, alternation appends "Continue" user turn
+        self.assertEqual(contents[2]["role"], "user")
+        self.assertEqual(contents[2]["parts"], [{"text": "Continue"}])
+
+    def test_tool_use_explicit_thought_signature_and_list_tool_result(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [
+                {"role": "user", "content": "Run ls"},
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "t_bash",
+                            "name": "Bash",
+                            "input": {"command": "ls -la"},
+                            "thoughtSignature": "explicit_sig_456",
+                        }
+                    ],
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "t_bash",
+                            "content": [
+                                {"type": "text", "text": "file1.txt\nfile2.txt"},
+                            ],
+                        }
+                    ],
+                },
+            ],
+        }
+        _, contents, _, _, _ = anthropic_to_cloudcode_request(payload, "test-project")
+        self.assertEqual(len(contents), 3)
+        # Turn 1: model
+        self.assertEqual(contents[1]["role"], "model")
+        self.assertEqual(
+            contents[1]["parts"][0],
+            {
+                "thoughtSignature": "explicit_sig_456",
+                "functionCall": {"name": "Bash", "args": {"command": "ls -la"}},
+            },
+        )
+        # Turn 2: user tool_result extracted from block list
         self.assertEqual(contents[2]["role"], "user")
         self.assertEqual(
-            contents[2]["parts"],
-            [
-                {"text": "[Tool Result]: Sunny, 22C"},
-                {"text": '[Tool Result]: {"temperature": 22}'},
-            ],
+            contents[2]["parts"][0],
+            {
+                "functionResponse": {
+                    "name": "Bash",
+                    "response": {"output": "file1.txt\nfile2.txt"},
+                }
+            },
         )
 
     def test_thinking_config_integration(self):
@@ -344,6 +436,20 @@ class TestAnthropicResponseBuilder(unittest.TestCase):
         self.assertEqual(resp["content"][0]["type"], "thinking")
         self.assertEqual(resp["content"][1]["type"], "text")
         self.assertEqual(resp["content"][2]["type"], "tool_use")
+
+    def test_build_anthropic_message_caches_tool_info(self):
+        resp = build_anthropic_message(
+            message_id="msg_cache_test",
+            model="gemini-2.5-pro",
+            tool_calls=[{
+                "id": "toolu_cache123",
+                "name": "lookup_user",
+                "args": {"uid": 42},
+                "thought_signature": "sig_cache123",
+            }],
+        )
+        self.assertEqual(get_tool_name("toolu_cache123"), "lookup_user")
+        self.assertEqual(get_thought_signature("toolu_cache123", "lookup_user", {"uid": 42}), "sig_cache123")
 
 
 class TestAnthropicSSEEvents(unittest.TestCase):
@@ -523,6 +629,15 @@ class TestAnthropicSSEEvents(unittest.TestCase):
                         delta_events.append(json.loads(line[5:].strip()))
         self.assertEqual(len(delta_events), 1)
         self.assertEqual(delta_events[0]["delta"]["stop_reason"], "end_turn")
+
+    def test_sse_events_caches_thought_signature_and_tool_name(self):
+        mock_upstream_lines = [
+            'data: {"candidates": [{"content": {"parts": [{"functionCall": {"id": "toolu_stream999", "name": "fetch_data", "args": {"key": "val"}}, "thoughtSignature": "stream_sig_999"}]}}]}\n',
+            'data: {"candidates": [{"finishReason": "STOP"}]}\n',
+        ]
+        list(build_anthropic_sse_events(iter(mock_upstream_lines), "gemini-2.5-pro"))
+        self.assertEqual(get_tool_name("toolu_stream999"), "fetch_data")
+        self.assertEqual(get_thought_signature("toolu_stream999", "fetch_data", {"key": "val"}), "stream_sig_999")
 
 
 class TestAnthropicErrorResponses(unittest.TestCase):

@@ -20,40 +20,20 @@ from bridge.transform import (
     DUMMY_THOUGHT_SIGNATURE,
     cache_thought_signature,
     get_thought_signature,
+    cache_tool_name,
+    get_tool_name,
     parse_cloudcode_sse_event,
     resolve_model_and_thinking,
     sanitize_schema_for_gemini,
 )
 
 _CACHE_LOCK = threading.Lock()
-_TOOL_NAMES: dict[str, str] = {}
-_MAX_CACHE_SIZE = 2048
-
-
-def cache_tool_name(call_id: str, name: str) -> None:
-    """Stores a tool function name associated with a tool call ID."""
-    if not call_id or not name:
-        return
-    with _CACHE_LOCK:
-        if len(_TOOL_NAMES) >= _MAX_CACHE_SIZE:
-            first_key = next(iter(_TOOL_NAMES))
-            _TOOL_NAMES.pop(first_key, None)
-        _TOOL_NAMES[call_id] = name
-
-
-def get_tool_name(call_id: str) -> str | None:
-    """Retrieves a cached tool function name for a tool call ID."""
-    if not call_id:
-        return None
-    with _CACHE_LOCK:
-        return _TOOL_NAMES.get(call_id)
 
 
 def clear_responses_cache() -> None:
     """Clears in-memory caches (primarily for testing)."""
     with _CACHE_LOCK:
-        _THOUGHT_SIGNATURES.clear()
-        _TOOL_NAMES.clear()
+        pass
 
 
 def _parse_arguments_to_dict(args: Any) -> dict[str, Any]:

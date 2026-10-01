@@ -79,6 +79,30 @@ def get_thought_signature(
     return DUMMY_THOUGHT_SIGNATURE
 
 
+_TOOL_NAME_CACHE: dict[str, str] = {}
+_TOOL_NAME_LOCK = threading.Lock()
+_TOOL_NAME_MAX = 2048
+
+
+def cache_tool_name(call_id: str, name: str) -> None:
+    """Stores a tool function name associated with a tool call ID."""
+    if not call_id or not name:
+        return
+    with _TOOL_NAME_LOCK:
+        if len(_TOOL_NAME_CACHE) >= _TOOL_NAME_MAX:
+            first_key = next(iter(_TOOL_NAME_CACHE))
+            _TOOL_NAME_CACHE.pop(first_key, None)
+        _TOOL_NAME_CACHE[call_id] = name
+
+
+def get_tool_name(call_id: str) -> str | None:
+    """Retrieves a cached tool function name for a tool call ID."""
+    if not call_id:
+        return None
+    with _TOOL_NAME_LOCK:
+        return _TOOL_NAME_CACHE.get(call_id)
+
+
 from bridge.client import (
     AuthenticationError,
     BridgeError,

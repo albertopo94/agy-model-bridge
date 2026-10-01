@@ -10,12 +10,16 @@ from typing import Any, Iterator
 
 from bridge.transform import (
     build_thinking_config,
+    cache_thought_signature,
+    cache_tool_name,
     check_sse_error,
     extract_finish_reason,
     extract_function_calls,
     extract_text_delta,
     extract_thought_delta,
     extract_usage,
+    get_thought_signature,
+    get_tool_name,
     parse_cloudcode_sse_event,
     resolve_model_and_thinking,
     sanitize_schema_for_gemini,
@@ -69,73 +73,125 @@ def anthropic_to_cloudcode_request(
 
     # Parse message turns
     contents: list[dict[str, Any]] = []
+    tool_names_by_call_id: dict[str, str] = {}
+
+    def _add_part(turn_role: str, part: dict[str, Any]) -> None:
+        if contents and contents[-1]["role"] == turn_role:
+            contents[-1]["parts"].append(part)
+        else:
+            contents.append({"role": turn_role, "parts": [part]})
+
     for msg in messages:
         if not isinstance(msg, dict):
             raise ValueError("Each message must be a dictionary")
         role = msg.get("role")
-
         raw_content = msg.get("content")
-        if isinstance(raw_content, str):
-            text = raw_content
-        elif isinstance(raw_content, list):
-            parts_str = []
+
+        if role in ("system", "developer"):
+            if isinstance(raw_content, str):
+                if raw_content.strip():
+                    system_texts.append(raw_content.strip())
+            elif isinstance(raw_content, list):
+                for item in raw_content:
+                    if isinstance(item, dict) and (item.get("type") == "text" or "text" in item):
+                        txt = str(item.get("text") or "")
+                        if txt.strip():
+                            system_texts.append(txt.strip())
+                    elif isinstance(item, str) and item.strip():
+                        system_texts.append(item.strip())
+            continue
+
+        if role in ("tool", "function"):
+            call_id = msg.get("tool_call_id") or msg.get("name") or ""
+            fn_name = msg.get("name") or tool_names_by_call_id.get(call_id) or get_tool_name(call_id) or "tool"
+            tr_content = raw_content
+            if isinstance(tr_content, list):
+                extracted_texts = []
+                for nb in tr_content:
+                    if isinstance(nb, dict) and (nb.get("type") == "text" or "text" in nb):
+                        extracted_texts.append(str(nb.get("text") or ""))
+                    elif isinstance(nb, str):
+                        extracted_texts.append(nb)
+                tr_content = "\n".join(extracted_texts) if extracted_texts else json.dumps(tr_content)
+            resp_payload = tr_content if isinstance(tr_content, dict) else {"output": tr_content}
+            _add_part("user", {"functionResponse": {"name": fn_name, "response": resp_payload}})
+            continue
+
+        if isinstance(raw_content, list):
+            parts_added = 0
             for block in raw_content:
                 if isinstance(block, dict):
                     b_type = block.get("type")
-                    if b_type == "tool_result":
+                    if b_type == "tool_use":
+                        call_id = block.get("id") or f"toolu_{uuid.uuid4().hex[:16]}"
+                        name = block.get("name", "tool")
+                        tool_names_by_call_id[call_id] = name
+                        cache_tool_name(call_id, name)
+                        args = block.get("input")
+                        if args is None:
+                            args = {}
+                        elif isinstance(args, str):
+                            try:
+                                args = json.loads(args)
+                            except Exception:
+                                args = {"raw": args}
+                        if not isinstance(args, dict):
+                            args = {}
+                        sig = (
+                            block.get("thoughtSignature")
+                            or block.get("thought_signature")
+                            or get_thought_signature(call_id, name, args)
+                        )
+                        part = {
+                            "thoughtSignature": sig,
+                            "functionCall": {"name": name, "args": args},
+                        }
+                        _add_part("model", part)
+                        parts_added += 1
+                    elif b_type == "tool_result":
+                        call_id = block.get("tool_use_id", "")
+                        name = tool_names_by_call_id.get(call_id) or get_tool_name(call_id) or "tool"
                         tr_content = block.get("content")
                         if tr_content is None:
                             tr_content = block.get("text", "")
                         if isinstance(tr_content, list):
-                            nested_strs = []
+                            extracted_texts = []
                             for nb in tr_content:
-                                if isinstance(nb, dict):
-                                    nested_strs.append(str(nb.get("text") or ""))
+                                if isinstance(nb, dict) and (nb.get("type") == "text" or "text" in nb):
+                                    extracted_texts.append(str(nb.get("text") or ""))
                                 elif isinstance(nb, str):
-                                    nested_strs.append(nb)
-                            content_str = "\n".join(nested_strs) if nested_strs else json.dumps(tr_content)
-                        elif isinstance(tr_content, (dict, list)):
-                            content_str = json.dumps(tr_content)
-                        else:
-                            content_str = str(tr_content)
-                        parts_str.append(f"[Tool Result]: {content_str}")
-                    elif b_type == "tool_use":
-                        name = block.get("name", "tool")
-                        inp = block.get("input")
-                        if inp is None:
-                            inp = {}
-                        parts_str.append(f"[Tool Call]: {name}({json.dumps(inp)})")
+                                    extracted_texts.append(nb)
+                            tr_content = "\n".join(extracted_texts) if extracted_texts else json.dumps(tr_content)
+                        response_payload = tr_content if isinstance(tr_content, dict) else {"output": tr_content}
+                        part = {"functionResponse": {"name": name, "response": response_payload}}
+                        _add_part("user", part)
+                        parts_added += 1
                     elif b_type == "text" or "text" in block:
-                        parts_str.append(str(block.get("text") or ""))
-                elif isinstance(block, str):
-                    parts_str.append(block)
-            text = "\n".join(parts_str) if any(p.startswith("[Tool ") for p in parts_str) else "".join(parts_str)
+                        text_str = str(block.get("text") or "")
+                        if text_str and text_str.strip():
+                            part = {"text": text_str}
+                            part_role = "model" if role == "assistant" else "user"
+                            _add_part(part_role, part)
+                            parts_added += 1
+                elif isinstance(block, str) and block.strip():
+                    part = {"text": block}
+                    part_role = "model" if role == "assistant" else "user"
+                    _add_part(part_role, part)
+                    parts_added += 1
+            if parts_added == 0:
+                part_role = "model" if role == "assistant" else "user"
+                _add_part(part_role, {"text": " "})
+        elif isinstance(raw_content, str):
+            text_str = raw_content if raw_content.strip() else " "
+            part_role = "model" if role == "assistant" else "user"
+            _add_part(part_role, {"text": text_str})
         elif raw_content is None:
-            text = ""
+            part_role = "model" if role == "assistant" else "user"
+            _add_part(part_role, {"text": " "})
         else:
-            text = str(raw_content)
-
-        if role in ("system", "developer"):
-            if text and text.strip():
-                system_texts.append(text.strip())
-            continue
-        elif role == "user":
-            turn_role = "user"
-        elif role == "assistant":
-            turn_role = "model"
-        elif role in ("tool", "function"):
-            turn_role = "user"
-            text = f"[Tool Result]: {text}"
-        else:
-            turn_role = "user"
-
-        part_text = text if text and text.strip() else " "
-        turn_parts = [{"text": part_text}]
-
-        if contents and contents[-1]["role"] == turn_role:
-            contents[-1]["parts"].extend(turn_parts)
-        else:
-            contents.append({"role": turn_role, "parts": turn_parts})
+            text_str = str(raw_content)
+            part_role = "model" if role == "assistant" else "user"
+            _add_part(part_role, {"text": text_str if text_str.strip() else " "})
 
     system_instruction: dict[str, Any] | None = None
     if system_texts:
@@ -254,6 +310,11 @@ def build_anthropic_message(
                     call_args = json.loads(call_args)
                 except Exception:
                     pass
+            if call_id and call_name:
+                cache_tool_name(call_id, call_name)
+            thought_sig = call.get("thought_signature") or call.get("thoughtSignature")
+            if thought_sig:
+                cache_thought_signature(call_id=call_id, signature=thought_sig, name=call_name, args=call_args)
             content.append({
                 "type": "tool_use",
                 "id": call_id,
@@ -373,6 +434,26 @@ def build_anthropic_sse_events(lines_gen: Iterator[str], model: str) -> Iterator
                 yield f"event: content_block_stop\ndata: {json.dumps({'type': 'content_block_stop', 'index': text_block_index})}\n\n"
                 text_block_open = False
 
+            for fc in fc_list:
+                call_id = fc.get("id") or f"toolu_{uuid.uuid4().hex[:16]}"
+                fc["id"] = call_id
+                name = fc.get("name", "")
+                args = fc.get("args") or {}
+                sig = fc.get("thought_signature") or fc.get("thoughtSignature")
+                if not sig:
+                    resp = parsed.get("response") if isinstance(parsed.get("response"), dict) else parsed
+                    cands = resp.get("candidates") if isinstance(resp, dict) else None
+                    if cands and isinstance(cands, list) and len(cands) > 0 and isinstance(cands[0], dict):
+                        cand = cands[0]
+                        sig = cand.get("thoughtSignature") or cand.get("thought_signature")
+                        if not sig and isinstance(cand.get("content"), dict):
+                            sig = cand["content"].get("thoughtSignature") or cand["content"].get("thought_signature")
+                if sig:
+                    fc["thought_signature"] = sig
+                    cache_thought_signature(call_id=call_id, signature=sig, name=name, args=args)
+                if call_id and name:
+                    cache_tool_name(call_id, name)
+
             accumulated_tool_calls.extend(fc_list)
 
     # 3. Close open blocks
@@ -393,6 +474,11 @@ def build_anthropic_sse_events(lines_gen: Iterator[str], model: str) -> Iterator
         call_args = call.get("args")
         if call_args is None:
             call_args = {}
+        if call_id and call_name:
+            cache_tool_name(call_id, call_name)
+        thought_sig = call.get("thought_signature") or call.get("thoughtSignature")
+        if thought_sig:
+            cache_thought_signature(call_id=call_id, signature=thought_sig, name=call_name, args=call_args)
         json_args = json.dumps(call_args) if not isinstance(call_args, str) else call_args
 
         block_start = {
