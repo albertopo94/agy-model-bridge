@@ -275,6 +275,8 @@ class TestDashboardRendering(unittest.TestCase):
         )
 
         self.assertIn('viewBox="0 0 24 24"', by_id["hermes"].get("icon_svg", ""))
+        self.assertIn('id="nousresearch-hermes"', by_id["hermes"].get("icon_svg", ""))
+        self.assertIn('fill="currentColor"', by_id["hermes"].get("icon_svg", ""))
         self.assertEqual(
             by_id["hermes"]["auto_cmd"]("127.0.0.1:24980"),
             "agy-bridge setup-hermes",
