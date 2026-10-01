@@ -85,7 +85,7 @@ def test_dashboard(base_url: str) -> None:
             unescaped_body = html.unescape(html_body)
             for expected_snippet in (
                 "# ~/.codex/config.toml",
-                "[model]",
+                "[model_providers.agy]",
                 'wire_api = "responses"',
                 "export ANTHROPIC_BASE_URL=",
                 "export OPENAI_BASE_URL=",

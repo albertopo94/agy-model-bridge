@@ -153,7 +153,19 @@ class TestDashboardRendering(unittest.TestCase):
         # Refined manual configuration snippets (checked both in unescaped HTML and CLIENT_CARDS)
         import html as html_lib
         unescaped_html = html_lib.unescape(html)
-        self.assertIn('# ~/.codex/config.toml\n[model]\nwire_api = "responses"\nbase_url = "http://127.0.0.1:24980/v1"', unescaped_html)
+        expected_codex_toml = (
+            '# ~/.codex/config.toml\n'
+            'model = "gemini-3.8-flash-high"\n'
+            'model_provider = "agy"\n'
+            'model_context_window = 1048576\n'
+            'model_auto_compact_token_limit = 943718\n\n'
+            '[model_providers.agy]\n'
+            'name = "agy"\n'
+            'base_url = "http://127.0.0.1:24980/v1"\n'
+            'wire_api = "responses"\n'
+            'requires_openai_auth = false'
+        )
+        self.assertIn(expected_codex_toml, unescaped_html)
         self.assertIn('export ANTHROPIC_BASE_URL="http://127.0.0.1:24980"\nexport ANTHROPIC_AUTH_TOKEN="local-bridge"', unescaped_html)
         self.assertIn('export OPENAI_BASE_URL="http://127.0.0.1:24980/v1"\nexport OPENAI_API_KEY="local-bridge"', unescaped_html)
         self.assertIn('BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY=local-bridge', unescaped_html)
@@ -221,7 +233,18 @@ class TestDashboardRendering(unittest.TestCase):
         )
         self.assertEqual(
             by_id["codex"]["manual_snippet"]("127.0.0.1:24980"),
-            '# ~/.codex/config.toml\n[model]\nwire_api = "responses"\nbase_url = "http://{addr}/v1"'.replace("{addr}", "127.0.0.1:24980"),
+            (
+                '# ~/.codex/config.toml\n'
+                'model = "gemini-3.8-flash-high"\n'
+                'model_provider = "agy"\n'
+                'model_context_window = 1048576\n'
+                'model_auto_compact_token_limit = 943718\n\n'
+                '[model_providers.agy]\n'
+                'name = "agy"\n'
+                'base_url = "http://127.0.0.1:24980/v1"\n'
+                'wire_api = "responses"\n'
+                'requires_openai_auth = false'
+            ),
         )
         self.assertEqual(by_id["codex"]["docs_url"], "https://github.com/openai/codex")
 

@@ -146,7 +146,18 @@ CLIENT_CARDS: list[dict[str, Any]] = [
             else "agy-bridge setup-codex"
         ),
         "restore_cmd": lambda addr: "agy-bridge restore-codex",
-        "manual_snippet": lambda addr: f'# ~/.codex/config.toml\n[model]\nwire_api = "responses"\nbase_url = "http://{addr}/v1"',
+        "manual_snippet": lambda addr: (
+            f'# ~/.codex/config.toml\n'
+            f'model = "gemini-3.8-flash-high"\n'
+            f'model_provider = "agy"\n'
+            f'model_context_window = 1048576\n'
+            f'model_auto_compact_token_limit = 943718\n\n'
+            f'[model_providers.agy]\n'
+            f'name = "agy"\n'
+            f'base_url = "http://{addr}/v1"\n'
+            f'wire_api = "responses"\n'
+            f'requires_openai_auth = false'
+        ),
         "docs_url": "https://github.com/openai/codex",
     },
     {
