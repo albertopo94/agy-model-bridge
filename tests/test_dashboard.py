@@ -139,10 +139,12 @@ class TestDashboardRendering(unittest.TestCase):
         self.assertNotIn("ANTHROPIC_CUSTOM_MODEL_OPTION", html)
         self.assertNotIn("mkdir -p ~/.codex", html)
 
-        # Claude Code mascot icon
+        # Claude Code mascot icon and Codex CLI icon
         self.assertIn('class="card-icon"', html)
         self.assertIn("#d77757", html)
         self.assertIn("#ffc400", html)
+        self.assertIn("codex-linear-gradient", html)
+        self.assertIn('viewBox="0 0 270.35 270.35"', html)
         self.assertIn("export OPENAI_BASE_URL", html)
         self.assertNotIn("npx freellmapi setup", html)
         self.assertIn("BASE_URL", html)
