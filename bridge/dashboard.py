@@ -110,11 +110,11 @@ CLIENT_CARDS: list[dict[str, Any]] = [
         "desc_es": "CLI con Anthropic Messages API (URL base sin /v1)",
         "icon_svg": CLAUDE_ICON_SVG,
         "auto_cmd": lambda addr: (
-            f"python3 -m bridge setup-claude --port {addr.rsplit(':', 1)[1]}"
+            f"agy-bridge setup-claude --port {addr.rsplit(':', 1)[1]}"
             if ":" in addr and addr.rsplit(":", 1)[1].isdigit() and addr.rsplit(":", 1)[1] != "24980"
-            else "python3 -m bridge setup-claude"
+            else "agy-bridge setup-claude"
         ),
-        "restore_cmd": lambda addr: "python3 -m bridge restore-claude",
+        "restore_cmd": lambda addr: "agy-bridge restore-claude",
         "manual_snippet": lambda addr: f'export ANTHROPIC_BASE_URL="http://{addr}"\nexport ANTHROPIC_AUTH_TOKEN="local-bridge"',
         "docs_url": "https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview",
     },
@@ -125,11 +125,11 @@ CLIENT_CARDS: list[dict[str, Any]] = [
         "desc_en": "OpenAI Responses API CLI (wire_api = 'responses')",
         "desc_es": "CLI con OpenAI Responses API (wire_api = 'responses')",
         "auto_cmd": lambda addr: (
-            f"python3 -m bridge setup-codex --port {addr.rsplit(':', 1)[1]}"
+            f"agy-bridge setup-codex --port {addr.rsplit(':', 1)[1]}"
             if ":" in addr and addr.rsplit(":", 1)[1].isdigit() and addr.rsplit(":", 1)[1] != "24980"
-            else "python3 -m bridge setup-codex"
+            else "agy-bridge setup-codex"
         ),
-        "restore_cmd": lambda addr: "python3 -m bridge restore-codex",
+        "restore_cmd": lambda addr: "agy-bridge restore-codex",
         "manual_snippet": lambda addr: f'# ~/.codex/config.toml\n[model]\nwire_api = "responses"\nbase_url = "http://{addr}/v1"',
         "docs_url": "https://github.com/openai/codex",
     },

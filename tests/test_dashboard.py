@@ -58,8 +58,8 @@ class TestDashboardRendering(unittest.TestCase):
 
         # Restore section heading in supported cards
         self.assertIn("Restaurar configuración", html)
-        self.assertIn("python3 -m bridge restore-claude", html)
-        self.assertIn("python3 -m bridge restore-codex", html)
+        self.assertIn("agy-bridge restore-claude", html)
+        self.assertIn("agy-bridge restore-codex", html)
 
         # Copy buttons and pre IDs for restore
         self.assertIn('id="claude-restore"', html)
@@ -134,8 +134,8 @@ class TestDashboardRendering(unittest.TestCase):
         self.assertIn("http://127.0.0.1:24980/v1", html)
 
         # Setup commands and keywords (100% native, zero external package dependencies)
-        self.assertIn("python3 -m bridge setup-claude", html)
-        self.assertIn("python3 -m bridge setup-codex", html)
+        self.assertIn("agy-bridge setup-claude", html)
+        self.assertIn("agy-bridge setup-codex", html)
         self.assertNotIn("ANTHROPIC_CUSTOM_MODEL_OPTION", html)
         self.assertNotIn("mkdir -p ~/.codex", html)
 
@@ -207,15 +207,15 @@ class TestDashboardRendering(unittest.TestCase):
         by_id = {c["id"]: c for c in CLIENT_CARDS}
         self.assertEqual(
             by_id["codex"]["auto_cmd"]("127.0.0.1:24980"),
-            "python3 -m bridge setup-codex",
+            "agy-bridge setup-codex",
         )
         self.assertEqual(
             by_id["codex"]["auto_cmd"]("127.0.0.1:9090"),
-            "python3 -m bridge setup-codex --port 9090",
+            "agy-bridge setup-codex --port 9090",
         )
         self.assertEqual(
             by_id["codex"]["restore_cmd"]("127.0.0.1:24980"),
-            "python3 -m bridge restore-codex",
+            "agy-bridge restore-codex",
         )
         self.assertEqual(
             by_id["codex"]["manual_snippet"]("127.0.0.1:24980"),
@@ -225,15 +225,15 @@ class TestDashboardRendering(unittest.TestCase):
 
         self.assertEqual(
             by_id["claude"]["auto_cmd"]("127.0.0.1:24980"),
-            "python3 -m bridge setup-claude",
+            "agy-bridge setup-claude",
         )
         self.assertEqual(
             by_id["claude"]["auto_cmd"]("127.0.0.1:9090"),
-            "python3 -m bridge setup-claude --port 9090",
+            "agy-bridge setup-claude --port 9090",
         )
         self.assertEqual(
             by_id["claude"]["restore_cmd"]("127.0.0.1:24980"),
-            "python3 -m bridge restore-claude",
+            "agy-bridge restore-claude",
         )
         self.assertEqual(
             by_id["claude"]["manual_snippet"]("127.0.0.1:24980"),
