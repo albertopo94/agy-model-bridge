@@ -8,11 +8,20 @@ import unittest.mock
 from pathlib import Path
 
 from bridge.setup import (
+    CLIENT_CONFIGURATORS,
+    ClaudeConfigurator,
+    ClientConfigurator,
+    CodexConfigurator,
     atomic_write_file,
     create_backup,
     describe_backup,
+    get_configurator,
     list_backups,
+    list_configurators,
+    register_configurator,
     restore_backup,
+    restore_claude,
+    restore_codex,
     setup_claude,
     setup_codex,
     uninstall,
@@ -1235,7 +1244,7 @@ class TestUpdateInstallation(unittest.TestCase):
 
         self.assertEqual(result["status"], "updated")
         self.assertTrue(result["restarted_daemon"])
-        self.assertEqual(result["version"], "0.5.1")
+        self.assertEqual(result["version"], "0.5.2")
         mock_run.assert_called_once_with(
             ["git", "-C", str(self.repo_dir), "pull", "--ff-only"],
             capture_output=True,
@@ -1427,7 +1436,7 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main([flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.5.1")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.5.2")
 
     def test_cli_subcommand_version_flags(self):
         from bridge.__main__ import main
@@ -1439,19 +1448,303 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main(["update", flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.5.1")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.5.2")
 
     def test_version_unification(self):
         import bridge
         from pathlib import Path
         import re
 
-        self.assertEqual(bridge.__version__, "0.5.1")
+        self.assertEqual(bridge.__version__, "0.5.2")
         pyproject_path = Path(__file__).resolve().parent.parent / "pyproject.toml"
         pyproject_text = pyproject_path.read_text(encoding="utf-8")
         match = re.search(r'version\s*=\s*"([^"]+)"', pyproject_text)
         self.assertIsNotNone(match)
-        self.assertEqual(match.group(1), "0.5.1")
+        self.assertEqual(match.group(1), "0.5.2")
+
+
+class TestClientConfiguratorRegistry(unittest.TestCase):
+    def test_default_configurators_registered(self):
+        claude_cfg = get_configurator("claude")
+        self.assertIsInstance(claude_cfg, ClaudeConfigurator)
+        self.assertEqual(claude_cfg.name, "claude")
+        self.assertEqual(claude_cfg.display_name, "Claude Code")
+
+        codex_cfg = get_configurator("codex")
+        self.assertIsInstance(codex_cfg, CodexConfigurator)
+        self.assertEqual(codex_cfg.name, "codex")
+        self.assertEqual(codex_cfg.display_name, "Codex CLI")
+
+    def test_get_configurator_unknown_raises_key_error(self):
+        with self.assertRaises(KeyError):
+            get_configurator("unknown_client")
+
+    def test_list_configurators(self):
+        configurators = list_configurators()
+        names = [c.name for c in configurators]
+        self.assertIn("claude", names)
+        self.assertIn("codex", names)
+
+    def test_register_custom_configurator(self):
+        class DummyConfigurator(ClientConfigurator):
+            name = "dummy"
+            display_name = "Dummy Client"
+
+            @property
+            def default_config_path(self) -> Path:
+                return Path("/tmp/dummy.conf")
+
+            def is_configured(self, config_path: Path | None = None) -> bool:
+                return False
+
+            def setup(self, base_url: str | None = None, model: str = "gemini-3.8-flash-high", config_path: Path | None = None, **kwargs) -> Path:
+                return self.get_config_path(config_path)
+
+            def restore(self, config_path: Path | None = None, backup_path: Path | None = None, **kwargs) -> bool:
+                return True
+
+        dummy = DummyConfigurator()
+        register_configurator(dummy)
+        try:
+            self.assertEqual(get_configurator("dummy"), dummy)
+            self.assertIn(dummy, list_configurators())
+        finally:
+            CLIENT_CONFIGURATORS.pop("dummy", None)
+
+
+class TestClaudeConfiguratorStrategy(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.dir_path = Path(self.temp_dir.name)
+        self.configurator = ClaudeConfigurator()
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_paths(self):
+        with unittest.mock.patch("pathlib.Path.home", return_value=self.dir_path):
+            self.assertEqual(
+                self.configurator.default_config_path,
+                self.dir_path / ".claude" / "settings.json",
+            )
+            self.assertEqual(
+                self.configurator.get_config_path(),
+                self.dir_path / ".claude" / "settings.json",
+            )
+        custom = self.dir_path / "custom.json"
+        self.assertEqual(self.configurator.get_config_path(custom), custom)
+
+    def test_is_configured_false_when_file_missing_or_clean(self):
+        target = self.dir_path / "settings.json"
+        self.assertFalse(self.configurator.is_configured(target))
+
+        target.write_text(json.dumps({"env": {"OTHER_KEY": "val"}}), encoding="utf-8")
+        self.assertFalse(self.configurator.is_configured(target))
+
+    def test_is_configured_true_after_setup(self):
+        target = self.dir_path / "settings.json"
+        self.configurator.setup(config_path=target)
+        self.assertTrue(self.configurator.is_configured(target))
+
+    def test_restore_from_backup(self):
+        target = self.dir_path / "settings.json"
+        target.write_text(json.dumps({"env": {"ORIGINAL": "val"}}), encoding="utf-8")
+
+        # Setup creates backup
+        self.configurator.setup(config_path=target)
+        self.assertTrue(self.configurator.is_configured(target))
+
+        # Restore restores original
+        restored = self.configurator.restore(config_path=target)
+        self.assertTrue(restored)
+        data = json.loads(target.read_text(encoding="utf-8"))
+        self.assertEqual(data, {"env": {"ORIGINAL": "val"}})
+
+    def test_restore_surgical_clean_without_backups(self):
+        target = self.dir_path / "settings.json"
+        target.write_text(
+            json.dumps({
+                "env": {
+                    "USER_KEY": "keep",
+                    "ANTHROPIC_BASE_URL": "http://127.0.0.1:24980",
+                    "ANTHROPIC_MODEL": "gemini-3.8-flash-high",
+                },
+                "modelPicker": {"options": [{"model": "gemini-3.8-flash-high"}]},
+            }),
+            encoding="utf-8",
+        )
+        self.assertTrue(self.configurator.is_configured(target))
+
+        restored = self.configurator.restore(config_path=target)
+        self.assertTrue(restored)
+        data = json.loads(target.read_text(encoding="utf-8"))
+        self.assertEqual(data["env"], {"USER_KEY": "keep"})
+        self.assertNotIn("modelPicker", data)
+
+    def test_purge_backups(self):
+        target = self.dir_path / "settings.json"
+        target.write_text("{}", encoding="utf-8")
+        b1 = self.dir_path / "settings.json.backup-2026-09-20T10-00-00"
+        b1.write_text("{}", encoding="utf-8")
+        b2 = self.dir_path / "settings.json.backup-2026-09-21T10-00-00"
+        b2.write_text("{}", encoding="utf-8")
+
+        purged_count = self.configurator.purge_backups(target)
+        self.assertEqual(purged_count, 2)
+        self.assertEqual(len(self.configurator.list_backups(target)), 0)
+
+
+class TestCodexConfiguratorStrategy(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.dir_path = Path(self.temp_dir.name)
+        self.configurator = CodexConfigurator()
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_paths(self):
+        with unittest.mock.patch("pathlib.Path.home", return_value=self.dir_path):
+            self.assertEqual(
+                self.configurator.default_config_path,
+                self.dir_path / ".codex" / "config.toml",
+            )
+            self.assertEqual(
+                self.configurator.get_config_path(),
+                self.dir_path / ".codex" / "config.toml",
+            )
+        custom = self.dir_path / "custom.toml"
+        self.assertEqual(self.configurator.get_config_path(custom), custom)
+
+    def test_is_configured_false_when_file_missing_or_clean(self):
+        target = self.dir_path / "config.toml"
+        self.assertFalse(self.configurator.is_configured(target))
+
+        target.write_text('personality = "pragmatic"\n', encoding="utf-8")
+        self.assertFalse(self.configurator.is_configured(target))
+
+    def test_is_configured_true_after_setup(self):
+        target = self.dir_path / "config.toml"
+        self.configurator.setup(config_path=target)
+        self.assertTrue(self.configurator.is_configured(target))
+
+    def test_restore_from_backup(self):
+        target = self.dir_path / "config.toml"
+        target.write_text('model = "gpt-original"\n', encoding="utf-8")
+
+        self.configurator.setup(config_path=target)
+        self.assertTrue(self.configurator.is_configured(target))
+
+        restored = self.configurator.restore(config_path=target)
+        self.assertTrue(restored)
+        self.assertEqual(target.read_text(encoding="utf-8"), 'model = "gpt-original"\n')
+
+    def test_restore_surgical_clean_without_backups(self):
+        target = self.dir_path / "config.toml"
+        target.write_text(
+            '[projects]\nactive = "my-prj"\n\n'
+            '# model = "old"  # agy-override\n'
+            '# agy:start\nmodel = "gemini"\n# agy:end\n',
+            encoding="utf-8",
+        )
+        self.assertTrue(self.configurator.is_configured(target))
+
+        restored = self.configurator.restore(config_path=target)
+        self.assertTrue(restored)
+        cleaned = target.read_text(encoding="utf-8")
+        self.assertNotIn("# agy:start", cleaned)
+        self.assertIn('model = "old"', cleaned)
+
+    def test_purge_backups(self):
+        target = self.dir_path / "config.toml"
+        target.write_text("{}", encoding="utf-8")
+        b1 = self.dir_path / "config.toml.backup-2026-09-20T10-00-00"
+        b1.write_text("{}", encoding="utf-8")
+
+        purged_count = self.configurator.purge_backups(target)
+        self.assertEqual(purged_count, 1)
+        self.assertEqual(len(self.configurator.list_backups(target)), 0)
+
+
+class TestUninstallDynamicConfigurators(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp_dir.name)
+        self.daemon_dir = self.root / ".agy-bridge"
+        self.daemon_dir.mkdir(parents=True, exist_ok=True)
+        self.bin_dir = self.root / ".local" / "bin"
+        self.bin_dir.mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_uninstall_automatically_handles_registered_3rd_party_configurator(self):
+        calls = {"restore": False, "purge": False}
+        test_root = self.root
+
+        class MockThirdPartyConfigurator(ClientConfigurator):
+            name = "mock3rd"
+            display_name = "Mock 3rd Party Client"
+
+            @property
+            def default_config_path(self) -> Path:
+                return test_root / ".mock3rd" / "config.json"
+
+            def is_configured(self, config_path: Path | None = None) -> bool:
+                return True
+
+            def setup(self, base_url: str | None = None, model: str = "gemini-3.8-flash-high", config_path: Path | None = None, **kwargs) -> Path:
+                return self.get_config_path(config_path)
+
+            def restore(self, config_path: Path | None = None, backup_path: Path | None = None, **kwargs) -> bool:
+                calls["restore"] = True
+                return True
+
+            def purge_backups(self, config_path: Path | None = None) -> int:
+                calls["purge"] = True
+                return 3
+
+        mock_configurator = MockThirdPartyConfigurator()
+        register_configurator(mock_configurator)
+        try:
+            res = uninstall(
+                daemon_dir=self.daemon_dir,
+                bin_dir=self.bin_dir,
+                restore_configs=True,
+                purge_backups=True,
+            )
+            self.assertTrue(calls["restore"])
+            self.assertTrue(calls["purge"])
+            self.assertIn("mock3rd", res["restored_clients"])
+            self.assertTrue(res["restored_clients"]["mock3rd"])
+            self.assertIn("claude_restored", res)
+            self.assertIn("codex_restored", res)
+        finally:
+            CLIENT_CONFIGURATORS.pop("mock3rd", None)
+
+
+class TestStandaloneWrappers(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.dir_path = Path(self.temp_dir.name)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_wrappers_delegate_to_configurators(self):
+        claude_path = self.dir_path / "claude.json"
+        codex_path = self.dir_path / "codex.toml"
+
+        p1 = setup_claude(settings_path=claude_path)
+        self.assertEqual(p1, claude_path)
+        self.assertTrue(get_configurator("claude").is_configured(claude_path))
+
+        p2 = setup_codex(config_path=codex_path)
+        self.assertEqual(p2, codex_path)
+        self.assertTrue(get_configurator("codex").is_configured(codex_path))
+
+        self.assertTrue(restore_claude(settings_path=claude_path))
+        self.assertTrue(restore_codex(config_path=codex_path))
 
 
 if __name__ == "__main__":

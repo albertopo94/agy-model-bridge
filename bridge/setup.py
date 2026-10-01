@@ -5,6 +5,7 @@ and Codex CLI configuration files.
 Zero external dependencies: pure Python standard library.
 """
 
+from abc import ABC, abstractmethod
 from datetime import datetime
 import json
 import os
@@ -223,243 +224,210 @@ DEFAULT_CLAUDE_MODEL_PICKER_OPTIONS: list[dict[str, str]] = [
 ]
 
 
-def setup_claude(
-    settings_path: Path | None = None,
-    base_url: str | None = None,
-    port: int | None = None,
-    model: str = "gemini-3.8-flash-high",
-    auth_token: str = "antigravity",
-) -> Path:
-    """Configures Claude Code settings.json with agy-model-bridge environment variables.
+class ClientConfigurator(ABC):
+    """Abstract base class (Strategy) for client configuration management."""
 
-    Creates a timestamped backup if settings.json exists, surgically merges bridge
-    keys into 'env', sets curated modelPicker options for /model, preserves user keys
-    and top-level settings, and writes atomically with mode 0o600.
+    name: str = ""
+    display_name: str = ""
 
-    Args:
-        settings_path: Path to settings.json (defaults to ~/.claude/settings.json).
-        base_url: Base URL for gateway (default: http://127.0.0.1:24980 or http://127.0.0.1:{port}).
-        port: Gateway port override.
-        model: Default model identifier (default: gemini-3.8-flash-high).
-        auth_token: Gateway auth token (default: antigravity).
+    @property
+    @abstractmethod
+    def default_config_path(self) -> Path:
+        """Default filesystem path for this client's configuration file."""
+        pass
 
-    Returns:
-        Path of configured settings.json file.
-    """
-    if settings_path is None:
-        target = Path.home() / ".claude" / "settings.json"
-    else:
-        target = Path(settings_path)
+    def get_config_path(self, custom_path: Path | None = None) -> Path:
+        """Returns custom_path if provided, else default_config_path."""
+        if custom_path is not None:
+            return Path(custom_path)
+        return self.default_config_path
 
-    if base_url:
-        resolved_url = base_url.rstrip("/")
-    elif port is not None:
-        resolved_url = f"http://127.0.0.1:{port}"
-    else:
-        resolved_url = "http://127.0.0.1:24980"
+    @abstractmethod
+    def is_configured(self, config_path: Path | None = None) -> bool:
+        """Returns True if AGY configuration settings or blocks are present in the target config."""
+        pass
 
-    backup_path = None
-    settings: dict[str, Any] = {}
-    if target.exists():
-        backup_path = create_backup(target)
-        try:
-            with open(target, "r", encoding="utf-8") as f:
-                content = f.read().strip()
-                if content:
-                    loaded = json.loads(content)
-                    if isinstance(loaded, dict):
-                        settings = loaded
-        except (json.JSONDecodeError, OSError):
-            settings = {}
+    @abstractmethod
+    def setup(
+        self,
+        base_url: str | None = None,
+        model: str = "gemini-3.8-flash-high",
+        config_path: Path | None = None,
+        **kwargs: Any,
+    ) -> Path:
+        """Configures the client file to point to AGY model bridge."""
+        pass
 
-    env_dict = settings.get("env")
-    if not isinstance(env_dict, dict):
-        env_dict = {}
-        settings["env"] = env_dict
+    @abstractmethod
+    def restore(
+        self,
+        config_path: Path | None = None,
+        backup_path: Path | None = None,
+        **kwargs: Any,
+    ) -> bool:
+        """Restores the client configuration from a backup or performs surgical removal."""
+        pass
 
-    env_dict["ANTHROPIC_BASE_URL"] = resolved_url
-    env_dict["ANTHROPIC_AUTH_TOKEN"] = auth_token
-    env_dict["ANTHROPIC_MODEL"] = model
-    env_dict["ANTHROPIC_DEFAULT_SONNET_MODEL"] = model
-    env_dict["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = model
-    env_dict["ANTHROPIC_DEFAULT_OPUS_MODEL"] = model
-    env_dict["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = "1048576"
-    env_dict["CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"] = "1"
+    def list_backups(self, config_path: Path | None = None) -> list[Path]:
+        """Lists historical backup files for this client, sorted by mtime descending."""
+        target = self.get_config_path(config_path)
+        return list_backups(target)
 
-    model_options = [dict(opt) for opt in DEFAULT_CLAUDE_MODEL_PICKER_OPTIONS]
-    if not any(opt.get("model") == model for opt in model_options):
-        model_options.insert(
-            0,
-            {
-                "model": model,
-                "label": f"Custom ({model})",
-                "behavesAs": "claude-3-7-sonnet",
-            },
-        )
-
-    settings["modelPicker"] = {
-        "options": model_options,
-        "replaceBuiltInOptions": False,
-    }
-
-    formatted_json = json.dumps(settings, indent=2) + "\n"
-    atomic_write_file(target, formatted_json, mode=0o600)
-    res = ConfigPath(target)
-    res.backup_path = backup_path
-    return res
-
-
-CODEX_BLOCK_REGEX = re.compile(
-    r"^[ \t]*# agy:start[\s\S]*?^[ \t]*# agy:end[ \t]*(?:\r?\n)?",
-    re.MULTILINE,
-)
-
-CODEX_ROOT_CONFLICT_REGEX = re.compile(
-    r"^[ \t]*(model|model_provider|model_context_window|model_auto_compact_token_limit)[ \t]*=.*$",
-    re.MULTILINE,
-)
-
-
-def build_codex_block(model: str, base_url: str) -> str:
-    """Constructs the delimited agy configuration block for Codex config.toml."""
-    return (
-        "# agy:start\n"
-        f'model = "{model}"\n'
-        'model_provider = "agy"\n'
-        "model_context_window = 1048576\n"
-        "model_auto_compact_token_limit = 943718\n\n"
-        "[model_providers.agy]\n"
-        'name = "agy"\n'
-        f'base_url = "{base_url}"\n'
-        'wire_api = "responses"\n'
-        "requires_openai_auth = false\n"
-        "# agy:end"
-    )
-
-
-def setup_codex(
-    config_path: Path | None = None,
-    base_url: str | None = None,
-    port: int | None = None,
-    model: str = "gemini-3.8-flash-high",
-) -> Path:
-    """Configures Codex CLI config.toml with delimited agy configuration block.
-
-    Creates a timestamped backup if config.toml exists, replaces or inserts the
-    delimited block (# agy:start ... # agy:end), preserves all existing tables and
-    content outside the block, and writes atomically with mode 0o600.
-
-    Args:
-        config_path: Path to config.toml (defaults to ~/.codex/config.toml).
-        base_url: Base URL for gateway (default: http://127.0.0.1:24980/v1 or http://127.0.0.1:{port}/v1).
-        port: Gateway port override.
-        model: Default model identifier (default: gemini-3.8-flash-high).
-
-    Returns:
-        Path of configured config.toml file.
-    """
-    if config_path is None:
-        target = Path.home() / ".codex" / "config.toml"
-    else:
-        target = Path(config_path)
-
-    if base_url:
-        resolved_url = base_url.rstrip("/")
-    elif port is not None:
-        resolved_url = f"http://127.0.0.1:{port}/v1"
-    else:
-        resolved_url = "http://127.0.0.1:24980/v1"
-
-    block = build_codex_block(model=model, base_url=resolved_url)
-
-    backup_path = None
-    if target.exists():
-        backup_path = create_backup(target)
-        existing_content = target.read_text(encoding="utf-8")
-        if CODEX_BLOCK_REGEX.search(existing_content):
-            existing_content = CODEX_BLOCK_REGEX.sub("", existing_content)
-
-        table_match = re.search(r"^[ \t]*\[", existing_content, re.MULTILINE)
-        if table_match:
-            prefix = existing_content[:table_match.start()]
-            suffix = existing_content[table_match.start():]
-            cleaned_prefix = CODEX_ROOT_CONFLICT_REGEX.sub(r"# \g<0>  # agy-override", prefix)
-            if cleaned_prefix.strip():
-                new_content = cleaned_prefix.rstrip() + "\n\n" + block + "\n\n" + suffix.lstrip()
-            else:
-                new_content = block + "\n\n" + suffix.lstrip()
-        elif existing_content.strip():
-            cleaned_prefix = CODEX_ROOT_CONFLICT_REGEX.sub(r"# \g<0>  # agy-override", existing_content)
-            if cleaned_prefix.strip():
-                new_content = cleaned_prefix.rstrip() + "\n\n" + block + "\n"
-            else:
-                new_content = block + "\n"
-        else:
-            new_content = block + "\n"
-    else:
-        new_content = block + "\n"
-
-    atomic_write_file(target, new_content, mode=0o600)
-    res = ConfigPath(target)
-    res.backup_path = backup_path
-    return res
-
-
-def uninstall(
-    daemon_dir: Path | None = None,
-    bin_dir: Path | None = None,
-    claude_settings_path: Path | None = None,
-    codex_config_path: Path | None = None,
-    restore_configs: bool = True,
-    purge_backups: bool = False,
-) -> dict[str, Any]:
-    """Uninstalls Antigravity Model Bridge and optionally restores client configurations.
-
-    Args:
-        daemon_dir: Path to daemon directory (default: ~/.agy-bridge).
-        bin_dir: Path to launcher binary directory (default: ~/.local/bin).
-        claude_settings_path: Path to Claude settings.json (default: ~/.claude/settings.json).
-        codex_config_path: Path to Codex config.toml (default: ~/.codex/config.toml).
-        restore_configs: Whether to restore Claude/Codex configurations.
-        purge_backups: Whether to delete historical configuration backups.
-
-    Returns:
-        Structured dictionary reporting actions performed:
-        {
-            "daemon_stopped": bool,
-            "claude_restored": bool,
-            "codex_restored": bool,
-            "binaries_removed": list[str],
-            "daemon_dir_removed": bool,
-            "backups_purged": bool,
-        }
-    """
-    resolved_daemon_dir = Path(daemon_dir) if daemon_dir is not None else Path.home() / ".agy-bridge"
-    resolved_bin_dir = Path(bin_dir) if bin_dir is not None else Path.home() / ".local" / "bin"
-    resolved_claude = Path(claude_settings_path) if claude_settings_path is not None else Path.home() / ".claude" / "settings.json"
-    resolved_codex = Path(codex_config_path) if codex_config_path is not None else Path.home() / ".codex" / "config.toml"
-
-    # 1. Stop daemon if running
-    pid_file = resolved_daemon_dir / "bridge.pid"
-    stop_result = bridge.daemon.stop_daemon(pid_file=pid_file)
-    daemon_stopped = stop_result.get("status") == "stopped"
-
-    # 2. Restore or surgically clean client configurations
-    claude_restored = False
-    codex_restored = False
-
-    if restore_configs:
-        # Claude restoration
-        claude_backups = list_backups(resolved_claude)
-        if claude_backups:
+    def purge_backups(self, config_path: Path | None = None) -> int:
+        """Deletes all historical backup files for this client. Returns number of purged files."""
+        target = self.get_config_path(config_path)
+        purged = 0
+        for b in self.list_backups(target):
             try:
-                restore_backup(resolved_claude, backup_path=claude_backups[0])
-                claude_restored = True
+                b.unlink()
+                purged += 1
             except OSError:
-                claude_restored = False
-        elif resolved_claude.exists() and resolved_claude.is_file():
+                pass
+        return purged
+
+
+class ClaudeConfigurator(ClientConfigurator):
+    """Configurator strategy for Claude Code CLI."""
+
+    name = "claude"
+    display_name = "Claude Code"
+
+    @property
+    def default_config_path(self) -> Path:
+        return Path.home() / ".claude" / "settings.json"
+
+    def is_configured(self, config_path: Path | None = None) -> bool:
+        target = self.get_config_path(config_path)
+        if not target.exists() or not target.is_file():
+            return False
+        try:
+            content = target.read_text(encoding="utf-8").strip()
+            if not content:
+                return False
+            data = json.loads(content)
+            if not isinstance(data, dict):
+                return False
+            env = data.get("env")
+            if isinstance(env, dict):
+                base_url = str(env.get("ANTHROPIC_BASE_URL", "")).lower()
+                auth_token = str(env.get("ANTHROPIC_AUTH_TOKEN", "")).lower()
+                model = str(env.get("ANTHROPIC_MODEL", "")).lower()
+                if "24980" in base_url or auth_token == "antigravity" or "gemini" in model:
+                    return True
+                agy_env_keys = (
+                    "ANTHROPIC_BASE_URL",
+                    "ANTHROPIC_AUTH_TOKEN",
+                    "ANTHROPIC_MODEL",
+                    "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
+                    "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY",
+                )
+                if any(k in env for k in agy_env_keys):
+                    return True
+                if any(k.startswith("ANTHROPIC_DEFAULT_") and k.endswith("_MODEL") for k in env):
+                    return True
+            picker = data.get("modelPicker")
+            if isinstance(picker, dict):
+                options = picker.get("options", [])
+                if isinstance(options, list):
+                    for opt in options:
+                        if isinstance(opt, dict) and "gemini" in opt.get("model", ""):
+                            return True
+            return False
+        except (json.JSONDecodeError, OSError):
+            return False
+
+    def setup(
+        self,
+        base_url: str | None = None,
+        model: str = "gemini-3.8-flash-high",
+        config_path: Path | None = None,
+        **kwargs: Any,
+    ) -> Path:
+        target = self.get_config_path(config_path or kwargs.get("settings_path"))
+        port = kwargs.get("port")
+        auth_token = kwargs.get("auth_token", "antigravity")
+
+        if base_url:
+            resolved_url = base_url.rstrip("/")
+        elif port is not None:
+            resolved_url = f"http://127.0.0.1:{port}"
+        else:
+            resolved_url = "http://127.0.0.1:24980"
+
+        backup_path = None
+        settings: dict[str, Any] = {}
+        if target.exists():
+            backup_path = create_backup(target)
             try:
-                content = resolved_claude.read_text(encoding="utf-8").strip()
+                with open(target, "r", encoding="utf-8") as f:
+                    content = f.read().strip()
+                    if content:
+                        loaded = json.loads(content)
+                        if isinstance(loaded, dict):
+                            settings = loaded
+            except (json.JSONDecodeError, OSError):
+                settings = {}
+
+        env_dict = settings.get("env")
+        if not isinstance(env_dict, dict):
+            env_dict = {}
+            settings["env"] = env_dict
+
+        env_dict["ANTHROPIC_BASE_URL"] = resolved_url
+        env_dict["ANTHROPIC_AUTH_TOKEN"] = auth_token
+        env_dict["ANTHROPIC_MODEL"] = model
+        env_dict["ANTHROPIC_DEFAULT_SONNET_MODEL"] = model
+        env_dict["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = model
+        env_dict["ANTHROPIC_DEFAULT_OPUS_MODEL"] = model
+        env_dict["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = "1048576"
+        env_dict["CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"] = "1"
+
+        model_options = [dict(opt) for opt in DEFAULT_CLAUDE_MODEL_PICKER_OPTIONS]
+        if not any(opt.get("model") == model for opt in model_options):
+            model_options.insert(
+                0,
+                {
+                    "model": model,
+                    "label": f"Custom ({model})",
+                    "behavesAs": "claude-3-7-sonnet",
+                },
+            )
+
+        settings["modelPicker"] = {
+            "options": model_options,
+            "replaceBuiltInOptions": False,
+        }
+
+        formatted_json = json.dumps(settings, indent=2) + "\n"
+        atomic_write_file(target, formatted_json, mode=0o600)
+        res = ConfigPath(target)
+        res.backup_path = backup_path
+        return res
+
+    def restore(
+        self,
+        config_path: Path | None = None,
+        backup_path: Path | None = None,
+        **kwargs: Any,
+    ) -> bool:
+        target = self.get_config_path(config_path or kwargs.get("settings_path"))
+        if backup_path is not None:
+            try:
+                restore_backup(target, backup_path=backup_path)
+                return True
+            except (OSError, FileNotFoundError):
+                return False
+
+        backups = self.list_backups(target)
+        if backups:
+            try:
+                restore_backup(target, backup_path=backups[0])
+                return True
+            except OSError:
+                return False
+        elif target.exists() and target.is_file():
+            try:
+                content = target.read_text(encoding="utf-8").strip()
                 if content:
                     settings = json.loads(content)
                     if isinstance(settings, dict):
@@ -507,22 +475,144 @@ def uninstall(
                                 settings.pop("modelPicker", None)
 
                         formatted_json = json.dumps(settings, indent=2) + "\n"
-                        atomic_write_file(resolved_claude, formatted_json, mode=0o600)
-                        claude_restored = True
+                        atomic_write_file(target, formatted_json, mode=0o600)
+                        return True
             except (json.JSONDecodeError, OSError):
-                claude_restored = False
+                return False
+        return False
 
-        # Codex restoration
-        codex_backups = list_backups(resolved_codex)
-        if codex_backups:
+
+CODEX_BLOCK_REGEX = re.compile(
+    r"^[ \t]*# agy:start[\s\S]*?^[ \t]*# agy:end[ \t]*(?:\r?\n)?",
+    re.MULTILINE,
+)
+
+CODEX_ROOT_CONFLICT_REGEX = re.compile(
+    r"^[ \t]*(model|model_provider|model_context_window|model_auto_compact_token_limit)[ \t]*=.*$",
+    re.MULTILINE,
+)
+
+
+def build_codex_block(model: str, base_url: str) -> str:
+    """Constructs the delimited agy configuration block for Codex config.toml."""
+    return (
+        "# agy:start\n"
+        f'model = "{model}"\n'
+        'model_provider = "agy"\n'
+        "model_context_window = 1048576\n"
+        "model_auto_compact_token_limit = 943718\n\n"
+        "[model_providers.agy]\n"
+        'name = "agy"\n'
+        f'base_url = "{base_url}"\n'
+        'wire_api = "responses"\n'
+        "requires_openai_auth = false\n"
+        "# agy:end"
+    )
+
+
+class CodexConfigurator(ClientConfigurator):
+    """Configurator strategy for Codex CLI."""
+
+    name = "codex"
+    display_name = "Codex CLI"
+
+    @property
+    def default_config_path(self) -> Path:
+        return Path.home() / ".codex" / "config.toml"
+
+    def is_configured(self, config_path: Path | None = None) -> bool:
+        target = self.get_config_path(config_path)
+        if not target.exists() or not target.is_file():
+            return False
+        try:
+            content = target.read_text(encoding="utf-8")
+            if (
+                CODEX_BLOCK_REGEX.search(content)
+                or "# agy:start" in content
+                or "[model_providers.agy]" in content
+                or 'model_provider = "agy"' in content
+                or ":24980" in content
+            ):
+                return True
+            return False
+        except OSError:
+            return False
+
+    def setup(
+        self,
+        base_url: str | None = None,
+        model: str = "gemini-3.8-flash-high",
+        config_path: Path | None = None,
+        **kwargs: Any,
+    ) -> Path:
+        target = self.get_config_path(config_path)
+        port = kwargs.get("port")
+
+        if base_url:
+            resolved_url = base_url.rstrip("/")
+        elif port is not None:
+            resolved_url = f"http://127.0.0.1:{port}/v1"
+        else:
+            resolved_url = "http://127.0.0.1:24980/v1"
+
+        block = build_codex_block(model=model, base_url=resolved_url)
+
+        backup_path = None
+        if target.exists():
+            backup_path = create_backup(target)
+            existing_content = target.read_text(encoding="utf-8")
+            if CODEX_BLOCK_REGEX.search(existing_content):
+                existing_content = CODEX_BLOCK_REGEX.sub("", existing_content)
+
+            table_match = re.search(r"^[ \t]*\[", existing_content, re.MULTILINE)
+            if table_match:
+                prefix = existing_content[:table_match.start()]
+                suffix = existing_content[table_match.start():]
+                cleaned_prefix = CODEX_ROOT_CONFLICT_REGEX.sub(r"# \g<0>  # agy-override", prefix)
+                if cleaned_prefix.strip():
+                    new_content = cleaned_prefix.rstrip() + "\n\n" + block + "\n\n" + suffix.lstrip()
+                else:
+                    new_content = block + "\n\n" + suffix.lstrip()
+            elif existing_content.strip():
+                cleaned_prefix = CODEX_ROOT_CONFLICT_REGEX.sub(r"# \g<0>  # agy-override", existing_content)
+                if cleaned_prefix.strip():
+                    new_content = cleaned_prefix.rstrip() + "\n\n" + block + "\n"
+                else:
+                    new_content = block + "\n"
+            else:
+                new_content = block + "\n"
+        else:
+            new_content = block + "\n"
+
+        atomic_write_file(target, new_content, mode=0o600)
+        res = ConfigPath(target)
+        res.backup_path = backup_path
+        return res
+
+    def restore(
+        self,
+        config_path: Path | None = None,
+        backup_path: Path | None = None,
+        **kwargs: Any,
+    ) -> bool:
+        target = self.get_config_path(config_path)
+        if backup_path is not None:
             try:
-                restore_backup(resolved_codex, backup_path=codex_backups[0])
-                codex_restored = True
+                restore_backup(target, backup_path=backup_path)
+                return True
+            except (OSError, FileNotFoundError):
+                return False
+
+        backups = self.list_backups(target)
+        if backups:
+            try:
+                restore_backup(target, backup_path=backups[0])
+                return True
             except OSError:
-                codex_restored = False
-        elif resolved_codex.exists() and resolved_codex.is_file():
+                return False
+        elif target.exists() and target.is_file():
             try:
-                content = resolved_codex.read_text(encoding="utf-8")
+                content = target.read_text(encoding="utf-8")
                 if CODEX_BLOCK_REGEX.search(content):
                     cleaned = CODEX_BLOCK_REGEX.sub("", content).strip()
                     cleaned = re.sub(
@@ -533,22 +623,156 @@ def uninstall(
                     )
                     if cleaned:
                         cleaned += "\n"
-                    atomic_write_file(resolved_codex, cleaned, mode=0o600)
-                    codex_restored = True
+                    atomic_write_file(target, cleaned, mode=0o600)
+                    return True
             except OSError:
-                codex_restored = False
+                return False
+        return False
 
-    # 3. Purge backup files if requested
-    if purge_backups:
-        all_backups = list_backups(resolved_claude) + list_backups(resolved_codex)
-        for b in all_backups:
-            try:
-                b.unlink()
-            except OSError:
-                pass
-        backups_purged = True
-    else:
-        backups_purged = False
+
+CLIENT_CONFIGURATORS: dict[str, ClientConfigurator] = {
+    "claude": ClaudeConfigurator(),
+    "codex": CodexConfigurator(),
+}
+
+
+def register_configurator(configurator: ClientConfigurator) -> None:
+    """Registers a client configurator into the global registry."""
+    CLIENT_CONFIGURATORS[configurator.name] = configurator
+
+
+def get_configurator(name: str) -> ClientConfigurator:
+    """Retrieves a client configurator by name from the registry."""
+    if name not in CLIENT_CONFIGURATORS:
+        raise KeyError(f"Unknown client configurator: '{name}'")
+    return CLIENT_CONFIGURATORS[name]
+
+
+def list_configurators() -> list[ClientConfigurator]:
+    """Returns a list of all registered client configurators."""
+    return list(CLIENT_CONFIGURATORS.values())
+
+
+def setup_claude(
+    settings_path: Path | None = None,
+    base_url: str | None = None,
+    port: int | None = None,
+    model: str = "gemini-3.8-flash-high",
+    auth_token: str = "antigravity",
+) -> Path:
+    """Configures Claude Code settings.json with agy-model-bridge environment variables."""
+    return get_configurator("claude").setup(
+        base_url=base_url,
+        model=model,
+        config_path=settings_path,
+        port=port,
+        auth_token=auth_token,
+    )
+
+
+def setup_codex(
+    config_path: Path | None = None,
+    base_url: str | None = None,
+    port: int | None = None,
+    model: str = "gemini-3.8-flash-high",
+) -> Path:
+    """Configures Codex CLI config.toml with delimited agy configuration block."""
+    return get_configurator("codex").setup(
+        base_url=base_url,
+        model=model,
+        config_path=config_path,
+        port=port,
+    )
+
+
+def restore_claude(
+    settings_path: Path | None = None,
+    backup_path: Path | None = None,
+) -> bool:
+    """Restores Claude Code settings.json from backup or surgically cleans bridge keys."""
+    return get_configurator("claude").restore(
+        config_path=settings_path,
+        backup_path=backup_path,
+    )
+
+
+def restore_codex(
+    config_path: Path | None = None,
+    backup_path: Path | None = None,
+) -> bool:
+    """Restores Codex CLI config.toml from backup or surgically removes agy block."""
+    return get_configurator("codex").restore(
+        config_path=config_path,
+        backup_path=backup_path,
+    )
+
+
+def uninstall(
+    daemon_dir: Path | None = None,
+    bin_dir: Path | None = None,
+    configurators: list[ClientConfigurator] | None = None,
+    custom_config_paths: dict[str, Path] | None = None,
+    restore_configs: bool = True,
+    purge_backups: bool = False,
+    claude_settings_path: Path | None = None,
+    codex_config_path: Path | None = None,
+) -> dict[str, Any]:
+    """Uninstalls Antigravity Model Bridge and optionally restores client configurations.
+
+    Args:
+        daemon_dir: Path to daemon directory (default: ~/.agy-bridge).
+        bin_dir: Path to launcher binary directory (default: ~/.local/bin).
+        configurators: Optional list of ClientConfigurators to handle (defaults to all registered).
+        custom_config_paths: Optional mapping of client name to custom config Path.
+        restore_configs: Whether to restore client configurations.
+        purge_backups: Whether to delete historical configuration backups.
+        claude_settings_path: Backward-compatible override for Claude settings.json path.
+        codex_config_path: Backward-compatible override for Codex config.toml path.
+
+    Returns:
+        Structured dictionary reporting actions performed:
+        {
+            "daemon_stopped": bool,
+            "claude_restored": bool,
+            "codex_restored": bool,
+            "restored_clients": dict[str, bool],
+            "binaries_removed": list[str],
+            "daemon_dir_removed": bool,
+            "backups_purged": bool,
+        }
+    """
+    resolved_daemon_dir = Path(daemon_dir) if daemon_dir is not None else Path.home() / ".agy-bridge"
+    resolved_bin_dir = Path(bin_dir) if bin_dir is not None else Path.home() / ".local" / "bin"
+
+    # 1. Stop daemon if running
+    pid_file = resolved_daemon_dir / "bridge.pid"
+    stop_result = bridge.daemon.stop_daemon(pid_file=pid_file)
+    daemon_stopped = stop_result.get("status") == "stopped"
+
+    # 2. Determine configurators and paths
+    active_configurators = list(configurators) if configurators is not None else list_configurators()
+    paths_map: dict[str, Path] = {}
+    if custom_config_paths:
+        paths_map.update(custom_config_paths)
+    if claude_settings_path is not None:
+        paths_map["claude"] = Path(claude_settings_path)
+    if codex_config_path is not None:
+        paths_map["codex"] = Path(codex_config_path)
+
+    # 3. Restore or surgically clean client configurations & purge backups if requested
+    restored_clients: dict[str, bool] = {}
+    for cfg in active_configurators:
+        target_path = cfg.get_config_path(paths_map.get(cfg.name))
+        if restore_configs:
+            restored = cfg.restore(config_path=target_path)
+        else:
+            restored = False
+        restored_clients[cfg.name] = restored
+
+        if purge_backups:
+            cfg.purge_backups(config_path=target_path)
+
+    backups_purged = bool(purge_backups)
 
     # 4. Remove launcher scripts
     binaries_removed: list[str] = []
@@ -575,8 +799,9 @@ def uninstall(
 
     return {
         "daemon_stopped": daemon_stopped,
-        "claude_restored": claude_restored,
-        "codex_restored": codex_restored,
+        "claude_restored": restored_clients.get("claude", False),
+        "codex_restored": restored_clients.get("codex", False),
+        "restored_clients": restored_clients,
         "binaries_removed": binaries_removed,
         "daemon_dir_removed": daemon_dir_removed,
         "backups_purged": backups_purged,
