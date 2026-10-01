@@ -171,13 +171,7 @@ class TestDashboardRendering(unittest.TestCase):
         )
         self.assertIn(expected_codex_toml, unescaped_html)
         self.assertIn('export ANTHROPIC_BASE_URL="http://127.0.0.1:24980"\nexport ANTHROPIC_AUTH_TOKEN="local-bridge"', unescaped_html)
-        expected_hermes_snippet = (
-            "BASE_URL=http://127.0.0.1:24980/v1\n"
-            "API_KEY=local-bridge\n\n"
-            "# Hermes Desktop: Settings -> Local / custom endpoint\n"
-            "# Endpoint URL: http://127.0.0.1:24980/v1\n"
-            "# API Key:      local-bridge"
-        )
+        expected_hermes_snippet = "BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY=local-bridge"
         self.assertIn(expected_hermes_snippet, unescaped_html)
         self.assertIn('BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY=local-bridge', unescaped_html)
 
@@ -295,13 +289,7 @@ class TestDashboardRendering(unittest.TestCase):
         )
         self.assertEqual(
             by_id["hermes"]["manual_snippet"]("127.0.0.1:24980"),
-            (
-                "BASE_URL=http://127.0.0.1:24980/v1\n"
-                "API_KEY=local-bridge\n\n"
-                "# Hermes Desktop: Settings -> Local / custom endpoint\n"
-                "# Endpoint URL: http://127.0.0.1:24980/v1\n"
-                "# API Key:      local-bridge"
-            ),
+            "BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY=local-bridge",
         )
         self.assertEqual(by_id["hermes"]["docs_url"], "https://hermes-agent.nousresearch.com")
 

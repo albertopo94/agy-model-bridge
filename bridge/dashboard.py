@@ -182,13 +182,7 @@ CLIENT_CARDS: list[dict[str, Any]] = [
             else "agy-bridge setup-hermes"
         ),
         "restore_cmd": lambda addr: "agy-bridge restore-hermes",
-        "manual_snippet": lambda addr: (
-            f"BASE_URL=http://{addr}/v1\n"
-            f"API_KEY=local-bridge\n\n"
-            f"# Hermes Desktop: Settings -> Local / custom endpoint\n"
-            f"# Endpoint URL: http://{addr}/v1\n"
-            f"# API Key:      local-bridge"
-        ),
+        "manual_snippet": lambda addr: f"BASE_URL=http://{addr}/v1\nAPI_KEY=local-bridge",
         "docs_url": "https://hermes-agent.nousresearch.com",
     },
     {
