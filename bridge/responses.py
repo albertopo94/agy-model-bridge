@@ -13,16 +13,18 @@ from bridge.transform import (
     build_openai_error_response,
     build_thinking_config,
     check_sse_error,
+    extract_function_calls,
     extract_text_delta,
     extract_usage,
     parse_cloudcode_sse_event,
     resolve_model_and_thinking,
+    sanitize_schema_for_gemini,
 )
 
 
 def responses_to_cloudcode_request(
-    payload: dict[str, Any], project: str
-) -> tuple[str, list[dict[str, Any]], dict[str, Any] | None, dict[str, Any] | None]:
+    payload: dict[str, Any], project: str = ""
+) -> tuple[str, list[dict[str, Any]], dict[str, Any] | None, dict[str, Any] | None, list[dict[str, Any]] | None]:
     """Validates OpenAI Responses payload and transforms to Cloud Code parameters.
 
     Args:
@@ -30,7 +32,7 @@ def responses_to_cloudcode_request(
         project: Upstream project identifier.
 
     Returns:
-        tuple of (model_name, contents_list, system_instruction_dict_or_None, generation_config_dict_or_None)
+        tuple of (model_name, contents_list, system_instruction_dict_or_None, generation_config_dict_or_None, tools_or_None)
 
     Raises:
         ValueError: If model or input are missing or invalid.
@@ -163,7 +165,32 @@ def responses_to_cloudcode_request(
 
     generation_config: dict[str, Any] | None = gen_config if gen_config else None
 
-    return model, contents, system_instruction, generation_config
+    # Tools translation
+    tools_raw = payload.get("tools")
+    tools: list[dict[str, Any]] | None = None
+    if isinstance(tools_raw, list) and tools_raw:
+        function_declarations: list[dict[str, Any]] = []
+        for tool in tools_raw:
+            if not isinstance(tool, dict):
+                continue
+            fn = tool.get("function") if "function" in tool and isinstance(tool["function"], dict) else tool
+            if not isinstance(fn, dict):
+                continue
+            name = fn.get("name")
+            if not name or not isinstance(name, str):
+                continue
+            decl: dict[str, Any] = {"name": name}
+            description = fn.get("description")
+            if description and isinstance(description, str):
+                decl["description"] = description
+            parameters = fn.get("parameters")
+            if parameters and isinstance(parameters, dict):
+                decl["parameters"] = sanitize_schema_for_gemini(parameters)
+            function_declarations.append(decl)
+        if function_declarations:
+            tools = [{"functionDeclarations": function_declarations}]
+
+    return model, contents, system_instruction, generation_config, tools
 
 
 def build_responses_completion(
@@ -171,6 +198,7 @@ def build_responses_completion(
     model: str,
     text: str,
     usage: dict[str, int] | None = None,
+    tool_calls: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Constructs non-streaming OpenAI Response object."""
     in_tok = 0
@@ -181,27 +209,56 @@ def build_responses_completion(
         out_tok = int(usage.get("completion_tokens") or usage.get("output_tokens") or 0)
         total_tok = int(usage.get("total_tokens") or (in_tok + out_tok))
 
-    msg_id = f"msg_{uuid.uuid4().hex[:16]}"
+    output: list[dict[str, Any]] = []
+    if text:
+        output.append({
+            "id": f"msg_{uuid.uuid4().hex[:16]}",
+            "type": "message",
+            "status": "completed",
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "output_text",
+                    "text": text,
+                }
+            ],
+        })
+    if tool_calls:
+        for tc in tool_calls:
+            fc_id = f"fc_{uuid.uuid4().hex[:16]}"
+            call_id = tc.get("id") or f"call_{uuid.uuid4().hex[:16]}"
+            name = tc.get("name", "")
+            args_val = tc.get("args", {})
+            args_str = json.dumps(args_val) if isinstance(args_val, (dict, list)) else str(args_val or "")
+            output.append({
+                "id": fc_id,
+                "type": "function_call",
+                "status": "completed",
+                "call_id": call_id,
+                "name": name,
+                "arguments": args_str,
+            })
+    if not output:
+        output.append({
+            "id": f"msg_{uuid.uuid4().hex[:16]}",
+            "type": "message",
+            "status": "completed",
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "output_text",
+                    "text": text,
+                }
+            ],
+        })
+
     return {
         "id": response_id,
         "object": "response",
         "created": int(time.time()),
         "status": "completed",
         "model": model,
-        "output": [
-            {
-                "id": msg_id,
-                "type": "message",
-                "status": "completed",
-                "role": "assistant",
-                "content": [
-                    {
-                        "type": "output_text",
-                        "text": text,
-                    }
-                ],
-            }
-        ],
+        "output": output,
         "usage": {
             "total_tokens": total_tok,
             "input_tokens": in_tok,
@@ -218,58 +275,54 @@ def build_responses_sse_events(
     """Transforms Cloud Code SSE stream into OpenAI Responses SSE events."""
     if not response_id:
         response_id = f"resp_{uuid.uuid4().hex[:16]}"
-    item_id = f"msg_{uuid.uuid4().hex[:16]}"
-    created_ts = int(time.time())
+    now = int(time.time())
+    seq = 0
+
+    def emit(event: str, payload: dict[str, Any]) -> str:
+        nonlocal seq
+        payload["type"] = event
+        payload["sequence_number"] = seq
+        seq += 1
+        return f"event: {event}\ndata: {json.dumps(payload)}\n\n"
+
+    # Initial response.created skeleton
+    created_response = {
+        "id": response_id,
+        "object": "response",
+        "created": now,
+        "created_at": now,
+        "status": "in_progress",
+        "model": model,
+        "output": [],
+        "output_text": "",
+        "usage": None,
+    }
+    yield emit("response.created", {"response": created_response})
+
+    # Initial response.in_progress skeleton
+    in_progress_response = {
+        "id": response_id,
+        "object": "response",
+        "created": now,
+        "created_at": now,
+        "status": "in_progress",
+        "model": model,
+        "output": [],
+        "output_text": "",
+        "usage": None,
+    }
+    yield emit("response.in_progress", {"response": in_progress_response})
+
+    output_index = 0
+    text_item_id: str | None = None
+    text_output_index: int = 0
+    full_text = ""
+    outputs: list[dict[str, Any]] = []
+
     in_tok = 0
     out_tok = 0
     total_tok = 0
-    deltas: list[str] = []
 
-    # 1. response.created
-    created_payload = {
-        "type": "response.created",
-        "response": {
-            "id": response_id,
-            "object": "response",
-            "created": created_ts,
-            "status": "in_progress",
-            "model": model,
-            "output": [],
-            "usage": None,
-        },
-    }
-    yield f"event: response.created\ndata: {json.dumps(created_payload)}\n\n"
-
-    # 2. response.output_item.added
-    output_item_payload = {
-        "type": "response.output_item.added",
-        "response_id": response_id,
-        "output_index": 0,
-        "item": {
-            "id": item_id,
-            "type": "message",
-            "status": "in_progress",
-            "role": "assistant",
-            "content": [],
-        },
-    }
-    yield f"event: response.output_item.added\ndata: {json.dumps(output_item_payload)}\n\n"
-
-    # 3. response.content_part.added
-    content_part_payload = {
-        "type": "response.content_part.added",
-        "response_id": response_id,
-        "item_id": item_id,
-        "output_index": 0,
-        "content_index": 0,
-        "part": {
-            "type": "output_text",
-            "text": "",
-        },
-    }
-    yield f"event: response.content_part.added\ndata: {json.dumps(content_part_payload)}\n\n"
-
-    # 4. Stream response.output_text.delta
     for line in lines_gen:
         parsed = parse_cloudcode_sse_event(line)
         if parsed is None:
@@ -283,78 +336,81 @@ def build_responses_sse_events(
             out_tok = usage.get("completion_tokens", out_tok)
             total_tok = usage.get("total_tokens", in_tok + out_tok)
 
-        delta_text = extract_text_delta(parsed)
-        if delta_text:
-            deltas.append(delta_text)
-            delta_payload = {
-                "type": "response.output_text.delta",
-                "response_id": response_id,
-                "item_id": item_id,
-                "output_index": 0,
-                "content_index": 0,
-                "delta": delta_text,
-            }
-            yield f"event: response.output_text.delta\ndata: {json.dumps(delta_payload)}\n\n"
-
-    full_text = "".join(deltas)
-
-    # response.output_text.done
-    text_done_payload = {
-        "type": "response.output_text.done",
-        "response_id": response_id,
-        "item_id": item_id,
-        "output_index": 0,
-        "content_index": 0,
-        "text": full_text,
-    }
-    yield f"event: response.output_text.done\ndata: {json.dumps(text_done_payload)}\n\n"
-
-    # 5. response.content_part.done
-    part_done_payload = {
-        "type": "response.content_part.done",
-        "response_id": response_id,
-        "item_id": item_id,
-        "output_index": 0,
-        "content_index": 0,
-        "part": {
-            "type": "output_text",
-            "text": full_text,
-        },
-    }
-    yield f"event: response.content_part.done\ndata: {json.dumps(part_done_payload)}\n\n"
-
-    # 6. response.output_item.done
-    item_done_payload = {
-        "type": "response.output_item.done",
-        "response_id": response_id,
-        "output_index": 0,
-        "item": {
-            "id": item_id,
-            "type": "message",
-            "status": "completed",
-            "role": "assistant",
-            "content": [
+        text_delta = extract_text_delta(parsed)
+        if text_delta:
+            if text_item_id is None:
+                text_item_id = f"msg_{uuid.uuid4().hex[:16]}"
+                text_output_index = output_index
+                output_index += 1
+                yield emit(
+                    "response.output_item.added",
+                    {
+                        "response_id": response_id,
+                        "output_index": text_output_index,
+                        "item": {
+                            "id": text_item_id,
+                            "type": "message",
+                            "status": "in_progress",
+                            "role": "assistant",
+                            "content": [],
+                        },
+                    },
+                )
+                yield emit(
+                    "response.content_part.added",
+                    {
+                        "response_id": response_id,
+                        "item_id": text_item_id,
+                        "output_index": text_output_index,
+                        "content_index": 0,
+                        "part": {
+                            "type": "output_text",
+                            "text": "",
+                            "annotations": [],
+                        },
+                    },
+                )
+            yield emit(
+                "response.output_text.delta",
                 {
-                    "type": "output_text",
-                    "text": full_text,
-                }
-            ],
-        },
-    }
-    yield f"event: response.output_item.done\ndata: {json.dumps(item_done_payload)}\n\n"
+                    "response_id": response_id,
+                    "item_id": text_item_id,
+                    "output_index": text_output_index,
+                    "content_index": 0,
+                    "delta": text_delta,
+                },
+            )
+            full_text += text_delta
 
-    # 7. response.completed
-    completed_payload = {
-        "type": "response.completed",
-        "response": {
-            "id": response_id,
-            "object": "response",
-            "created": created_ts,
-            "status": "completed",
-            "model": model,
-            "output": [
-                {
-                    "id": item_id,
+        function_calls = extract_function_calls(parsed)
+        if function_calls:
+            if text_item_id is not None:
+                yield emit(
+                    "response.output_text.done",
+                    {
+                        "response_id": response_id,
+                        "item_id": text_item_id,
+                        "output_index": text_output_index,
+                        "content_index": 0,
+                        "text": full_text,
+                    },
+                )
+                yield emit(
+                    "response.content_part.done",
+                    {
+                        "response_id": response_id,
+                        "item_id": text_item_id,
+                        "output_index": text_output_index,
+                        "content_index": 0,
+                        "part": {
+                            "type": "output_text",
+                            "text": full_text,
+                            "annotations": [],
+                        },
+                    },
+                )
+                completed_text_item = {
+                    "id": text_item_id,
                     "type": "message",
                     "status": "completed",
                     "role": "assistant",
@@ -362,10 +418,140 @@ def build_responses_sse_events(
                         {
                             "type": "output_text",
                             "text": full_text,
+                            "annotations": [],
                         }
                     ],
                 }
+                yield emit(
+                    "response.output_item.done",
+                    {
+                        "response_id": response_id,
+                        "output_index": text_output_index,
+                        "item": completed_text_item,
+                    },
+                )
+                outputs.append(completed_text_item)
+                text_item_id = None
+
+            for fc in function_calls:
+                fc_id = f"fc_{uuid.uuid4().hex[:16]}"
+                call_id = fc.get("id") or f"call_{uuid.uuid4().hex[:16]}"
+                name = fc.get("name", "")
+                args_val = fc.get("args", {})
+                args_str = json.dumps(args_val) if isinstance(args_val, (dict, list)) else str(args_val or "")
+                fc_output_index = output_index
+                output_index += 1
+
+                yield emit(
+                    "response.output_item.added",
+                    {
+                        "response_id": response_id,
+                        "output_index": fc_output_index,
+                        "item": {
+                            "id": fc_id,
+                            "type": "function_call",
+                            "status": "in_progress",
+                            "call_id": call_id,
+                            "name": name,
+                            "arguments": "",
+                        },
+                    },
+                )
+                yield emit(
+                    "response.function_call_arguments.delta",
+                    {
+                        "response_id": response_id,
+                        "item_id": fc_id,
+                        "output_index": fc_output_index,
+                        "delta": args_str,
+                    },
+                )
+                yield emit(
+                    "response.function_call_arguments.done",
+                    {
+                        "response_id": response_id,
+                        "item_id": fc_id,
+                        "output_index": fc_output_index,
+                        "arguments": args_str,
+                    },
+                )
+                completed_fc_item = {
+                    "id": fc_id,
+                    "type": "function_call",
+                    "status": "completed",
+                    "call_id": call_id,
+                    "name": name,
+                    "arguments": args_str,
+                }
+                yield emit(
+                    "response.output_item.done",
+                    {
+                        "response_id": response_id,
+                        "output_index": fc_output_index,
+                        "item": completed_fc_item,
+                    },
+                )
+                outputs.append(completed_fc_item)
+
+    if text_item_id is not None:
+        yield emit(
+            "response.output_text.done",
+            {
+                "response_id": response_id,
+                "item_id": text_item_id,
+                "output_index": text_output_index,
+                "content_index": 0,
+                "text": full_text,
+            },
+        )
+        yield emit(
+            "response.content_part.done",
+            {
+                "response_id": response_id,
+                "item_id": text_item_id,
+                "output_index": text_output_index,
+                "content_index": 0,
+                "part": {
+                    "type": "output_text",
+                    "text": full_text,
+                    "annotations": [],
+                },
+            },
+        )
+        completed_text_item = {
+            "id": text_item_id,
+            "type": "message",
+            "status": "completed",
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "output_text",
+                    "text": full_text,
+                    "annotations": [],
+                }
             ],
+        }
+        yield emit(
+            "response.output_item.done",
+            {
+                "response_id": response_id,
+                "output_index": text_output_index,
+                "item": completed_text_item,
+            },
+        )
+        outputs.append(completed_text_item)
+        text_item_id = None
+
+    completed_payload = {
+        "response": {
+            "id": response_id,
+            "object": "response",
+            "created": now,
+            "created_at": now,
+            "status": "completed",
+            "model": model,
+            "output": outputs,
+            "output_text": full_text,
             "usage": {
                 "total_tokens": total_tok,
                 "input_tokens": in_tok,
@@ -373,7 +559,7 @@ def build_responses_sse_events(
             },
         },
     }
-    yield f"event: response.completed\ndata: {json.dumps(completed_payload)}\n\n"
+    yield emit("response.completed", completed_payload)
 
 
 def build_responses_error_response(

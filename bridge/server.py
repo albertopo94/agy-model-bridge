@@ -464,7 +464,7 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
     def _handle_responses(self, payload: dict[str, Any]) -> None:
         try:
             stream = bool(payload.get("stream", False))
-            model, contents, system_instruction, generation_config = responses_to_cloudcode_request(
+            model, contents, system_instruction, generation_config, tools = responses_to_cloudcode_request(
                 payload, self.project
             )
         except ValueError as ve:
@@ -478,6 +478,8 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
         extra_kwargs: dict[str, Any] = {}
         if generation_config is not None:
             extra_kwargs["generation_config"] = generation_config
+        if tools is not None:
+            extra_kwargs["tools"] = tools
 
         if stream:
             try:
@@ -554,6 +556,7 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
             )
             try:
                 collected_text: list[str] = []
+                collected_tool_calls: list[dict[str, Any]] = []
                 last_usage = None
                 event_count = 0
                 has_finish_reason = False
@@ -571,8 +574,11 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                         delta = extract_text_delta(parsed)
                         if delta:
                             collected_text.append(delta)
+                        fcs = extract_function_calls(parsed)
+                        if fcs:
+                            collected_tool_calls.extend(fcs)
 
-                if event_count == 0 and not collected_text and not has_finish_reason:
+                if event_count == 0 and not collected_text and not has_finish_reason and not collected_tool_calls:
                     raise BridgeError("Stream ended without data")
 
                 resp_id = f"resp_{uuid.uuid4().hex[:16]}"
@@ -582,6 +588,7 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                     model=model,
                     text=full_text,
                     usage=last_usage,
+                    tool_calls=collected_tool_calls if collected_tool_calls else None,
                 )
                 try:
                     self._send_json(200, resp_obj)

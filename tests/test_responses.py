@@ -20,7 +20,7 @@ class TestResponsesRequestTranslation(unittest.TestCase):
             ],
             "temperature": 0.2,
         }
-        model, contents, system_inst, gen_config = responses_to_cloudcode_request(
+        model, contents, system_inst, gen_config, tools = responses_to_cloudcode_request(
             payload, project="test-project"
         )
         self.assertEqual(model, "gemini-2.5-pro")
@@ -29,6 +29,7 @@ class TestResponsesRequestTranslation(unittest.TestCase):
         self.assertIsNotNone(gen_config)
         self.assertEqual(gen_config["temperature"], 0.2)
         self.assertNotIn("thinkingConfig", gen_config)
+        self.assertIsNone(tools)
 
     def test_input_with_typed_items_and_input_text_blocks(self):
         payload = {
@@ -48,7 +49,7 @@ class TestResponsesRequestTranslation(unittest.TestCase):
                 },
             ],
         }
-        _, contents, _, _ = responses_to_cloudcode_request(payload, "test-project")
+        _, contents, _, _, tools = responses_to_cloudcode_request(payload, "test-project")
         self.assertEqual(len(contents), 3)
         self.assertEqual(contents[0]["role"], "user")
         self.assertEqual(contents[0]["parts"], [{"text": "What is Python?"}])
@@ -56,16 +57,18 @@ class TestResponsesRequestTranslation(unittest.TestCase):
         self.assertEqual(contents[1]["parts"], [{"text": "A programming language."}])
         self.assertEqual(contents[2]["role"], "user")
         self.assertEqual(contents[2]["parts"], [{"text": "Tell me more."}])
+        self.assertIsNone(tools)
 
     def test_input_as_string_normalized(self):
         payload = {
             "model": "gemini-2.5-pro",
             "input": "Single prompt string",
         }
-        _, contents, _, _ = responses_to_cloudcode_request(payload, "test-project")
+        _, contents, _, _, tools = responses_to_cloudcode_request(payload, "test-project")
         self.assertEqual(len(contents), 1)
         self.assertEqual(contents[0]["role"], "user")
         self.assertEqual(contents[0]["parts"], [{"text": "Single prompt string"}])
+        self.assertIsNone(tools)
 
     def test_input_with_system_and_developer_roles_extracted_to_system_instruction(self):
         payload = {
@@ -76,7 +79,7 @@ class TestResponsesRequestTranslation(unittest.TestCase):
                 {"role": "user", "content": "User question."},
             ],
         }
-        _, contents, system_inst, _ = responses_to_cloudcode_request(payload, "test-project")
+        _, contents, system_inst, _, tools = responses_to_cloudcode_request(payload, "test-project")
         self.assertEqual(
             system_inst,
             {"parts": [{"text": "System prompt.\nDeveloper prompt."}]},
@@ -84,6 +87,7 @@ class TestResponsesRequestTranslation(unittest.TestCase):
         self.assertEqual(len(contents), 1)
         self.assertEqual(contents[0]["role"], "user")
         self.assertEqual(contents[0]["parts"], [{"text": "User question."}])
+        self.assertIsNone(tools)
 
     def test_input_with_function_call_output(self):
         payload = {
@@ -96,17 +100,18 @@ class TestResponsesRequestTranslation(unittest.TestCase):
                 }
             ],
         }
-        _, contents, _, _ = responses_to_cloudcode_request(payload, "test-project")
+        _, contents, _, _, tools = responses_to_cloudcode_request(payload, "test-project")
         self.assertEqual(len(contents), 1)
         self.assertEqual(contents[0]["role"], "user")
         self.assertEqual(contents[0]["parts"], [{"text": "[Function Output]: 42"}])
+        self.assertIsNone(tools)
 
     def test_thinking_config_integration(self):
         payload_high = {
             "model": "gemini-3.1-pro-high",
             "input": ["Solve this riddle"],
         }
-        _, _, _, gen_config_high = responses_to_cloudcode_request(payload_high, "test-project")
+        _, _, _, gen_config_high, _ = responses_to_cloudcode_request(payload_high, "test-project")
         self.assertEqual(gen_config_high["thinkingConfig"], {"thinkingLevel": "HIGH"})
 
         payload_override = {
@@ -114,7 +119,7 @@ class TestResponsesRequestTranslation(unittest.TestCase):
             "input": ["Solve this riddle"],
             "reasoning_effort": "low",
         }
-        _, _, _, gen_config_ovr = responses_to_cloudcode_request(payload_override, "test-project")
+        _, _, _, gen_config_ovr, _ = responses_to_cloudcode_request(payload_override, "test-project")
         self.assertEqual(gen_config_ovr["thinkingConfig"], {"thinkingLevel": "LOW"})
 
     def test_input_as_dict_normalized(self):
@@ -122,10 +127,11 @@ class TestResponsesRequestTranslation(unittest.TestCase):
             "model": "gemini-2.5-pro",
             "input": {"role": "user", "content": "Single dict input"},
         }
-        _, contents, _, _ = responses_to_cloudcode_request(payload, "test-project")
+        _, contents, _, _, tools = responses_to_cloudcode_request(payload, "test-project")
         self.assertEqual(len(contents), 1)
         self.assertEqual(contents[0]["role"], "user")
         self.assertEqual(contents[0]["parts"], [{"text": "Single dict input"}])
+        self.assertIsNone(tools)
 
     def test_input_function_call_with_dict_arguments_serialized(self):
         payload = {
@@ -138,12 +144,13 @@ class TestResponsesRequestTranslation(unittest.TestCase):
                 }
             ],
         }
-        _, contents, _, _ = responses_to_cloudcode_request(payload, "test-project")
+        _, contents, _, _, tools = responses_to_cloudcode_request(payload, "test-project")
         self.assertEqual(len(contents), 3)  # leading hello user turn + assistant turn + trailing continue user turn
         self.assertEqual(contents[0]["role"], "user")
         self.assertEqual(contents[1]["role"], "model")
         self.assertIn('"query": "weather"', contents[1]["parts"][0]["text"])
         self.assertEqual(contents[2]["role"], "user")
+        self.assertIsNone(tools)
 
     def test_stop_sequences_preserve_newlines_and_filter_whitespace(self):
         payload = {
@@ -151,30 +158,112 @@ class TestResponsesRequestTranslation(unittest.TestCase):
             "input": ["Hi"],
             "stop": ["", "  ", "\n", "STOP"],
         }
-        _, _, _, gen_config = responses_to_cloudcode_request(payload, "test-project")
+        _, _, _, gen_config, tools = responses_to_cloudcode_request(payload, "test-project")
         self.assertEqual(gen_config["stopSequences"], ["\n", "STOP"])
+        self.assertIsNone(tools)
 
     def test_omitted_or_aliased_model_resolves_to_flash_tiered(self):
         # Omitted model defaults to flash-tiered with HIGH thinking
-        model, _, _, gen_config = responses_to_cloudcode_request(
+        model, _, _, gen_config, tools = responses_to_cloudcode_request(
             {"input": ["Hi"]}, "p"
         )
         self.assertEqual(model, "gemini-3.8-flash-tiered")
         self.assertEqual(gen_config.get("thinkingConfig"), {"thinkingLevel": "HIGH"})
+        self.assertIsNone(tools)
 
         # "auto" model
-        model_auto, _, _, gen_config_auto = responses_to_cloudcode_request(
+        model_auto, _, _, gen_config_auto, _ = responses_to_cloudcode_request(
             {"model": "auto", "input": ["Hi"]}, "p"
         )
         self.assertEqual(model_auto, "gemini-3.8-flash-tiered")
         self.assertEqual(gen_config_auto.get("thinkingConfig"), {"thinkingLevel": "HIGH"})
 
         # "gemini-3.8-flash-high"
-        model_fh, _, _, gen_config_fh = responses_to_cloudcode_request(
+        model_fh, _, _, gen_config_fh, _ = responses_to_cloudcode_request(
             {"model": "gemini-3.8-flash-high", "input": ["Hi"]}, "p"
         )
         self.assertEqual(model_fh, "gemini-3.8-flash-tiered")
         self.assertEqual(gen_config_fh.get("thinkingConfig"), {"thinkingLevel": "HIGH"})
+
+    def test_tools_flat_function_format_and_schema_sanitization(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "input": ["List files"],
+            "tools": [
+                {
+                    "type": "function",
+                    "name": "mem_current_project",
+                    "description": "Get current project name and context",
+                    "parameters": {
+                        "$schema": "http://json-schema.org/draft-07/schema#",
+                        "type": "object",
+                        "properties": {
+                            "detail": {
+                                "type": "string",
+                                "description": "Detail level",
+                            }
+                        },
+                        "additionalProperties": False,
+                    },
+                }
+            ],
+        }
+        _, _, _, _, tools = responses_to_cloudcode_request(payload)
+        self.assertIsNotNone(tools)
+        self.assertEqual(len(tools), 1)
+        self.assertIn("functionDeclarations", tools[0])
+        decls = tools[0]["functionDeclarations"]
+        self.assertEqual(len(decls), 1)
+        self.assertEqual(decls[0]["name"], "mem_current_project")
+        self.assertEqual(decls[0]["description"], "Get current project name and context")
+        params = decls[0]["parameters"]
+        self.assertEqual(params["type"], "object")
+        self.assertIn("detail", params["properties"])
+        self.assertNotIn("$schema", params)
+        self.assertNotIn("additionalProperties", params)
+
+    def test_tools_nested_function_format(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "input": ["Run cmd"],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "description": "Execute shell command",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"cmd": {"type": "string"}},
+                            "required": ["cmd"],
+                        },
+                    },
+                }
+            ],
+        }
+        _, _, _, _, tools = responses_to_cloudcode_request(payload)
+        self.assertIsNotNone(tools)
+        decls = tools[0]["functionDeclarations"]
+        self.assertEqual(len(decls), 1)
+        self.assertEqual(decls[0]["name"], "exec_command")
+        self.assertEqual(decls[0]["description"], "Execute shell command")
+        self.assertEqual(decls[0]["parameters"]["required"], ["cmd"])
+
+    def test_tools_empty_or_invalid_returns_none(self):
+        _, _, _, _, tools_empty = responses_to_cloudcode_request(
+            {"model": "gemini-2.5-pro", "input": ["Hi"], "tools": []}
+        )
+        self.assertIsNone(tools_empty)
+
+        _, _, _, _, tools_none = responses_to_cloudcode_request(
+            {"model": "gemini-2.5-pro", "input": ["Hi"], "tools": None}
+        )
+        self.assertIsNone(tools_none)
+
+        _, _, _, _, tools_noname = responses_to_cloudcode_request(
+            {"model": "gemini-2.5-pro", "input": ["Hi"], "tools": [{"type": "function"}]}
+        )
+        self.assertIsNone(tools_noname)
 
     def test_invalid_model_type_raises_value_error(self):
         with self.assertRaises(ValueError):
@@ -217,6 +306,52 @@ class TestResponsesResponseBuilder(unittest.TestCase):
             {"input_tokens": 15, "output_tokens": 25, "total_tokens": 40},
         )
 
+    def test_build_responses_completion_with_tool_calls(self):
+        tool_calls = [
+            {
+                "id": "call_abc123",
+                "name": "mem_current_project",
+                "args": {"detail": "summary"},
+            }
+        ]
+        resp = build_responses_completion(
+            response_id="resp_123456",
+            model="gemini-2.5-pro",
+            text="",
+            usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+            tool_calls=tool_calls,
+        )
+        output = resp["output"]
+        self.assertEqual(len(output), 1)
+        self.assertEqual(output[0]["type"], "function_call")
+        self.assertEqual(output[0]["status"], "completed")
+        self.assertEqual(output[0]["call_id"], "call_abc123")
+        self.assertEqual(output[0]["name"], "mem_current_project")
+        self.assertEqual(output[0]["arguments"], '{"detail": "summary"}')
+
+    def test_build_responses_completion_with_text_and_tool_calls(self):
+        tool_calls = [
+            {
+                "id": "call_xyz",
+                "name": "exec_command",
+                "args": {"cmd": "ls"},
+            }
+        ]
+        resp = build_responses_completion(
+            response_id="resp_123456",
+            model="gemini-2.5-pro",
+            text="Let me check the files.",
+            tool_calls=tool_calls,
+        )
+        output = resp["output"]
+        self.assertEqual(len(output), 2)
+        self.assertEqual(output[0]["type"], "message")
+        self.assertEqual(output[0]["content"][0]["text"], "Let me check the files.")
+        self.assertEqual(output[1]["type"], "function_call")
+        self.assertEqual(output[1]["call_id"], "call_xyz")
+        self.assertEqual(output[1]["name"], "exec_command")
+        self.assertEqual(output[1]["arguments"], '{"cmd": "ls"}')
+
 
 class TestResponsesSSEEvents(unittest.TestCase):
     def test_build_responses_sse_events_sequence(self):
@@ -246,6 +381,7 @@ class TestResponsesSSEEvents(unittest.TestCase):
         event_names = [e[0] for e in parsed_events]
         expected_sequence = [
             "response.created",
+            "response.in_progress",
             "response.output_item.added",
             "response.content_part.added",
             "response.output_text.delta",
@@ -256,6 +392,10 @@ class TestResponsesSSEEvents(unittest.TestCase):
             "response.completed",
         ]
         self.assertEqual(event_names, expected_sequence)
+
+        # Check sequence numbers
+        for idx, (_, data) in enumerate(parsed_events):
+            self.assertEqual(data.get("sequence_number"), idx)
 
         # Check response.created
         created_event = parsed_events[0][1]
@@ -288,6 +428,121 @@ class TestResponsesSSEEvents(unittest.TestCase):
             "Hello Codex!",
         )
         self.assertEqual(completed_event["response"]["usage"]["total_tokens"], 15)
+
+    def test_build_responses_sse_events_lazy_text_opening_when_no_text(self):
+        mock_upstream_lines = [
+            'data: {"candidates": [{"content": {"parts": [{"thought": true, "text": "internal thought"}]}}]}\n',
+            'data: {"candidates": [{"finishReason": "STOP"}]}\n',
+        ]
+        events = list(build_responses_sse_events(iter(mock_upstream_lines), "gemini-2.5-pro"))
+        parsed_events = []
+        for raw in events:
+            for l in raw.strip().split("\n"):
+                if l.startswith("data:"):
+                    parsed_events.append(json.loads(l[5:].strip()))
+
+        event_types = [p.get("type") for p in parsed_events]
+        self.assertEqual(
+            event_types,
+            ["response.created", "response.in_progress", "response.completed"],
+        )
+        completed_event = parsed_events[-1]
+        self.assertEqual(completed_event["response"]["output"], [])
+        self.assertEqual(completed_event["response"]["output_text"], "")
+
+    def test_build_responses_sse_events_function_call(self):
+        mock_upstream_lines = [
+            'data: {"candidates": [{"content": {"parts": [{"functionCall": {"name": "mem_current_project", "args": {"detail": "summary"}}}]}}]}\n',
+            'data: {"candidates": [{"finishReason": "STOP"}]}\n',
+        ]
+        events = list(build_responses_sse_events(iter(mock_upstream_lines), "gemini-2.5-pro"))
+        parsed_events = []
+        for raw in events:
+            for l in raw.strip().split("\n"):
+                if l.startswith("data:"):
+                    parsed_events.append(json.loads(l[5:].strip()))
+
+        event_types = [p.get("type") for p in parsed_events]
+        expected_types = [
+            "response.created",
+            "response.in_progress",
+            "response.output_item.added",
+            "response.function_call_arguments.delta",
+            "response.function_call_arguments.done",
+            "response.output_item.done",
+            "response.completed",
+        ]
+        self.assertEqual(event_types, expected_types)
+
+        # Check sequence numbers
+        for idx, p in enumerate(parsed_events):
+            self.assertEqual(p.get("sequence_number"), idx)
+
+        # Check function call item added
+        fc_item_added = parsed_events[2]
+        self.assertEqual(fc_item_added["output_index"], 0)
+        self.assertEqual(fc_item_added["item"]["type"], "function_call")
+        self.assertEqual(fc_item_added["item"]["status"], "in_progress")
+        self.assertEqual(fc_item_added["item"]["name"], "mem_current_project")
+        self.assertEqual(fc_item_added["item"]["arguments"], "")
+
+        # Check delta and done
+        fc_delta = parsed_events[3]
+        self.assertEqual(fc_delta["delta"], '{"detail": "summary"}')
+        fc_done = parsed_events[4]
+        self.assertEqual(fc_done["arguments"], '{"detail": "summary"}')
+
+        # Check function call item done
+        fc_item_done = parsed_events[5]
+        self.assertEqual(fc_item_done["item"]["status"], "completed")
+        self.assertEqual(fc_item_done["item"]["arguments"], '{"detail": "summary"}')
+
+        # Check completed response output
+        completed_resp = parsed_events[6]["response"]
+        self.assertEqual(len(completed_resp["output"]), 1)
+        self.assertEqual(completed_resp["output"][0]["type"], "function_call")
+        self.assertEqual(completed_resp["output"][0]["name"], "mem_current_project")
+        self.assertEqual(completed_resp["output"][0]["arguments"], '{"detail": "summary"}')
+
+    def test_build_responses_sse_events_text_followed_by_function_call(self):
+        mock_upstream_lines = [
+            'data: {"candidates": [{"content": {"parts": [{"text": "Checking project:"}]}}]}\n',
+            'data: {"candidates": [{"content": {"parts": [{"functionCall": {"name": "mem_current_project", "args": {}}}]}}]}\n',
+            'data: {"candidates": [{"finishReason": "STOP"}]}\n',
+        ]
+        events = list(build_responses_sse_events(iter(mock_upstream_lines), "gemini-2.5-pro"))
+        parsed_events = []
+        for raw in events:
+            for l in raw.strip().split("\n"):
+                if l.startswith("data:"):
+                    parsed_events.append(json.loads(l[5:].strip()))
+
+        event_types = [p.get("type") for p in parsed_events]
+        expected_types = [
+            "response.created",
+            "response.in_progress",
+            "response.output_item.added",
+            "response.content_part.added",
+            "response.output_text.delta",
+            "response.output_text.done",
+            "response.content_part.done",
+            "response.output_item.done",
+            "response.output_item.added",
+            "response.function_call_arguments.delta",
+            "response.function_call_arguments.done",
+            "response.output_item.done",
+            "response.completed",
+        ]
+        self.assertEqual(event_types, expected_types)
+
+        # Output index for text item should be 0, and for fc item should be 1
+        self.assertEqual(parsed_events[2]["output_index"], 0)
+        self.assertEqual(parsed_events[8]["output_index"], 1)
+
+        completed_resp = parsed_events[-1]["response"]
+        self.assertEqual(len(completed_resp["output"]), 2)
+        self.assertEqual(completed_resp["output"][0]["type"], "message")
+        self.assertEqual(completed_resp["output"][1]["type"], "function_call")
 
     def test_build_responses_sse_events_with_custom_response_id(self):
         chunks = [

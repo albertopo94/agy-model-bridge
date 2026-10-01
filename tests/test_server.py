@@ -1100,6 +1100,77 @@ class TestServerEndpoints(unittest.TestCase):
         self.assertTrue(parsed_err["response"]["id"].startswith("resp_"))
         self.assertTrue(getattr(handler, "close_connection", False))
 
+    def test_responses_passes_tools_to_stream_generate_content_streaming(self):
+        handler = self.server.RequestHandlerClass.__new__(self.server.RequestHandlerClass)
+        handler.client = MagicMock()
+        handler.client.stream_generate_content.return_value = iter([
+            'data: {"candidates": [{"content": {"parts": [{"text": "Hello"}]}}]}\n'
+        ])
+        handler.project = "test-project"
+        handler.wfile = MagicMock()
+        handler.send_response = MagicMock()
+        handler.send_header = MagicMock()
+        handler.end_headers = MagicMock()
+
+        payload = {
+            "model": "gemini-2.5-pro",
+            "input": ["List files"],
+            "tools": [
+                {
+                    "type": "function",
+                    "name": "mem_current_project",
+                    "description": "Get context",
+                    "parameters": {"type": "object", "properties": {}},
+                }
+            ],
+            "stream": True,
+        }
+        handler._handle_responses(payload)
+
+        _, kwargs = handler.client.stream_generate_content.call_args
+        self.assertIn("tools", kwargs)
+        self.assertEqual(len(kwargs["tools"]), 1)
+        self.assertEqual(
+            kwargs["tools"][0]["functionDeclarations"][0]["name"],
+            "mem_current_project",
+        )
+
+    def test_responses_passes_tools_to_stream_generate_content_non_streaming(self):
+        handler = self.server.RequestHandlerClass.__new__(self.server.RequestHandlerClass)
+        handler.client = MagicMock()
+        handler.client.stream_generate_content.return_value = iter([
+            'data: {"candidates": [{"content": {"parts": [{"functionCall": {"name": "mem_current_project", "args": {}}}]}}]}\n'
+        ])
+        handler.project = "test-project"
+        handler._send_json = MagicMock()
+
+        payload = {
+            "model": "gemini-2.5-pro",
+            "input": ["List files"],
+            "tools": [
+                {
+                    "type": "function",
+                    "name": "mem_current_project",
+                    "description": "Get context",
+                }
+            ],
+            "stream": False,
+        }
+        handler._handle_responses(payload)
+
+        _, kwargs = handler.client.stream_generate_content.call_args
+        self.assertIn("tools", kwargs)
+        self.assertEqual(len(kwargs["tools"]), 1)
+        self.assertEqual(
+            kwargs["tools"][0]["functionDeclarations"][0]["name"],
+            "mem_current_project",
+        )
+        handler._send_json.assert_called_once()
+        code, resp = handler._send_json.call_args[0]
+        self.assertEqual(code, 200)
+        self.assertEqual(resp["output"][0]["type"], "function_call")
+        self.assertEqual(resp["output"][0]["name"], "mem_current_project")
+
 
 if __name__ == "__main__":
     unittest.main()
