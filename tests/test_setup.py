@@ -520,11 +520,17 @@ class TestSetupCodex(unittest.TestCase):
         setup_codex(config_path=target)
 
         updated = target.read_text(encoding="utf-8")
-        import tomllib
-        parsed = tomllib.loads(updated)
-        self.assertEqual(parsed.get("model"), "gemini-3.8-flash-high")
-        self.assertEqual(parsed.get("model_provider"), "agy")
-        self.assertEqual(parsed.get("personality"), "pragmatic")
+        try:
+            import tomllib
+            parsed = tomllib.loads(updated)
+            self.assertEqual(parsed.get("model"), "gemini-3.8-flash-high")
+            self.assertEqual(parsed.get("model_provider"), "agy")
+            self.assertEqual(parsed.get("personality"), "pragmatic")
+        except ImportError:
+            # Python 3.10 standard library compatibility (tomllib was added in Python 3.11)
+            self.assertIn('model = "gemini-3.8-flash-high"', updated)
+            self.assertIn('model_provider = "agy"', updated)
+            self.assertIn('personality = "pragmatic"', updated)
         self.assertIn('# model = "gpt-6-sol"  # agy-override', updated)
 
     def test_codex_cli_flags_port_and_model(self):
@@ -1244,7 +1250,7 @@ class TestUpdateInstallation(unittest.TestCase):
 
         self.assertEqual(result["status"], "updated")
         self.assertTrue(result["restarted_daemon"])
-        self.assertEqual(result["version"], "0.5.2")
+        self.assertEqual(result["version"], "0.5.3")
         mock_run.assert_called_once_with(
             ["git", "-C", str(self.repo_dir), "pull", "--ff-only"],
             capture_output=True,
@@ -1436,7 +1442,7 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main([flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.5.2")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.5.3")
 
     def test_cli_subcommand_version_flags(self):
         from bridge.__main__ import main
@@ -1448,19 +1454,19 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main(["update", flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.5.2")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.5.3")
 
     def test_version_unification(self):
         import bridge
         from pathlib import Path
         import re
 
-        self.assertEqual(bridge.__version__, "0.5.2")
+        self.assertEqual(bridge.__version__, "0.5.3")
         pyproject_path = Path(__file__).resolve().parent.parent / "pyproject.toml"
         pyproject_text = pyproject_path.read_text(encoding="utf-8")
         match = re.search(r'version\s*=\s*"([^"]+)"', pyproject_text)
         self.assertIsNotNone(match)
-        self.assertEqual(match.group(1), "0.5.2")
+        self.assertEqual(match.group(1), "0.5.3")
 
 
 class TestClientConfiguratorRegistry(unittest.TestCase):
