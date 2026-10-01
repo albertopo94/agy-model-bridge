@@ -196,6 +196,9 @@ class TestTranslationsParity(unittest.TestCase):
             "setup_codex_success",
             "setup_codex_auto_read",
             "setup_codex_run_hint",
+            "setup_hermes_success",
+            "setup_hermes_auto_read",
+            "setup_hermes_run_hint",
             # Restore
             "restore_restored_from",
             "restore_client_ready",
@@ -214,6 +217,7 @@ class TestTranslationsParity(unittest.TestCase):
             "uninstall_daemon_dir_removed",
             "uninstall_claude_restored",
             "uninstall_codex_restored",
+            "uninstall_hermes_restored",
             "uninstall_backups_purged",
             # Update
             "update_success",

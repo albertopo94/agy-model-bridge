@@ -35,7 +35,7 @@ class TestOpenAIToCloudCodeRequest(unittest.TestCase):
                 {"role": "user", "content": "Hello world"},
             ],
         }
-        model, contents, system_instruction, gen_config = openai_to_cloudcode_request(
+        model, contents, system_instruction, gen_config, tools = openai_to_cloudcode_request(
             payload, project="aicode-consumers"
         )
         self.assertEqual(model, "gemini-2.5-pro")
@@ -48,6 +48,7 @@ class TestOpenAIToCloudCodeRequest(unittest.TestCase):
             [{"role": "user", "parts": [{"text": "Hello world"}]}],
         )
         self.assertIsNone(gen_config)
+        self.assertIsNone(tools)
 
     def test_valid_request_multi_turn_conversation(self):
         payload = {
@@ -58,7 +59,7 @@ class TestOpenAIToCloudCodeRequest(unittest.TestCase):
                 {"role": "user", "content": "Tell me a joke"},
             ],
         }
-        model, contents, system_instruction, gen_config = openai_to_cloudcode_request(
+        model, contents, system_instruction, gen_config, tools = openai_to_cloudcode_request(
             payload, project="test-project"
         )
         self.assertEqual(model, "gemini-2.5-flash")
@@ -72,6 +73,7 @@ class TestOpenAIToCloudCodeRequest(unittest.TestCase):
             ],
         )
         self.assertIsNone(gen_config)
+        self.assertIsNone(tools)
 
     def test_multiple_system_messages_concatenated(self):
         payload = {
@@ -82,7 +84,7 @@ class TestOpenAIToCloudCodeRequest(unittest.TestCase):
                 {"role": "user", "content": "Action"},
             ],
         }
-        _, _, system_instruction, _ = openai_to_cloudcode_request(
+        _, _, system_instruction, _, _ = openai_to_cloudcode_request(
             payload, project="test-project"
         )
         self.assertIsNotNone(system_instruction)
@@ -99,7 +101,7 @@ class TestOpenAIToCloudCodeRequest(unittest.TestCase):
                 {"role": "user", "content": "Hello"},
             ],
         }
-        _, _, system_instruction, _ = openai_to_cloudcode_request(
+        _, _, system_instruction, _, _ = openai_to_cloudcode_request(
             payload, project="test-project"
         )
         self.assertIsNotNone(system_instruction)
@@ -115,7 +117,7 @@ class TestOpenAIToCloudCodeRequest(unittest.TestCase):
                 {"role": "user", "content": None},
             ],
         }
-        _, contents, _, _ = openai_to_cloudcode_request(payload, project="test-project")
+        _, contents, _, _, _ = openai_to_cloudcode_request(payload, project="test-project")
         self.assertEqual(
             contents,
             [{"role": "user", "parts": [{"text": " "}]}],
@@ -129,7 +131,7 @@ class TestOpenAIToCloudCodeRequest(unittest.TestCase):
                 {"role": "user", "content": "Tell me a joke"},
             ],
         }
-        _, contents, _, _ = openai_to_cloudcode_request(payload, project="test-project")
+        _, contents, _, _, _ = openai_to_cloudcode_request(payload, project="test-project")
         self.assertEqual(
             contents,
             [
@@ -146,7 +148,7 @@ class TestOpenAIToCloudCodeRequest(unittest.TestCase):
                 {"role": "assistant", "content": "How can I help you today?"},
             ],
         }
-        _, contents, _, _ = openai_to_cloudcode_request(payload, project="test-project")
+        _, contents, _, _, _ = openai_to_cloudcode_request(payload, project="test-project")
         self.assertEqual(
             contents,
             [
@@ -165,7 +167,7 @@ class TestOpenAIToCloudCodeRequest(unittest.TestCase):
                 {"role": "user", "content": "\t\n "},
             ],
         }
-        _, contents, _, _ = openai_to_cloudcode_request(payload, project="test-project")
+        _, contents, _, _, _ = openai_to_cloudcode_request(payload, project="test-project")
         self.assertEqual(
             contents,
             [
@@ -175,8 +177,9 @@ class TestOpenAIToCloudCodeRequest(unittest.TestCase):
             ],
         )
 
-    def test_missing_model_raises_value_error(self):
+    def test_invalid_model_type_raises_value_error(self):
         payload = {
+            "model": 12345,
             "messages": [{"role": "user", "content": "Hello"}],
         }
         with self.assertRaises(ValueError) as ctx:
@@ -216,7 +219,7 @@ class TestOpenAIToCloudCodeRequest(unittest.TestCase):
                 }
             ],
         }
-        _, contents, _, _ = openai_to_cloudcode_request(payload, project="test-project")
+        _, contents, _, _, _ = openai_to_cloudcode_request(payload, project="test-project")
         self.assertEqual(
             contents,
             [{"role": "user", "parts": [{"text": "Hello world!"}]}],
@@ -235,7 +238,7 @@ class TestOpenAIToCloudCodeRequest(unittest.TestCase):
                 }
             ],
         }
-        _, contents, _, _ = openai_to_cloudcode_request(payload, project="test-project")
+        _, contents, _, _, _ = openai_to_cloudcode_request(payload, project="test-project")
         self.assertEqual(
             contents,
             [{"role": "user", "parts": [{"text": "Describe this image."}]}],
@@ -251,7 +254,7 @@ class TestOpenAIToCloudCodeRequest(unittest.TestCase):
                 }
             ],
         }
-        _, contents, _, _ = openai_to_cloudcode_request(payload, project="test-project")
+        _, contents, _, _, _ = openai_to_cloudcode_request(payload, project="test-project")
         self.assertEqual(
             contents,
             [{"role": "user", "parts": [{"text": "Just text item"}]}],
@@ -267,7 +270,7 @@ class TestOpenAIToCloudCodeRequest(unittest.TestCase):
                 }
             ],
         }
-        _, contents, _, _ = openai_to_cloudcode_request(payload, project="test-project")
+        _, contents, _, _, _ = openai_to_cloudcode_request(payload, project="test-project")
         self.assertEqual(
             contents,
             [{"role": "user", "parts": [{"text": "First paragraph.\nSecond paragraph."}]}],
@@ -291,11 +294,14 @@ class TestOpenAIToCloudCodeRequest(unittest.TestCase):
                 },
             ],
         }
-        _, contents, _, _ = openai_to_cloudcode_request(payload, project="test-project")
+        _, contents, _, _, _ = openai_to_cloudcode_request(payload, project="test-project")
         # Conversation ends with model, so helper appends a user "Continue" turn
         self.assertEqual(contents[0]["role"], "user")
         self.assertEqual(contents[1]["role"], "model")
-        self.assertIn("[Tool Call: get_weather({\"location\": \"Tokyo\"})]", contents[1]["parts"][0]["text"])
+        self.assertEqual(
+            contents[1]["parts"],
+            [{"functionCall": {"name": "get_weather", "args": {"location": "Tokyo"}}}],
+        )
 
     def test_only_system_messages_raises_value_error(self):
         payload = {
@@ -328,7 +334,7 @@ class TestOpenAIToCloudCodeRequest(unittest.TestCase):
                 }
             ],
         }
-        _, contents, _, _ = openai_to_cloudcode_request(payload, project="test-project")
+        _, contents, _, _, _ = openai_to_cloudcode_request(payload, project="test-project")
         self.assertEqual(contents, [{"role": "user", "parts": [{"text": "hello"}]}])
 
     def test_empty_system_instruction_returns_none(self):
@@ -339,7 +345,7 @@ class TestOpenAIToCloudCodeRequest(unittest.TestCase):
                 {"role": "user", "content": "hello"},
             ],
         }
-        _, _, system_instruction, _ = openai_to_cloudcode_request(payload, project="test-project")
+        _, _, system_instruction, _, _ = openai_to_cloudcode_request(payload, project="test-project")
         self.assertIsNone(system_instruction)
 
     def test_whitespace_system_instruction_returns_none(self):
@@ -350,7 +356,7 @@ class TestOpenAIToCloudCodeRequest(unittest.TestCase):
                 {"role": "user", "content": "hello"},
             ],
         }
-        _, _, system_instruction, _ = openai_to_cloudcode_request(payload, project="test-project")
+        _, _, system_instruction, _, _ = openai_to_cloudcode_request(payload, project="test-project")
         self.assertIsNone(system_instruction)
 
     def test_generation_config_mapping_sampling_params(self):
@@ -362,7 +368,7 @@ class TestOpenAIToCloudCodeRequest(unittest.TestCase):
             "top_p": 0.95,
             "stop": ["END", "STOP"],
         }
-        _, _, _, gen_config = openai_to_cloudcode_request(payload, project="test-project")
+        _, _, _, gen_config, _ = openai_to_cloudcode_request(payload, project="test-project")
         self.assertEqual(
             gen_config,
             {
@@ -380,7 +386,7 @@ class TestOpenAIToCloudCodeRequest(unittest.TestCase):
             "max_completion_tokens": 256,
             "stop": "STOP_TOKEN",
         }
-        _, _, _, gen_config = openai_to_cloudcode_request(payload, project="test-project")
+        _, _, _, gen_config, _ = openai_to_cloudcode_request(payload, project="test-project")
         self.assertEqual(
             gen_config,
             {
@@ -394,7 +400,7 @@ class TestOpenAIToCloudCodeRequest(unittest.TestCase):
             "model": "custom-model",
             "messages": [{"role": "user", "content": "hello"}],
         }
-        _, _, _, gen_config = openai_to_cloudcode_request(payload, project="test-project")
+        _, _, _, gen_config, _ = openai_to_cloudcode_request(payload, project="test-project")
         self.assertIsNone(gen_config)
 
     def test_generation_config_stop_empty_sequences_omitted(self):
@@ -405,7 +411,7 @@ class TestOpenAIToCloudCodeRequest(unittest.TestCase):
                     "messages": [{"role": "user", "content": "hello"}],
                     "stop": empty_stop,
                 }
-                _, _, _, gen_config = openai_to_cloudcode_request(payload, project="test-project")
+                _, _, _, gen_config, _ = openai_to_cloudcode_request(payload, project="test-project")
                 self.assertIsNone(gen_config)
 
     def test_generation_config_stop_filters_empty_strings(self):
@@ -414,7 +420,7 @@ class TestOpenAIToCloudCodeRequest(unittest.TestCase):
             "messages": [{"role": "user", "content": "hello"}],
             "stop": ["", "STOP_TOKEN", "   ", "END"],
         }
-        _, _, _, gen_config = openai_to_cloudcode_request(payload, project="test-project")
+        _, _, _, gen_config, _ = openai_to_cloudcode_request(payload, project="test-project")
         self.assertEqual(
             gen_config,
             {
@@ -433,15 +439,15 @@ class TestOpenAIToCloudCodeRequest(unittest.TestCase):
                 {"role": "function", "content": "Result from func"},
             ],
         }
-        _, contents, _, _ = openai_to_cloudcode_request(payload, project="test-project")
+        _, contents, _, _, _ = openai_to_cloudcode_request(payload, project="test-project")
         self.assertEqual(
             contents,
             [
                 {"role": "user", "parts": [{"text": "Call tool"}]},
                 {"role": "model", "parts": [{"text": "Calling tool..."}]},
-                {"role": "user", "parts": [{"text": "[Tool Result]: Result from tool"}]},
+                {"role": "user", "parts": [{"functionResponse": {"name": "tool", "response": {"output": "Result from tool"}}}]},
                 {"role": "model", "parts": [{"text": "Calling function..."}]},
-                {"role": "user", "parts": [{"text": "[Tool Result]: Result from func"}]},
+                {"role": "user", "parts": [{"functionResponse": {"name": "tool", "response": {"output": "Result from func"}}}]},
             ],
         )
 
@@ -457,13 +463,13 @@ class TestOpenAIToCloudCodeRequest(unittest.TestCase):
                 {"role": "tool", "content": "Tool output"},
             ],
         }
-        _, contents, _, _ = openai_to_cloudcode_request(payload, project="test-project")
+        _, contents, _, _, _ = openai_to_cloudcode_request(payload, project="test-project")
         self.assertEqual(
             contents,
             [
                 {"role": "user", "parts": [{"text": "Question 1"}, {"text": "Question 2"}]},
                 {"role": "model", "parts": [{"text": "Answer 1"}, {"text": "Answer 2"}]},
-                {"role": "user", "parts": [{"text": "Followup"}, {"text": "[Tool Result]: Tool output"}]},
+                {"role": "user", "parts": [{"text": "Followup"}, {"functionResponse": {"name": "tool", "response": {"output": "Tool output"}}}]},
             ],
         )
 
@@ -475,7 +481,7 @@ class TestOpenAIToCloudCodeRequest(unittest.TestCase):
                 {"role": "assistant", "content": "How can I help you?"},
             ],
         }
-        _, contents, _, _ = openai_to_cloudcode_request(payload, project="test-project")
+        _, contents, _, _, _ = openai_to_cloudcode_request(payload, project="test-project")
         self.assertEqual(
             contents,
             [
@@ -1029,6 +1035,48 @@ class TestBuildOpenAIResponses(unittest.TestCase):
         self.assertEqual(resp["choices"][0]["finish_reason"], "length")
         self.assertEqual(resp["usage"], usage)
 
+    def test_build_openai_chunk_with_delta_tool_calls(self):
+        tool_calls = [
+            {
+                "index": 0,
+                "id": "call_abc123",
+                "type": "function",
+                "function": {
+                    "name": "get_weather",
+                    "arguments": '{"location": "Tokyo"}',
+                },
+            }
+        ]
+        chunk_str = build_openai_chunk(
+            completion_id="chatcmpl-123",
+            model="gemini-2.5-pro",
+            delta_tool_calls=tool_calls,
+        )
+        chunk_json = json.loads(chunk_str[6:].strip())
+        self.assertEqual(chunk_json["choices"][0]["delta"]["tool_calls"], tool_calls)
+
+    def test_build_openai_completion_with_tool_calls(self):
+        tool_calls = [
+            {
+                "id": "call_abc123",
+                "type": "function",
+                "function": {
+                    "name": "get_weather",
+                    "arguments": '{"location": "Tokyo"}',
+                },
+            }
+        ]
+        resp = build_openai_completion(
+            completion_id="chatcmpl-999",
+            model="gemini-2.5-pro",
+            full_text="",
+            tool_calls=tool_calls,
+            finish_reason="tool_calls",
+        )
+        self.assertEqual(resp["choices"][0]["message"]["tool_calls"], tool_calls)
+        self.assertIsNone(resp["choices"][0]["message"]["content"])
+        self.assertEqual(resp["choices"][0]["finish_reason"], "tool_calls")
+
     def test_build_openai_model_list(self):
         upstream = [
             {"name": "models/gemini-2.5-pro"},
@@ -1276,7 +1324,7 @@ class TestBuildThinkingConfig(unittest.TestCase):
             "model": "gemini-3.1-pro-high",
             "messages": [{"role": "user", "content": "hello"}],
         }
-        _, _, _, gen_config_high = openai_to_cloudcode_request(payload_high, "test-project")
+        _, _, _, gen_config_high, _ = openai_to_cloudcode_request(payload_high, "test-project")
         self.assertIsNotNone(gen_config_high)
         self.assertEqual(gen_config_high.get("thinkingConfig"), {"thinkingLevel": "HIGH"})
 
@@ -1285,7 +1333,7 @@ class TestBuildThinkingConfig(unittest.TestCase):
             "model": "gemini-2.5-pro",
             "messages": [{"role": "user", "content": "hello"}],
         }
-        _, _, _, gen_config_std = openai_to_cloudcode_request(payload_std, "test-project")
+        _, _, _, gen_config_std, _ = openai_to_cloudcode_request(payload_std, "test-project")
         self.assertIsNone(gen_config_std)
 
         # Payload override takes precedence
@@ -1294,7 +1342,7 @@ class TestBuildThinkingConfig(unittest.TestCase):
             "messages": [{"role": "user", "content": "hello"}],
             "thinking": {"thinkingBudget": 1024},
         }
-        _, _, _, gen_config_ovr = openai_to_cloudcode_request(payload_override, "test-project")
+        _, _, _, gen_config_ovr, _ = openai_to_cloudcode_request(payload_override, "test-project")
         self.assertIsNotNone(gen_config_ovr)
         self.assertEqual(gen_config_ovr.get("thinkingConfig"), {"thinkingBudget": 1024})
 
@@ -1478,6 +1526,243 @@ class TestSanitizeSchemaForGemini(unittest.TestCase):
         self.assertEqual(author["type"], "object")
         self.assertEqual(author["properties"]["name"]["type"], "string")
         self.assertNotIn("$ref", author)
+
+
+class TestOpenAIToolCallingAndAliasing(unittest.TestCase):
+    def test_openai_to_cloudcode_request_resolves_auto_model(self):
+        payload = {
+            "model": "auto",
+            "messages": [{"role": "user", "content": "Hello"}],
+        }
+        model, contents, system_inst, gen_config, tools = openai_to_cloudcode_request(
+            payload, "test-project"
+        )
+        self.assertEqual(model, "gemini-3.8-flash-tiered")
+        self.assertIsNotNone(gen_config)
+        self.assertEqual(gen_config.get("thinkingConfig"), {"thinkingLevel": "HIGH"})
+        self.assertIsNone(tools)
+
+    def test_openai_to_cloudcode_request_resolves_none_or_missing_model(self):
+        # Missing model
+        payload1 = {"messages": [{"role": "user", "content": "Hello"}]}
+        model1, _, _, gen_config1, _ = openai_to_cloudcode_request(payload1, "test-project")
+        self.assertEqual(model1, "gemini-3.8-flash-tiered")
+        self.assertEqual(gen_config1.get("thinkingConfig"), {"thinkingLevel": "HIGH"})
+
+        # None model
+        payload2 = {"model": None, "messages": [{"role": "user", "content": "Hello"}]}
+        model2, _, _, gen_config2, _ = openai_to_cloudcode_request(payload2, "test-project")
+        self.assertEqual(model2, "gemini-3.8-flash-tiered")
+        self.assertEqual(gen_config2.get("thinkingConfig"), {"thinkingLevel": "HIGH"})
+
+        # Empty string model
+        payload3 = {"model": "   ", "messages": [{"role": "user", "content": "Hello"}]}
+        model3, _, _, gen_config3, _ = openai_to_cloudcode_request(payload3, "test-project")
+        self.assertEqual(model3, "gemini-3.8-flash-tiered")
+        self.assertEqual(gen_config3.get("thinkingConfig"), {"thinkingLevel": "HIGH"})
+
+    def test_openai_to_cloudcode_request_resolves_flash_high_model(self):
+        payload = {
+            "model": "gemini-3.8-flash-high",
+            "messages": [{"role": "user", "content": "Hello"}],
+        }
+        model, _, _, gen_config, _ = openai_to_cloudcode_request(payload, "test-project")
+        self.assertEqual(model, "gemini-3.8-flash-tiered")
+        self.assertEqual(gen_config.get("thinkingConfig"), {"thinkingLevel": "HIGH"})
+
+    def test_openai_to_cloudcode_request_invalid_model_type_raises_value_error(self):
+        payload = {
+            "model": 12345,
+            "messages": [{"role": "user", "content": "Hello"}],
+        }
+        with self.assertRaises(ValueError) as ctx:
+            openai_to_cloudcode_request(payload, "test-project")
+        self.assertIn("model", str(ctx.exception).lower())
+
+    def test_openai_to_cloudcode_request_extracts_and_converts_tools(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [{"role": "user", "content": "What is the weather?"}],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "get_weather",
+                        "description": "Get current temperature",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "location": {"type": "string"},
+                            },
+                            "required": ["location"],
+                        },
+                    },
+                }
+            ],
+        }
+        _, _, _, _, tools = openai_to_cloudcode_request(payload, "test-project")
+        self.assertIsNotNone(tools)
+        self.assertEqual(len(tools), 1)
+        self.assertIn("functionDeclarations", tools[0])
+        decls = tools[0]["functionDeclarations"]
+        self.assertEqual(len(decls), 1)
+        self.assertEqual(decls[0]["name"], "get_weather")
+        self.assertEqual(decls[0]["description"], "Get current temperature")
+        self.assertEqual(
+            decls[0]["parameters"],
+            {
+                "type": "object",
+                "properties": {"location": {"type": "string"}},
+                "required": ["location"],
+            },
+        )
+
+    def test_openai_to_cloudcode_request_extracts_flat_tools(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [{"role": "user", "content": "What is the weather?"}],
+            "tools": [
+                {
+                    "type": "function",
+                    "name": "lookup",
+                    "description": "Lookup entity",
+                    "parameters": {"type": "object", "properties": {}},
+                }
+            ],
+        }
+        _, _, _, _, tools = openai_to_cloudcode_request(payload, "test-project")
+        self.assertIsNotNone(tools)
+        decls = tools[0]["functionDeclarations"]
+        self.assertEqual(decls[0]["name"], "lookup")
+        self.assertEqual(decls[0]["description"], "Lookup entity")
+
+    def test_openai_to_cloudcode_request_sanitizes_tool_schema(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [{"role": "user", "content": "Run tool"}],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "custom_fn",
+                        "parameters": {
+                            "$schema": "http://json-schema.org/draft-07/schema#",
+                            "type": "object",
+                            "properties": {
+                                "tags": {
+                                    "type": "array",
+                                },
+                            },
+                        },
+                    },
+                }
+            ],
+        }
+        _, _, _, _, tools = openai_to_cloudcode_request(payload, "test-project")
+        self.assertIsNotNone(tools)
+        params = tools[0]["functionDeclarations"][0]["parameters"]
+        self.assertNotIn("$schema", params)
+        self.assertEqual(params["properties"]["tags"]["items"], {})
+
+    def test_openai_to_cloudcode_request_assistant_tool_calls_and_tool_response(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [
+                {"role": "user", "content": "What is the weather?"},
+                {
+                    "role": "assistant",
+                    "content": "Checking the weather now.",
+                    "tool_calls": [
+                        {
+                            "id": "call_weather_1",
+                            "type": "function",
+                            "function": {
+                                "name": "get_weather",
+                                "arguments": '{"location": "Tokyo"}',
+                            },
+                        }
+                    ],
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_weather_1",
+                    "content": "Sunny, 25C",
+                },
+            ],
+        }
+        _, contents, _, _, _ = openai_to_cloudcode_request(payload, "test-project")
+        self.assertEqual(len(contents), 3)
+        self.assertEqual(contents[0]["role"], "user")
+        self.assertEqual(contents[0]["parts"], [{"text": "What is the weather?"}])
+
+        self.assertEqual(contents[1]["role"], "model")
+        self.assertEqual(
+            contents[1]["parts"],
+            [
+                {"text": "Checking the weather now."},
+                {
+                    "functionCall": {
+                        "name": "get_weather",
+                        "args": {"location": "Tokyo"},
+                    }
+                },
+            ],
+        )
+
+        self.assertEqual(contents[2]["role"], "user")
+        self.assertEqual(
+            contents[2]["parts"],
+            [
+                {
+                    "functionResponse": {
+                        "name": "get_weather",
+                        "response": {"output": "Sunny, 25C"},
+                    }
+                }
+            ],
+        )
+
+    def test_openai_to_cloudcode_request_function_role_response(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [
+                {"role": "user", "content": "Hi"},
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "call_fn_99",
+                            "type": "function",
+                            "function": {"name": "my_calc", "arguments": {"x": 5}},
+                        }
+                    ],
+                },
+                {
+                    "role": "function",
+                    "name": "my_calc",
+                    "content": "Result: 10",
+                },
+            ],
+        }
+        _, contents, _, _, _ = openai_to_cloudcode_request(payload, "test-project")
+        self.assertEqual(contents[1]["role"], "model")
+        self.assertEqual(
+            contents[1]["parts"],
+            [{"functionCall": {"name": "my_calc", "args": {"x": 5}}}],
+        )
+        self.assertEqual(contents[2]["role"], "user")
+        self.assertEqual(
+            contents[2]["parts"],
+            [
+                {
+                    "functionResponse": {
+                        "name": "my_calc",
+                        "response": {"output": "Result: 10"},
+                    }
+                }
+            ],
+        )
 
 
 if __name__ == "__main__":

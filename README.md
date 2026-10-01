@@ -13,7 +13,7 @@ Zero-dependency, pure Python 3 local AI gateway that bridges the Google Cloud Co
   - `POST /v1/chat/completions` — OpenAI Chat Completions API with full streaming (SSE `text/event-stream`) and non-streaming support (for FreeLLMAPI, Hermes Agent, Aider).
   - `POST /v1/responses` — OpenAI Responses API shim for Codex CLI (`wire_api = "responses"`).
   - `POST /v1/messages` — Anthropic Messages API shim with dynamic SSE stream mapping (`thinking_delta`, `text_delta`, `tool_use`, `input_json_delta`), recursive OpenAPI 3.0 schema sanitization, and full tool calling for Claude Code CLI.
-- **Built-in Setup CLI**: Native subcommands (`setup-claude`, `setup-codex`) that surgically configure client environments with atomic writes, file permissions `0o600`, and automatic timestamped backups.
+- **Built-in Setup CLI**: Native subcommands (`setup-claude`, `setup-codex`, `setup-hermes`) that surgically configure client environments with atomic writes, file permissions `0o600`, and automatic timestamped backups.
 - **macOS Keychain OAuth Integration**: Seamlessly extracts Google OAuth credentials stored by Antigravity in Keychain (`service="gemini"`, `account="antigravity"`) with thread-safe TTL caching and automatic 401 re-read.
 - **Adaptive Thinking & Model Aliasing**: Intelligently resolves `gemini-3.8-flash-high` / `auto` to upstream `gemini-3.8-flash-tiered`, automatically configuring reasoning levels (`HIGH`, `MEDIUM`, `LOW`) and token budgets.
 
@@ -230,6 +230,8 @@ curl -fsSL https://raw.githubusercontent.com/albertopo94/agy-model-bridge/main/u
 | `agy-bridge restore-claude` | Interactively restores a Claude Code configuration backup |
 | `agy-bridge setup-codex` | Surgically configures Codex CLI (`~/.codex/config.toml`) |
 | `agy-bridge restore-codex` | Interactively restores a Codex CLI configuration backup |
+| `agy-bridge setup-hermes` | Surgically configures Hermes Agent (`~/.hermes/config.yaml`) |
+| `agy-bridge restore-hermes` | Interactively restores a Hermes Agent configuration backup |
 | `agy-bridge uninstall` | Uninstalls bridge, terminates daemon, and restores client configs |
 
 ---
@@ -244,7 +246,7 @@ Execute the complete test suite:
 python3 -m unittest discover -s tests -v
 ```
 
-All 430 tests run in ~1 second with zero external dependencies and zero network access.
+All 458 tests run in ~1 second with zero external dependencies and zero network access.
 
 ### End-to-End Smoke Test
 

@@ -339,22 +339,29 @@ def resolve_model_and_thinking(
 
 def openai_to_cloudcode_request(
     openai_payload: dict[str, Any], project: str
-) -> tuple[str, list[dict[str, Any]], dict[str, Any] | None, dict[str, Any] | None]:
-    """Validates OpenAI payload, extracts model, builds Cloud Code contents, systemInstruction, and generationConfig.
+) -> tuple[
+    str,
+    list[dict[str, Any]],
+    dict[str, Any] | None,
+    dict[str, Any] | None,
+    list[dict[str, Any]] | None,
+]:
+    """Validates OpenAI payload, extracts model, builds Cloud Code contents, systemInstruction, generationConfig, and tools.
 
     Args:
         openai_payload: Raw request dictionary matching OpenAI schema.
         project: Upstream project identifier.
 
     Returns:
-        tuple of (model_name, contents_list, system_instruction_dict_or_None, generation_config_dict_or_None)
+        tuple of (model_name, contents_list, system_instruction_dict_or_None, generation_config_dict_or_None, tools_list_or_None)
 
     Raises:
         ValueError: If model or messages are missing/invalid.
     """
-    model = openai_payload.get("model")
-    if not model or not isinstance(model, str) or not model.strip():
-        raise ValueError("Missing or invalid 'model' parameter")
+    raw_model = openai_payload.get("model")
+    if raw_model is not None and not isinstance(raw_model, str):
+        raise ValueError("Invalid 'model' parameter: must be a string")
+    model, thinking_cfg = resolve_model_and_thinking(raw_model, openai_payload)
 
     messages = openai_payload.get("messages")
     if not messages or not isinstance(messages, list) or len(messages) == 0:
@@ -362,6 +369,7 @@ def openai_to_cloudcode_request(
 
     system_texts: list[str] = []
     contents: list[dict[str, Any]] = []
+    tool_names_by_call_id: dict[str, str] = {}
 
     for msg in messages:
         if not isinstance(msg, dict):
@@ -392,39 +400,59 @@ def openai_to_cloudcode_request(
             turn_parts = [{"text": part_text}]
         elif role == "assistant":
             turn_role = "model"
+            turn_parts = []
+            if content and content.strip():
+                turn_parts.append({"text": content})
             tool_calls = msg.get("tool_calls")
             if tool_calls and isinstance(tool_calls, list):
-                tool_call_strs = []
                 for tc in tool_calls:
-                    if isinstance(tc, dict):
-                        fn = tc.get("function") or {}
-                        fn_name = fn.get("name") or "unknown"
-                        fn_args = fn.get("arguments", "")
-                        fn_args_str = json.dumps(fn_args) if isinstance(fn_args, (dict, list)) else str(fn_args or "")
-                        tool_call_strs.append(f"[Tool Call: {fn_name}({fn_args_str})]")
-                if tool_call_strs:
-                    tools_text = "\n".join(tool_call_strs)
-                    if content and content.strip():
-                        content = f"{content}\n{tools_text}"
+                    if not isinstance(tc, dict):
+                        continue
+                    call_id = tc.get("id") or ""
+                    fn = tc.get("function") if isinstance(tc.get("function"), dict) else tc
+                    fn_name = fn.get("name") or "unknown"
+                    if call_id:
+                        tool_names_by_call_id[call_id] = fn_name
+                    args_raw = fn.get("arguments")
+                    if isinstance(args_raw, dict):
+                        args_dict = args_raw
+                    elif isinstance(args_raw, str):
+                        try:
+                            args_dict = json.loads(args_raw) if args_raw.strip() else {}
+                            if not isinstance(args_dict, dict):
+                                args_dict = {"raw": args_dict}
+                        except Exception:
+                            args_dict = {"raw": args_raw} if args_raw else {}
                     else:
-                        content = tools_text
+                        args_dict = {}
+                    turn_parts.append({"functionCall": {"name": fn_name, "args": args_dict}})
             elif msg.get("function_call") and isinstance(msg.get("function_call"), dict):
                 fc = msg.get("function_call")
-                fc_name = fc.get("name") or "unknown"
-                fc_args = fc.get("arguments", "")
-                fc_args_str = json.dumps(fc_args) if isinstance(fc_args, (dict, list)) else str(fc_args or "")
-                tool_str = f"[Tool Call: {fc_name}({fc_args_str})]"
-                if content and content.strip():
-                    content = f"{content}\n{tool_str}"
+                fn_name = fc.get("name") or "unknown"
+                call_id = msg.get("name") or ""
+                if call_id:
+                    tool_names_by_call_id[call_id] = fn_name
+                args_raw = fc.get("arguments")
+                if isinstance(args_raw, dict):
+                    args_dict = args_raw
+                elif isinstance(args_raw, str):
+                    try:
+                        args_dict = json.loads(args_raw) if args_raw.strip() else {}
+                        if not isinstance(args_dict, dict):
+                            args_dict = {"raw": args_dict}
+                    except Exception:
+                        args_dict = {"raw": args_raw} if args_raw else {}
                 else:
-                    content = tool_str
-            part_text = content if content and content.strip() else " "
-            turn_parts = [{"text": part_text}]
+                    args_dict = {}
+                turn_parts.append({"functionCall": {"name": fn_name, "args": args_dict}})
+            if not turn_parts:
+                part_text = content if content and content.strip() else " "
+                turn_parts = [{"text": part_text}]
         elif role in ("tool", "function"):
             turn_role = "user"
-            tool_text = f"[Tool Result]: {content}"
-            part_text = tool_text if tool_text and tool_text.strip() else " "
-            turn_parts = [{"text": part_text}]
+            call_id = msg.get("tool_call_id") or msg.get("name") or ""
+            fn_name = msg.get("name") or tool_names_by_call_id.get(call_id, "tool")
+            turn_parts = [{"functionResponse": {"name": fn_name, "response": {"output": content}}}]
         else:
             raise ValueError(f"Invalid role: {role}")
 
@@ -486,13 +514,40 @@ def openai_to_cloudcode_request(
         if stop_list:
             gen_config["stopSequences"] = stop_list
 
-    thinking_cfg = build_thinking_config(model, openai_payload)
     if thinking_cfg is not None:
         gen_config["thinkingConfig"] = thinking_cfg
 
     generation_config: dict[str, Any] | None = gen_config if gen_config else None
 
-    return model, contents, system_instruction, generation_config
+    # Tools translation
+    raw_tools = openai_payload.get("tools")
+    if raw_tools is None and "functions" in openai_payload and isinstance(openai_payload.get("functions"), list):
+        raw_tools = [{"type": "function", "function": f} if isinstance(f, dict) else f for f in openai_payload["functions"]]
+
+    tools: list[dict[str, Any]] | None = None
+    if isinstance(raw_tools, list) and len(raw_tools) > 0:
+        function_declarations: list[dict[str, Any]] = []
+        for t in raw_tools:
+            if not isinstance(t, dict):
+                continue
+            fn = t.get("function") if isinstance(t.get("function"), dict) else t
+            name = fn.get("name")
+            if not name or not isinstance(name, str):
+                continue
+            decl: dict[str, Any] = {"name": name}
+            desc = fn.get("description")
+            if desc is not None:
+                decl["description"] = str(desc)
+            params = fn.get("parameters")
+            if params is not None and isinstance(params, dict):
+                decl["parameters"] = sanitize_schema_for_gemini(params)
+            else:
+                decl["parameters"] = {"type": "object", "properties": {}}
+            function_declarations.append(decl)
+        if function_declarations:
+            tools = [{"functionDeclarations": function_declarations}]
+
+    return model, contents, system_instruction, generation_config, tools
 
 
 def parse_cloudcode_sse_event(raw_line: str) -> dict[str, Any] | None:
@@ -781,13 +836,16 @@ def build_openai_chunk(
     finish_reason: str | None = None,
     usage: dict[str, int] | None = None,
     role: str | None = None,
+    delta_tool_calls: list[dict[str, Any]] | None = None,
 ) -> str:
     """Serializes a single OpenAI SSE chunk 'data: {...}\\n\\n'."""
-    delta: dict[str, str] = {}
+    delta: dict[str, Any] = {}
     if role is not None:
         delta["role"] = role
     if delta_text is not None:
         delta["content"] = delta_text
+    if delta_tool_calls is not None:
+        delta["tool_calls"] = delta_tool_calls
 
     chunk: dict[str, Any] = {
         "id": completion_id,
@@ -814,8 +872,16 @@ def build_openai_completion(
     full_text: str,
     usage: dict[str, int] | None = None,
     finish_reason: str = "stop",
+    tool_calls: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Constructs non-streaming OpenAI chat.completion JSON object."""
+    message: dict[str, Any] = {
+        "role": "assistant",
+        "content": full_text if full_text or not tool_calls else None,
+    }
+    if tool_calls is not None:
+        message["tool_calls"] = tool_calls
+
     return {
         "id": completion_id,
         "object": "chat.completion",
@@ -824,10 +890,7 @@ def build_openai_completion(
         "choices": [
             {
                 "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": full_text,
-                },
+                "message": message,
                 "finish_reason": finish_reason or "stop",
             }
         ],

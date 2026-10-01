@@ -28,6 +28,8 @@ class MockCloudCodeClient:
         self.should_fail_with = None
         self.custom_stream_generator = None
         self.last_generation_config = None
+        self.last_model = None
+        self.last_tools = None
         self.token_provider = MagicMock()
 
     def fetch_available_models(self, project: str):
@@ -42,8 +44,12 @@ class MockCloudCodeClient:
         contents: list,
         system_instruction=None,
         generation_config=None,
+        tools=None,
+        **kwargs,
     ):
+        self.last_model = model
         self.last_generation_config = generation_config
+        self.last_tools = tools
         if self.should_fail_with:
             raise self.should_fail_with
         if self.custom_stream_generator:
@@ -175,6 +181,90 @@ class TestServerEndpoints(unittest.TestCase):
 
         self.assertEqual("".join(deltas), "Hello world!")
         self.assertEqual(non_empty[-1], "data: [DONE]")
+
+    def test_chat_completions_streaming_tool_calls(self):
+        def tool_stream():
+            yield 'data: {"candidates": [{"content": {"parts": [{"functionCall": {"name": "get_weather", "args": {"city": "Paris"}}}]}}]}\n'
+            yield 'data: {"candidates": [{"finishReason": "STOP"}]}\n'
+
+        self.mock_client.custom_stream_generator = tool_stream
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [{"role": "user", "content": "What is the weather in Paris?"}],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {"name": "get_weather", "parameters": {"type": "object"}},
+                }
+            ],
+            "stream": True,
+        }
+        resp = self._http_post("/v1/chat/completions", payload, stream=True)
+        self.assertEqual(resp.status, 200)
+
+        lines = []
+        for raw_line in resp:
+            line_str = raw_line.decode("utf-8")
+            lines.append(line_str)
+            if line_str.strip() == "data: [DONE]":
+                break
+        resp.close()
+
+        non_empty = [l.strip() for l in lines if l.strip()]
+        chunks = [json.loads(l[6:]) for l in non_empty if l.startswith("data: ") and l != "data: [DONE]"]
+        self.assertTrue(len(chunks) >= 1)
+
+        # Check tool_calls in delta
+        tc_chunk = next((c for c in chunks if "tool_calls" in c["choices"][0]["delta"]), None)
+        self.assertIsNotNone(tc_chunk)
+        tool_calls = tc_chunk["choices"][0]["delta"]["tool_calls"]
+        self.assertEqual(len(tool_calls), 1)
+        self.assertEqual(tool_calls[0]["function"]["name"], "get_weather")
+        self.assertEqual(tool_calls[0]["function"]["arguments"], '{"city": "Paris"}')
+
+        # Check finish reason
+        last_chunk = chunks[-1]
+        self.assertEqual(last_chunk["choices"][0]["finish_reason"], "tool_calls")
+        self.assertIsNotNone(self.mock_client.last_tools)
+
+    def test_chat_completions_non_streaming_tool_calls(self):
+        def tool_stream():
+            yield 'data: {"candidates": [{"content": {"parts": [{"functionCall": {"name": "get_weather", "args": {"city": "Paris"}}}]}}]}\n'
+            yield 'data: {"candidates": [{"finishReason": "STOP"}]}\n'
+
+        self.mock_client.custom_stream_generator = tool_stream
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [{"role": "user", "content": "What is the weather in Paris?"}],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {"name": "get_weather", "parameters": {"type": "object"}},
+                }
+            ],
+            "stream": False,
+        }
+        status, headers, body = self._http_post("/v1/chat/completions", payload)
+        self.assertEqual(status, 200)
+        self.assertEqual(body["choices"][0]["finish_reason"], "tool_calls")
+        self.assertIsNone(body["choices"][0]["message"]["content"])
+        tool_calls = body["choices"][0]["message"]["tool_calls"]
+        self.assertEqual(len(tool_calls), 1)
+        self.assertEqual(tool_calls[0]["function"]["name"], "get_weather")
+        self.assertEqual(tool_calls[0]["function"]["arguments"], '{"city": "Paris"}')
+        self.assertIsNotNone(self.mock_client.last_tools)
+
+    def test_chat_completions_resolves_auto_model(self):
+        payload = {
+            "model": "auto",
+            "messages": [{"role": "user", "content": "Hello"}],
+            "stream": False,
+        }
+        status, headers, body = self._http_post("/v1/chat/completions", payload)
+        self.assertEqual(status, 200)
+        self.assertEqual(self.mock_client.last_model, "gemini-3.8-flash-tiered")
+        self.assertIsNotNone(self.mock_client.last_generation_config)
+        self.assertEqual(self.mock_client.last_generation_config.get("thinkingConfig"), {"thinkingLevel": "HIGH"})
 
     def test_chat_completions_invalid_payload_returns_400(self):
         # Missing messages

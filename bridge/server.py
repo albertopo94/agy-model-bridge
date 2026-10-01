@@ -605,7 +605,7 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
     def _handle_chat_completion(self, payload: dict[str, Any]) -> None:
         try:
             stream = bool(payload.get("stream", False))
-            model, contents, system_instruction, generation_config = openai_to_cloudcode_request(
+            model, contents, system_instruction, generation_config, tools = openai_to_cloudcode_request(
                 payload, self.project
             )
         except ValueError as ve:
@@ -628,6 +628,8 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
         extra_kwargs: dict[str, Any] = {}
         if generation_config is not None:
             extra_kwargs["generation_config"] = generation_config
+        if tools is not None:
+            extra_kwargs["tools"] = tools
 
         if stream:
             try:
@@ -669,9 +671,11 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
             last_finish_reason: str = "stop"
             last_usage: dict[str, int] | None = None
             is_first_chunk: bool = True
+            tool_calls_emitted: bool = False
+            tc_index: int = 0
 
             def process_line(line: str) -> None:
-                nonlocal last_finish_reason, last_usage, is_first_chunk
+                nonlocal last_finish_reason, last_usage, is_first_chunk, tool_calls_emitted, tc_index
                 parsed = parse_cloudcode_sse_event(line)
                 if not parsed:
                     return
@@ -683,12 +687,36 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                 usage = extract_usage(parsed)
                 if usage:
                     last_usage = usage
-                if delta_text:
+
+                fcs = extract_function_calls(parsed)
+                delta_tool_calls = None
+                if fcs:
+                    tool_calls_emitted = True
+                    delta_tool_calls = []
+                    for fc in fcs:
+                        tc_id = fc.get("id") or f"call_{uuid.uuid4().hex[:12]}"
+                        if tc_id.startswith("toolu_"):
+                            tc_id = f"call_{tc_id[6:]}"
+                        args = fc.get("args", {})
+                        args_str = json.dumps(args) if isinstance(args, (dict, list)) else str(args or "{}")
+                        delta_tool_calls.append({
+                            "index": tc_index,
+                            "id": tc_id,
+                            "type": "function",
+                            "function": {
+                                "name": fc.get("name", ""),
+                                "arguments": args_str,
+                            },
+                        })
+                        tc_index += 1
+
+                if delta_text or delta_tool_calls:
                     chunk = build_openai_chunk(
                         completion_id,
                         model,
                         delta_text=delta_text,
                         role="assistant" if is_first_chunk else None,
+                        delta_tool_calls=delta_tool_calls,
                     )
                     is_first_chunk = False
                     self.wfile.write(chunk.encode("utf-8"))
@@ -701,6 +729,9 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
 
                     for line in stream_gen:
                         process_line(line)
+
+                    if tool_calls_emitted:
+                        last_finish_reason = "tool_calls"
 
                     stop_chunk = build_openai_chunk(
                         completion_id,
@@ -734,6 +765,7 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                 )
                 try:
                     text_parts: list[str] = []
+                    collected_tool_calls: list[dict[str, Any]] = []
                     last_usage: dict[str, int] | None = None
                     last_finish_reason: str = "stop"
                     event_count = 0
@@ -754,9 +786,31 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                         usage = extract_usage(parsed)
                         if usage:
                             last_usage = usage
+                        fcs = extract_function_calls(parsed)
+                        if fcs:
+                            collected_tool_calls.extend(fcs)
 
-                    if event_count == 0 and not text_parts and not has_finish_reason:
+                    if event_count == 0 and not text_parts and not has_finish_reason and not collected_tool_calls:
                         raise BridgeError("Stream ended without data")
+
+                    formatted_tool_calls = None
+                    if collected_tool_calls:
+                        last_finish_reason = "tool_calls"
+                        formatted_tool_calls = []
+                        for fc in collected_tool_calls:
+                            tc_id = fc.get("id") or f"call_{uuid.uuid4().hex[:12]}"
+                            if tc_id.startswith("toolu_"):
+                                tc_id = f"call_{tc_id[6:]}"
+                            args = fc.get("args", {})
+                            args_str = json.dumps(args) if isinstance(args, (dict, list)) else str(args or "{}")
+                            formatted_tool_calls.append({
+                                "id": tc_id,
+                                "type": "function",
+                                "function": {
+                                    "name": fc.get("name", ""),
+                                    "arguments": args_str,
+                                },
+                            })
 
                     full_text = "".join(text_parts)
                     completion_obj = build_openai_completion(
@@ -765,6 +819,7 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                         full_text,
                         usage=last_usage,
                         finish_reason=last_finish_reason,
+                        tool_calls=formatted_tool_calls,
                     )
                     try:
                         self._send_json(200, completion_obj)

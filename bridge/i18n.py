@@ -124,6 +124,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "setup_codex_success": "Codex CLI configured successfully at {target}\n",
         "setup_codex_auto_read": "Codex CLI will read this configuration automatically.",
         "setup_codex_run_hint": "Run 'codex' to start coding with Gemini 3.8 Flash · high (1M context).",
+        "setup_hermes_success": "Hermes Agent configured successfully at {target}\n",
+        "setup_hermes_auto_read": "Hermes Agent will read this configuration automatically.",
+        "setup_hermes_run_hint": "Run 'hermes' or open Hermes Desktop to start chatting.",
         # Restore
         "restore_restored_from": "Restored configuration from: {name}",
         "restore_client_ready": "{client_name} ready at {target}",
@@ -142,6 +145,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "uninstall_daemon_dir_removed": "  - Directory ~/.agy-bridge removed.",
         "uninstall_claude_restored": "  - Claude Code configuration restored.",
         "uninstall_codex_restored": "  - Codex CLI configuration restored.",
+        "uninstall_hermes_restored": "  - Hermes Agent configuration restored.",
         "uninstall_backups_purged": "  - Backups history purged.",
         # Update
         "update_success": "✔ Repository updated to version v{ver}.",
@@ -188,6 +192,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "setup_codex_success": "Codex CLI configurado correctamente en {target}\n",
         "setup_codex_auto_read": "Codex CLI leerá esta configuración automáticamente.",
         "setup_codex_run_hint": "Ejecutá 'codex' para empezar a programar con Gemini 3.8 Flash · high (1M de contexto).",
+        "setup_hermes_success": "Hermes Agent configurado correctamente en {target}\n",
+        "setup_hermes_auto_read": "Hermes Agent leerá esta configuración automáticamente.",
+        "setup_hermes_run_hint": "Ejecutá 'hermes' o abrí Hermes Desktop para empezar a chatear.",
         # Restore
         "restore_restored_from": "Restaurada configuración desde: {name}",
         "restore_client_ready": "{client_name} listo en {target}",
@@ -206,6 +213,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "uninstall_daemon_dir_removed": "  - Directorio ~/.agy-bridge eliminado.",
         "uninstall_claude_restored": "  - Configuración de Claude Code restaurada.",
         "uninstall_codex_restored": "  - Configuración de Codex CLI restaurada.",
+        "uninstall_hermes_restored": "  - Configuración de Hermes Agent restaurada.",
         "uninstall_backups_purged": "  - Historial de backups purgado.",
         # Update
         "update_success": "✔ Repositorio actualizado a la versión v{ver}.",

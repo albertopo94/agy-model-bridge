@@ -17,8 +17,10 @@ from bridge.setup import (
     describe_backup,
     list_backups,
     restore_backup,
+    restore_hermes,
     setup_claude,
     setup_codex,
+    setup_hermes,
     uninstall,
     update_installation,
 )
@@ -392,6 +394,61 @@ def main(argv: list[str] | None = None) -> int:
         print(t("setup_codex_run_hint"))
         return 0
 
+    if argv and argv[0] == "setup-hermes":
+        parser = argparse.ArgumentParser(
+            prog=f"{prog_base} setup-hermes",
+            description="Configure Hermes Agent config.yaml for agy-model-bridge gateway.",
+        )
+        parser.add_argument(
+            "--port",
+            type=int,
+            default=None,
+            help="Gateway port (default: 24980)",
+        )
+        parser.add_argument(
+            "--model",
+            type=str,
+            default="gemini-3.8-flash-high",
+            help="Default model identifier (default: gemini-3.8-flash-high)",
+        )
+        parser.add_argument(
+            "--url",
+            "--base-url",
+            dest="base_url",
+            type=str,
+            default=None,
+            help="Gateway base URL override (with /v1)",
+        )
+        parser.add_argument(
+            "--token",
+            "--auth-token",
+            dest="auth_token",
+            type=str,
+            default="local-bridge",
+            help="Gateway auth token (default: local-bridge)",
+        )
+        parser.add_argument(
+            "--path",
+            type=Path,
+            default=None,
+            help="Path to Hermes config.yaml (default: ~/.hermes/config.yaml)",
+        )
+        parser.add_argument("--lang", type=str, default=None, help=t("cli_help_lang"))
+        args = parser.parse_args(argv[1:])
+        target = setup_hermes(
+            config_path=args.path,
+            base_url=args.base_url,
+            port=args.port,
+            model=args.model,
+            auth_token=args.auth_token,
+        )
+        if getattr(target, "backup_path", None):
+            print(t("setup_backup_label", path=target.backup_path))
+        print(t("setup_hermes_success", target=target))
+        print(t("setup_hermes_auto_read"))
+        print(t("setup_hermes_run_hint"))
+        return 0
+
     if argv and argv[0] == "restore-claude":
         return _handle_restore_cli(
             client_name="Claude Code",
@@ -406,6 +463,14 @@ def main(argv: list[str] | None = None) -> int:
             default_target=Path.home() / ".codex" / "config.toml",
             argv=argv[1:],
             prog_name=f"{prog_base} restore-codex",
+        )
+
+    if argv and argv[0] == "restore-hermes":
+        return _handle_restore_cli(
+            client_name="Hermes Agent",
+            default_target=Path.home() / ".hermes" / "config.yaml",
+            argv=argv[1:],
+            prog_name=f"{prog_base} restore-hermes",
         )
 
     if argv and argv[0] == "uninstall":
@@ -461,6 +526,8 @@ def main(argv: list[str] | None = None) -> int:
             print(t("uninstall_claude_restored"))
         if res.get("codex_restored"):
             print(t("uninstall_codex_restored"))
+        if res.get("hermes_restored"):
+            print(t("uninstall_hermes_restored"))
         if res.get("backups_purged"):
             print(t("uninstall_backups_purged"))
         return 0

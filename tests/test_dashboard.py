@@ -60,12 +60,15 @@ class TestDashboardRendering(unittest.TestCase):
         self.assertIn("Restaurar configuración", html)
         self.assertIn("agy-bridge restore-claude", html)
         self.assertIn("agy-bridge restore-codex", html)
+        self.assertIn("agy-bridge restore-hermes", html)
 
         # Copy buttons and pre IDs for restore
         self.assertIn('id="claude-restore"', html)
         self.assertIn("copySnippet(this, 'claude-restore')", html)
         self.assertIn('id="codex-restore"', html)
         self.assertIn("copySnippet(this, 'codex-restore')", html)
+        self.assertIn('id="hermes-restore"', html)
+        self.assertIn("copySnippet(this, 'hermes-restore')", html)
 
     def test_render_dashboard_vercel_styling_and_responsive_grid(self):
         auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
@@ -136,16 +139,17 @@ class TestDashboardRendering(unittest.TestCase):
         # Setup commands and keywords (100% native, zero external package dependencies)
         self.assertIn("agy-bridge setup-claude", html)
         self.assertIn("agy-bridge setup-codex", html)
+        self.assertIn("agy-bridge setup-hermes", html)
         self.assertNotIn("ANTHROPIC_CUSTOM_MODEL_OPTION", html)
         self.assertNotIn("mkdir -p ~/.codex", html)
 
-        # Claude Code mascot icon and Codex CLI icon
+        # Claude Code mascot icon, Codex CLI icon, and Hermes Agent icon
         self.assertIn('class="card-icon"', html)
         self.assertIn("#d77757", html)
         self.assertIn("#ffc400", html)
         self.assertIn("codex-linear-gradient", html)
         self.assertIn('viewBox="0 0 270.35 270.35"', html)
-        self.assertIn("export OPENAI_BASE_URL", html)
+        self.assertIn('viewBox="0 0 24 24"', html)
         self.assertNotIn("npx freellmapi setup", html)
         self.assertIn("BASE_URL", html)
         self.assertIn("API_KEY", html)
@@ -167,7 +171,14 @@ class TestDashboardRendering(unittest.TestCase):
         )
         self.assertIn(expected_codex_toml, unescaped_html)
         self.assertIn('export ANTHROPIC_BASE_URL="http://127.0.0.1:24980"\nexport ANTHROPIC_AUTH_TOKEN="local-bridge"', unescaped_html)
-        self.assertIn('export OPENAI_BASE_URL="http://127.0.0.1:24980/v1"\nexport OPENAI_API_KEY="local-bridge"', unescaped_html)
+        expected_hermes_snippet = (
+            "BASE_URL=http://127.0.0.1:24980/v1\n"
+            "API_KEY=local-bridge\n\n"
+            "# Hermes Desktop: Settings -> Local / custom endpoint\n"
+            "# Endpoint URL: http://127.0.0.1:24980/v1\n"
+            "# API Key:      local-bridge"
+        )
+        self.assertIn(expected_hermes_snippet, unescaped_html)
         self.assertIn('BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY=local-bridge', unescaped_html)
 
         # Clipboard copy functionality
@@ -180,11 +191,11 @@ class TestDashboardRendering(unittest.TestCase):
         auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
         html = render_dashboard("127.0.0.1", 24980, auth_status, models_count=20)
 
-        # 10 independent snippet IDs and corresponding copy button calls
+        # 11 independent snippet IDs and corresponding copy button calls
         expected_ids = [
             "claude-auto", "claude-manual", "claude-restore",
             "codex-auto", "codex-manual", "codex-restore",
-            "hermes-auto", "hermes-manual",
+            "hermes-auto", "hermes-manual", "hermes-restore",
             "freellmapi-auto", "freellmapi-manual",
         ]
         for snippet_id in expected_ids:
@@ -269,13 +280,28 @@ class TestDashboardRendering(unittest.TestCase):
             "https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview",
         )
 
+        self.assertIn('viewBox="0 0 24 24"', by_id["hermes"].get("icon_svg", ""))
         self.assertEqual(
             by_id["hermes"]["auto_cmd"]("127.0.0.1:24980"),
-            'export OPENAI_BASE_URL="http://127.0.0.1:24980/v1" OPENAI_API_KEY="local-bridge" && hermes',
+            "agy-bridge setup-hermes",
+        )
+        self.assertEqual(
+            by_id["hermes"]["auto_cmd"]("127.0.0.1:9090"),
+            "agy-bridge setup-hermes --port 9090",
+        )
+        self.assertEqual(
+            by_id["hermes"]["restore_cmd"]("127.0.0.1:24980"),
+            "agy-bridge restore-hermes",
         )
         self.assertEqual(
             by_id["hermes"]["manual_snippet"]("127.0.0.1:24980"),
-            'export OPENAI_BASE_URL="http://127.0.0.1:24980/v1"\nexport OPENAI_API_KEY="local-bridge"',
+            (
+                "BASE_URL=http://127.0.0.1:24980/v1\n"
+                "API_KEY=local-bridge\n\n"
+                "# Hermes Desktop: Settings -> Local / custom endpoint\n"
+                "# Endpoint URL: http://127.0.0.1:24980/v1\n"
+                "# API Key:      local-bridge"
+            ),
         )
         self.assertEqual(by_id["hermes"]["docs_url"], "https://hermes-agent.nousresearch.com")
 

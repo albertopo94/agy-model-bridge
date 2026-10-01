@@ -12,7 +12,9 @@ from bridge.setup import (
     ClaudeConfigurator,
     ClientConfigurator,
     CodexConfigurator,
+    HermesConfigurator,
     atomic_write_file,
+    build_hermes_block,
     create_backup,
     describe_backup,
     get_configurator,
@@ -22,8 +24,10 @@ from bridge.setup import (
     restore_backup,
     restore_claude,
     restore_codex,
+    restore_hermes,
     setup_claude,
     setup_codex,
+    setup_hermes,
     uninstall,
     update_installation,
 )
@@ -645,8 +649,10 @@ class TestCLIParsing(unittest.TestCase):
         for subcmd in (
             ["setup-claude", "--help"],
             ["setup-codex", "--help"],
+            ["setup-hermes", "--help"],
             ["restore-claude", "--help"],
             ["restore-codex", "--help"],
+            ["restore-hermes", "--help"],
             ["uninstall", "--help"],
             ["--help"],
         ):
@@ -890,6 +896,9 @@ class TestUninstall(unittest.TestCase):
         self.codex_dir = self.root / ".codex"
         self.codex_dir.mkdir(parents=True, exist_ok=True)
         self.codex_config = self.codex_dir / "config.toml"
+        self.hermes_dir = self.root / ".hermes"
+        self.hermes_dir.mkdir(parents=True, exist_ok=True)
+        self.hermes_config = self.hermes_dir / "config.yaml"
 
     def tearDown(self):
         self.temp_dir.cleanup()
@@ -904,6 +913,7 @@ class TestUninstall(unittest.TestCase):
             bin_dir=self.bin_dir,
             claude_settings_path=self.claude_settings,
             codex_config_path=self.codex_config,
+            hermes_config_path=self.hermes_config,
         )
 
         mock_stop_daemon.assert_called_once_with(pid_file=self.daemon_dir / "bridge.pid")
@@ -922,6 +932,7 @@ class TestUninstall(unittest.TestCase):
             bin_dir=self.bin_dir,
             claude_settings_path=self.claude_settings,
             codex_config_path=self.codex_config,
+            hermes_config_path=self.hermes_config,
         )
 
         self.assertFalse(bin1.exists())
@@ -940,26 +951,34 @@ class TestUninstall(unittest.TestCase):
         b_codex.write_text('model = "original-gpt"\n', encoding="utf-8")
         self.codex_config.write_text('# agy:start\nmodel = "gemini"\n# agy:end\n', encoding="utf-8")
 
+        b_hermes = self.hermes_dir / "config.yaml.backup-2026-09-20T10-00-00"
+        b_hermes.write_text('model:\n  default: "original-hermes"\n', encoding="utf-8")
+        self.hermes_config.write_text('# agy:start\nmodel:\n  default: "gemini"\n# agy:end\n', encoding="utf-8")
+
         result = uninstall(
             daemon_dir=self.daemon_dir,
             bin_dir=self.bin_dir,
             claude_settings_path=self.claude_settings,
             codex_config_path=self.codex_config,
+            hermes_config_path=self.hermes_config,
             restore_configs=True,
             purge_backups=False,
         )
 
         self.assertTrue(result["claude_restored"])
         self.assertTrue(result["codex_restored"])
+        self.assertTrue(result["hermes_restored"])
         self.assertFalse(result["backups_purged"])
 
         # Verify content restored
         claude_data = json.loads(self.claude_settings.read_text(encoding="utf-8"))
         self.assertEqual(claude_data, {"env": {"CUSTOM": "original"}})
         self.assertEqual(self.codex_config.read_text(encoding="utf-8"), 'model = "original-gpt"\n')
+        self.assertEqual(self.hermes_config.read_text(encoding="utf-8"), 'model:\n  default: "original-hermes"\n')
         # Backups still exist since purge_backups was False
         self.assertTrue(b_claude.exists())
         self.assertTrue(b_codex.exists())
+        self.assertTrue(b_hermes.exists())
 
     def test_uninstall_surgically_cleans_configs_when_no_backups(self):
         # Claude config with agy keys and modelPicker, but user custom keys preserved
@@ -1250,7 +1269,7 @@ class TestUpdateInstallation(unittest.TestCase):
 
         self.assertEqual(result["status"], "updated")
         self.assertTrue(result["restarted_daemon"])
-        self.assertEqual(result["version"], "0.5.5")
+        self.assertEqual(result["version"], "0.6.0")
         mock_run.assert_called_once_with(
             ["git", "-C", str(self.repo_dir), "pull", "--ff-only"],
             capture_output=True,
@@ -1442,7 +1461,7 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main([flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.5.5")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.6.0")
 
     def test_cli_subcommand_version_flags(self):
         from bridge.__main__ import main
@@ -1454,19 +1473,19 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main(["update", flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.5.5")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.6.0")
 
     def test_version_unification(self):
         import bridge
         from pathlib import Path
         import re
 
-        self.assertEqual(bridge.__version__, "0.5.5")
+        self.assertEqual(bridge.__version__, "0.6.0")
         pyproject_path = Path(__file__).resolve().parent.parent / "pyproject.toml"
         pyproject_text = pyproject_path.read_text(encoding="utf-8")
         match = re.search(r'version\s*=\s*"([^"]+)"', pyproject_text)
         self.assertIsNotNone(match)
-        self.assertEqual(match.group(1), "0.5.5")
+        self.assertEqual(match.group(1), "0.6.0")
 
 
 class TestClientConfiguratorRegistry(unittest.TestCase):
@@ -1672,6 +1691,241 @@ class TestCodexConfiguratorStrategy(unittest.TestCase):
         self.assertEqual(len(self.configurator.list_backups(target)), 0)
 
 
+class TestHermesConfiguratorStrategy(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.dir_path = Path(self.temp_dir.name)
+        self.configurator = HermesConfigurator()
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_paths(self):
+        with unittest.mock.patch("pathlib.Path.home", return_value=self.dir_path):
+            self.assertEqual(
+                self.configurator.default_config_path,
+                self.dir_path / ".hermes" / "config.yaml",
+            )
+            self.assertEqual(
+                self.configurator.get_config_path(),
+                self.dir_path / ".hermes" / "config.yaml",
+            )
+        custom = self.dir_path / "custom.yaml"
+        self.assertEqual(self.configurator.get_config_path(custom), custom)
+
+    def test_is_configured_false_when_file_missing_or_clean(self):
+        target = self.dir_path / "config.yaml"
+        self.assertFalse(self.configurator.is_configured(target))
+
+        target.write_text("terminal:\n  theme: dark\n", encoding="utf-8")
+        self.assertFalse(self.configurator.is_configured(target))
+
+    def test_is_configured_true_variations(self):
+        target = self.dir_path / "config.yaml"
+        for sample in (
+            "# agy:start\nmodel:\n  default: 'x'\n# agy:end",
+            "model_provider: custom:local-(127.0.0.1:24980)",
+            "base_url: http://127.0.0.1:24980/v1",
+            "provider: custom:local-127.0.0.1:24980",
+        ):
+            with self.subTest(sample=sample):
+                target.write_text(sample, encoding="utf-8")
+                self.assertTrue(self.configurator.is_configured(target))
+
+    def test_setup_fresh_file(self):
+        target = self.dir_path / "config.yaml"
+        res = self.configurator.setup(config_path=target)
+        self.assertEqual(res, target)
+        self.assertTrue(target.exists())
+        self.assertTrue(self.configurator.is_configured(target))
+        content = target.read_text(encoding="utf-8")
+        self.assertIn("# agy:start", content)
+        self.assertIn('default: "gemini-3.8-flash-high"', content)
+        self.assertIn('provider: "custom:local-(127.0.0.1:24980)"', content)
+        self.assertIn('base_url: "http://127.0.0.1:24980/v1"', content)
+        self.assertIn('api_mode: "chat_completions"', content)
+        self.assertIn('api_key: "local-bridge"', content)
+        self.assertIn("# agy:end", content)
+
+        # Permissions 0o600
+        mode = stat.S_IMODE(target.stat().st_mode)
+        self.assertEqual(mode, 0o600)
+
+    def test_setup_with_existing_file_with_conflict(self):
+        target = self.dir_path / "config.yaml"
+        initial_content = (
+            "terminal:\n"
+            "  theme: dark\n"
+            "model:\n"
+            '  default: "anthropic/claude-3-5-sonnet"\n'
+            "  temperature: 0.7\n"
+        )
+        target.write_text(initial_content, encoding="utf-8")
+
+        res = self.configurator.setup(config_path=target)
+        self.assertIsNotNone(res.backup_path)
+        self.assertTrue(res.backup_path.exists())
+
+        content = target.read_text(encoding="utf-8")
+        self.assertIn("# agy:start", content)
+        self.assertIn('default: "gemini-3.8-flash-high"', content)
+        self.assertIn("# [agy-disabled] model:", content)
+        self.assertIn('# [agy-disabled]   default: "anthropic/claude-3-5-sonnet"', content)
+        self.assertIn("# [agy-disabled]   temperature: 0.7", content)
+        self.assertIn("terminal:\n  theme: dark", content)
+
+    def test_setup_custom_port_and_url_and_model(self):
+        target = self.dir_path / "config.yaml"
+        self.configurator.setup(
+            config_path=target,
+            port=9090,
+            model="gemini-3.7-flash",
+            auth_token="custom-token",
+        )
+        content = target.read_text(encoding="utf-8")
+        self.assertIn('provider: "custom:local-(127.0.0.1:9090)"', content)
+        self.assertIn('base_url: "http://127.0.0.1:9090/v1"', content)
+        self.assertIn('default: "gemini-3.7-flash"', content)
+        self.assertIn('api_key: "custom-token"', content)
+
+        # Custom URL without /v1 gets /v1 appended
+        target2 = self.dir_path / "config2.yaml"
+        self.configurator.setup(
+            config_path=target2,
+            base_url="http://custom.host:1234",
+        )
+        content2 = target2.read_text(encoding="utf-8")
+        self.assertIn('base_url: "http://custom.host:1234/v1"', content2)
+
+    def test_restore_from_backup(self):
+        target = self.dir_path / "config.yaml"
+        target.write_text('model:\n  default: "original-hermes"\n', encoding="utf-8")
+
+        self.configurator.setup(config_path=target)
+        self.assertTrue(self.configurator.is_configured(target))
+
+        restored = self.configurator.restore(config_path=target)
+        self.assertTrue(restored)
+        self.assertEqual(target.read_text(encoding="utf-8"), 'model:\n  default: "original-hermes"\n')
+
+    def test_restore_surgical_clean_without_backups(self):
+        target = self.dir_path / "config.yaml"
+        target.write_text(
+            "# agy:start\n"
+            "model:\n"
+            '  default: "gemini-3.8-flash-high"\n'
+            '  provider: "custom:local-(127.0.0.1:24980)"\n'
+            '  base_url: "http://127.0.0.1:24980/v1"\n'
+            '  api_mode: "chat_completions"\n'
+            '  api_key: "local-bridge"\n'
+            "# agy:end\n\n"
+            "terminal:\n"
+            "  theme: dark\n"
+            "# [agy-disabled] model:\n"
+            '# [agy-disabled]   default: "anthropic/claude-3-5-sonnet"\n',
+            encoding="utf-8",
+        )
+        self.assertTrue(self.configurator.is_configured(target))
+
+        restored = self.configurator.restore(config_path=target)
+        self.assertTrue(restored)
+        cleaned = target.read_text(encoding="utf-8")
+        self.assertNotIn("# agy:start", cleaned)
+        self.assertNotIn("# [agy-disabled]", cleaned)
+        self.assertIn("terminal:\n  theme: dark", cleaned)
+        self.assertIn('model:\n  default: "anthropic/claude-3-5-sonnet"', cleaned)
+
+    def test_purge_backups(self):
+        target = self.dir_path / "config.yaml"
+        target.write_text("model: {}", encoding="utf-8")
+        b1 = self.dir_path / "config.yaml.backup-2026-09-20T10-00-00"
+        b1.write_text("model: {}", encoding="utf-8")
+
+        purged_count = self.configurator.purge_backups(target)
+        self.assertEqual(purged_count, 1)
+        self.assertEqual(len(self.configurator.list_backups(target)), 0)
+
+
+class TestCLIHermes(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.dir_path = Path(self.temp_dir.name)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_cli_setup_hermes_dispatches_with_flags(self):
+        from bridge.__main__ import main
+        target = self.dir_path / "hermes_config.yaml"
+        exit_code = main(["setup-hermes", "--port", "9090", "--model", "gemini-3.8-flash-low", "--path", str(target)])
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(target.exists())
+        content = target.read_text(encoding="utf-8")
+        self.assertIn('default: "gemini-3.8-flash-low"', content)
+        self.assertIn('provider: "custom:local-(127.0.0.1:9090)"', content)
+        self.assertIn('base_url: "http://127.0.0.1:9090/v1"', content)
+
+    def test_cli_setup_hermes_outputs_backup_and_guidance(self):
+        import io
+        from bridge.__main__ import main
+        target = self.dir_path / "hermes_config.yaml"
+        target.write_text("model:\n  default: 'old'\n", encoding="utf-8")
+        out = io.StringIO()
+        with unittest.mock.patch("sys.stdout", out):
+            exit_code = main(["setup-hermes", "--path", str(target)])
+        self.assertEqual(exit_code, 0)
+        output = out.getvalue()
+        self.assertIn("Backup: ", output)
+        self.assertIn(f"Hermes Agent configured successfully at {target}", output)
+        self.assertIn("Hermes Agent will read this configuration automatically.", output)
+        self.assertTrue(
+            "Run 'hermes' or open Hermes Desktop" in output
+            or "Ejecutá 'hermes' o abrí Hermes Desktop" in output
+        )
+
+    def test_cli_restore_hermes_no_backups_returns_1(self):
+        import io
+        from bridge.__main__ import main
+        target = self.dir_path / "config.yaml"
+        out = io.StringIO()
+        with unittest.mock.patch("sys.stdout", out):
+            exit_code = main(["restore-hermes", "--path", str(target)])
+        self.assertEqual(exit_code, 1)
+
+    def test_cli_restore_hermes_with_latest_flag(self):
+        import io
+        from bridge.__main__ import main
+        target = self.dir_path / "config.yaml"
+        target.write_text("model: bridge", encoding="utf-8")
+
+        b1 = self.dir_path / "config.yaml.backup-1"
+        b1.write_text("model: older", encoding="utf-8")
+        os.utime(b1, (1000.0, 1000.0))
+
+        b2 = self.dir_path / "config.yaml.backup-2"
+        b2.write_text("model: immediate_previous", encoding="utf-8")
+        os.utime(b2, (2000.0, 2000.0))
+
+        out = io.StringIO()
+        with unittest.mock.patch("sys.stdout", out):
+            exit_code = main(["restore-hermes", "--path", str(target), "--latest"])
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(target.read_text(encoding="utf-8"), "model: immediate_previous")
+        self.assertIn("Hermes Agent", out.getvalue())
+
+    def test_cli_restore_hermes_with_backup_flag(self):
+        from bridge.__main__ import main
+        target = self.dir_path / "config.yaml"
+        target.write_text("model: bridge", encoding="utf-8")
+
+        b1 = self.dir_path / "config.yaml.backup-1"
+        b1.write_text("model: specific", encoding="utf-8")
+
+        exit_code = main(["restore-hermes", "--path", str(target), "--backup", str(b1)])
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(target.read_text(encoding="utf-8"), "model: specific")
+
+
 class TestUninstallDynamicConfigurators(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -1751,6 +2005,12 @@ class TestStandaloneWrappers(unittest.TestCase):
 
         self.assertTrue(restore_claude(settings_path=claude_path))
         self.assertTrue(restore_codex(config_path=codex_path))
+
+        hermes_path = self.dir_path / "hermes.yaml"
+        p3 = setup_hermes(config_path=hermes_path)
+        self.assertEqual(p3, hermes_path)
+        self.assertTrue(get_configurator("hermes").is_configured(hermes_path))
+        self.assertTrue(restore_hermes(config_path=hermes_path))
 
 
 if __name__ == "__main__":
