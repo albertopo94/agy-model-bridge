@@ -5,6 +5,7 @@ Zero external dependencies: pure Python standard library.
 """
 
 import json
+import threading
 import time
 import uuid
 from typing import Any, Iterator
@@ -20,6 +21,71 @@ from bridge.transform import (
     resolve_model_and_thinking,
     sanitize_schema_for_gemini,
 )
+
+_CACHE_LOCK = threading.Lock()
+_THOUGHT_SIGNATURES: dict[str, str] = {}
+_TOOL_NAMES: dict[str, str] = {}
+_MAX_CACHE_SIZE = 2048
+
+
+def cache_thought_signature(call_id: str, signature: str) -> None:
+    """Stores a thought signature associated with a tool call ID."""
+    if not call_id or not signature:
+        return
+    with _CACHE_LOCK:
+        if len(_THOUGHT_SIGNATURES) >= _MAX_CACHE_SIZE:
+            first_key = next(iter(_THOUGHT_SIGNATURES))
+            _THOUGHT_SIGNATURES.pop(first_key, None)
+        _THOUGHT_SIGNATURES[call_id] = signature
+
+
+def get_thought_signature(call_id: str) -> str | None:
+    """Retrieves a cached thought signature for a tool call ID."""
+    if not call_id:
+        return None
+    with _CACHE_LOCK:
+        return _THOUGHT_SIGNATURES.get(call_id)
+
+
+def cache_tool_name(call_id: str, name: str) -> None:
+    """Stores a tool function name associated with a tool call ID."""
+    if not call_id or not name:
+        return
+    with _CACHE_LOCK:
+        if len(_TOOL_NAMES) >= _MAX_CACHE_SIZE:
+            first_key = next(iter(_TOOL_NAMES))
+            _TOOL_NAMES.pop(first_key, None)
+        _TOOL_NAMES[call_id] = name
+
+
+def get_tool_name(call_id: str) -> str | None:
+    """Retrieves a cached tool function name for a tool call ID."""
+    if not call_id:
+        return None
+    with _CACHE_LOCK:
+        return _TOOL_NAMES.get(call_id)
+
+
+def clear_responses_cache() -> None:
+    """Clears in-memory caches (primarily for testing)."""
+    with _CACHE_LOCK:
+        _THOUGHT_SIGNATURES.clear()
+        _TOOL_NAMES.clear()
+
+
+def _parse_arguments_to_dict(args: Any) -> dict[str, Any]:
+    """Normalizes function arguments to a dictionary."""
+    if isinstance(args, dict):
+        return args
+    if isinstance(args, str) and args.strip():
+        try:
+            parsed = json.loads(args)
+            if isinstance(parsed, dict):
+                return parsed
+            return {"raw": parsed}
+        except Exception:
+            return {"raw": args}
+    return {}
 
 
 def responses_to_cloudcode_request(
@@ -59,26 +125,169 @@ def responses_to_cloudcode_request(
         system_texts.append(instructions.strip())
 
     # Input items mapped to contents
+    tool_names_by_call_id: dict[str, str] = {}
     contents: list[dict[str, Any]] = []
+
     for item in input_items:
+        turn_parts: list[dict[str, Any]] = []
+        turn_role = "user"
+
         if isinstance(item, str):
-            role = "user"
-            text = item
+            part_text = item if item.strip() else " "
+            turn_parts = [{"text": part_text}]
+            turn_role = "user"
         elif isinstance(item, dict):
             role = item.get("role", "user")
             item_type = item.get("type")
+
             if item_type == "function_call":
+                call_id = item.get("call_id") or item.get("id") or ""
                 name = item.get("name", "")
-                args = item.get("arguments", "")
-                args_str = json.dumps(args) if isinstance(args, (dict, list)) else str(args or "")
-                text = f"[Tool Call: {name}({args_str})]"
-                role = "assistant"
+                if call_id and name:
+                    tool_names_by_call_id[call_id] = name
+                    cache_tool_name(call_id, name)
+                args_dict = _parse_arguments_to_dict(item.get("arguments"))
+                part: dict[str, Any] = {"functionCall": {"name": name, "args": args_dict}}
+                sig = (
+                    item.get("thoughtSignature")
+                    or item.get("thought_signature")
+                    or get_thought_signature(call_id)
+                )
+                if sig:
+                    part["thoughtSignature"] = sig
+                turn_parts = [part]
+                turn_role = "model"
             elif item_type == "function_call_output":
+                call_id = item.get("call_id") or item.get("id") or ""
+                name = tool_names_by_call_id.get(call_id) or get_tool_name(call_id) or "tool"
                 output = item.get("output", "")
-                output_str = json.dumps(output) if isinstance(output, (dict, list)) else str(output)
-                text = f"[Function Output]: {output_str}"
-                role = "user"
+                if isinstance(output, dict):
+                    response_payload = output
+                elif isinstance(output, str) and output.strip().startswith("{") and output.strip().endswith("}"):
+                    try:
+                        parsed_out = json.loads(output)
+                        response_payload = parsed_out if isinstance(parsed_out, dict) else {"output": output}
+                    except Exception:
+                        response_payload = {"output": output}
+                else:
+                    response_payload = {"output": output}
+                part = {"functionResponse": {"name": name, "response": response_payload}}
+                turn_parts = [part]
+                turn_role = "user"
+            elif role in ("system", "developer"):
+                raw_content = item.get("content")
+                if isinstance(raw_content, str):
+                    text = raw_content
+                elif isinstance(raw_content, list):
+                    text = "".join(
+                        str(b.get("text") or "") if isinstance(b, dict) else str(b)
+                        for b in raw_content
+                    )
+                else:
+                    text = str(raw_content or "")
+                if text and text.strip():
+                    system_texts.append(text.strip())
+                continue
+            elif role in ("tool", "function"):
+                call_id = item.get("tool_call_id") or item.get("call_id") or item.get("id") or ""
+                name = tool_names_by_call_id.get(call_id) or get_tool_name(call_id) or item.get("name") or "tool"
+                raw_content = item.get("content", "")
+                if isinstance(raw_content, dict):
+                    response_payload = raw_content
+                elif isinstance(raw_content, str) and raw_content.strip().startswith("{") and raw_content.strip().endswith("}"):
+                    try:
+                        parsed_out = json.loads(raw_content)
+                        response_payload = parsed_out if isinstance(parsed_out, dict) else {"output": raw_content}
+                    except Exception:
+                        response_payload = {"output": raw_content}
+                else:
+                    response_payload = {"output": raw_content}
+                part = {"functionResponse": {"name": name, "response": response_payload}}
+                turn_parts = [part]
+                turn_role = "user"
+            elif role == "assistant":
+                turn_role = "model"
+                raw_content = item.get("content")
+                text = ""
+                if isinstance(raw_content, str):
+                    text = raw_content
+                elif isinstance(raw_content, list):
+                    parts_str = []
+                    for block in raw_content:
+                        if isinstance(block, dict):
+                            b_type = block.get("type")
+                            if b_type == "function_call":
+                                b_call_id = block.get("call_id") or block.get("id") or ""
+                                b_name = block.get("name", "")
+                                if b_call_id and b_name:
+                                    tool_names_by_call_id[b_call_id] = b_name
+                                    cache_tool_name(b_call_id, b_name)
+                                b_args = _parse_arguments_to_dict(block.get("arguments"))
+                                b_part: dict[str, Any] = {"functionCall": {"name": b_name, "args": b_args}}
+                                b_sig = (
+                                    block.get("thoughtSignature")
+                                    or block.get("thought_signature")
+                                    or get_thought_signature(b_call_id)
+                                )
+                                if b_sig:
+                                    b_part["thoughtSignature"] = b_sig
+                                turn_parts.append(b_part)
+                            elif b_type in ("input_text", "text", "output_text") or "text" in block:
+                                parts_str.append(str(block.get("text") or ""))
+                        elif isinstance(block, str):
+                            parts_str.append(block)
+                    text = "".join(parts_str)
+                elif raw_content is not None:
+                    text = str(raw_content)
+
+                if text and text.strip():
+                    turn_parts.insert(0, {"text": text.strip()})
+
+                # Assistant function_call
+                fc = item.get("function_call")
+                if fc and isinstance(fc, dict):
+                    fc_call_id = item.get("call_id") or fc.get("id") or ""
+                    fc_name = fc.get("name", "")
+                    if fc_call_id and fc_name:
+                        tool_names_by_call_id[fc_call_id] = fc_name
+                        cache_tool_name(fc_call_id, fc_name)
+                    fc_args = _parse_arguments_to_dict(fc.get("arguments"))
+                    fc_part: dict[str, Any] = {"functionCall": {"name": fc_name, "args": fc_args}}
+                    fc_sig = (
+                        item.get("thoughtSignature")
+                        or fc.get("thoughtSignature")
+                        or get_thought_signature(fc_call_id)
+                    )
+                    if fc_sig:
+                        fc_part["thoughtSignature"] = fc_sig
+                    turn_parts.append(fc_part)
+
+                # Assistant tool_calls
+                tool_calls = item.get("tool_calls")
+                if tool_calls and isinstance(tool_calls, list):
+                    for tc in tool_calls:
+                        if isinstance(tc, dict):
+                            fn = tc.get("function") if "function" in tc and isinstance(tc["function"], dict) else tc
+                            tc_call_id = tc.get("id") or fn.get("id") or ""
+                            tc_name = fn.get("name", "")
+                            if tc_call_id and tc_name:
+                                tool_names_by_call_id[tc_call_id] = tc_name
+                                cache_tool_name(tc_call_id, tc_name)
+                            tc_args = _parse_arguments_to_dict(fn.get("arguments"))
+                            tc_part: dict[str, Any] = {"functionCall": {"name": tc_name, "args": tc_args}}
+                            tc_sig = (
+                                tc.get("thoughtSignature")
+                                or tc.get("thought_signature")
+                                or get_thought_signature(tc_call_id)
+                            )
+                            if tc_sig:
+                                tc_part["thoughtSignature"] = tc_sig
+                            turn_parts.append(tc_part)
+
+                if not turn_parts:
+                    turn_parts = [{"text": " "}]
             else:
+                turn_role = "user"
                 raw_content = item.get("content")
                 if isinstance(raw_content, str):
                     text = raw_content
@@ -95,23 +304,17 @@ def responses_to_cloudcode_request(
                     text = ""
                 else:
                     text = str(raw_content)
+
+                part_text = text if text and text.strip() else " "
+                turn_parts = [{"text": part_text}]
         else:
-            role = "user"
-            text = str(item)
-
-        if role in ("system", "developer"):
-            if text and text.strip():
-                system_texts.append(text.strip())
-            continue
-
-        turn_role = "model" if role == "assistant" else "user"
-        part_text = text if text and text.strip() else " "
-        turn_parts = [{"text": part_text}]
+            turn_role = "user"
+            turn_parts = [{"text": str(item)}]
 
         if contents and contents[-1]["role"] == turn_role:
             contents[-1]["parts"].extend(turn_parts)
         else:
-            contents.append({"role": turn_role, "parts": turn_parts})
+            contents.append({"role": turn_role, "parts": list(turn_parts)})
 
     if len(contents) == 0:
         raise ValueError(
@@ -228,6 +431,11 @@ def build_responses_completion(
             fc_id = f"fc_{uuid.uuid4().hex[:16]}"
             call_id = tc.get("id") or f"call_{uuid.uuid4().hex[:16]}"
             name = tc.get("name", "")
+            sig = tc.get("thought_signature") or tc.get("thoughtSignature")
+            if sig:
+                cache_thought_signature(call_id, sig)
+            if name and call_id:
+                cache_tool_name(call_id, name)
             args_val = tc.get("args", {})
             args_str = json.dumps(args_val) if isinstance(args_val, (dict, list)) else str(args_val or "")
             output.append({
@@ -437,6 +645,11 @@ def build_responses_sse_events(
                 fc_id = f"fc_{uuid.uuid4().hex[:16]}"
                 call_id = fc.get("id") or f"call_{uuid.uuid4().hex[:16]}"
                 name = fc.get("name", "")
+                sig = fc.get("thought_signature") or fc.get("thoughtSignature")
+                if sig:
+                    cache_thought_signature(call_id, sig)
+                if name and call_id:
+                    cache_tool_name(call_id, name)
                 args_val = fc.get("args", {})
                 args_str = json.dumps(args_val) if isinstance(args_val, (dict, list)) else str(args_val or "")
                 fc_output_index = output_index

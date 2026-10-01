@@ -103,7 +103,10 @@ class TestResponsesRequestTranslation(unittest.TestCase):
         _, contents, _, _, tools = responses_to_cloudcode_request(payload, "test-project")
         self.assertEqual(len(contents), 1)
         self.assertEqual(contents[0]["role"], "user")
-        self.assertEqual(contents[0]["parts"], [{"text": "[Function Output]: 42"}])
+        self.assertEqual(
+            contents[0]["parts"],
+            [{"functionResponse": {"name": "tool", "response": {"output": "42"}}}],
+        )
         self.assertIsNone(tools)
 
     def test_thinking_config_integration(self):
@@ -140,6 +143,7 @@ class TestResponsesRequestTranslation(unittest.TestCase):
                 {
                     "type": "function_call",
                     "name": "search",
+                    "call_id": "call_search_1",
                     "arguments": {"query": "weather", "days": 3},
                 }
             ],
@@ -148,9 +152,133 @@ class TestResponsesRequestTranslation(unittest.TestCase):
         self.assertEqual(len(contents), 3)  # leading hello user turn + assistant turn + trailing continue user turn
         self.assertEqual(contents[0]["role"], "user")
         self.assertEqual(contents[1]["role"], "model")
-        self.assertIn('"query": "weather"', contents[1]["parts"][0]["text"])
+        self.assertEqual(
+            contents[1]["parts"],
+            [{"functionCall": {"name": "search", "args": {"query": "weather", "days": 3}}}],
+        )
         self.assertEqual(contents[2]["role"], "user")
         self.assertIsNone(tools)
+
+    def test_consecutive_function_calls_and_outputs_grouped_into_parts(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "input": [
+                {"role": "user", "content": "Run checks"},
+                {
+                    "type": "function_call",
+                    "call_id": "call_1",
+                    "name": "exec_command",
+                    "arguments": json.dumps({"cmd": "ls"}),
+                },
+                {
+                    "type": "function_call",
+                    "call_id": "call_2",
+                    "name": "read_file",
+                    "arguments": {"path": "a.txt"},
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_1",
+                    "output": "file1.txt\nfile2.txt",
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_2",
+                    "output": {"content": "hello world"},
+                },
+            ],
+        }
+        _, contents, _, _, _ = responses_to_cloudcode_request(payload, "test-project")
+        self.assertEqual(len(contents), 3)
+        # Turn 0: user message
+        self.assertEqual(contents[0]["role"], "user")
+        self.assertEqual(contents[0]["parts"], [{"text": "Run checks"}])
+        # Turn 1: model tool calls grouped together
+        self.assertEqual(contents[1]["role"], "model")
+        self.assertEqual(
+            contents[1]["parts"],
+            [
+                {"functionCall": {"name": "exec_command", "args": {"cmd": "ls"}}},
+                {"functionCall": {"name": "read_file", "args": {"path": "a.txt"}}},
+            ],
+        )
+        # Turn 2: user tool outputs grouped together with resolved function names
+        self.assertEqual(contents[2]["role"], "user")
+        self.assertEqual(
+            contents[2]["parts"],
+            [
+                {
+                    "functionResponse": {
+                        "name": "exec_command",
+                        "response": {"output": "file1.txt\nfile2.txt"},
+                    }
+                },
+                {
+                    "functionResponse": {
+                        "name": "read_file",
+                        "response": {"content": "hello world"},
+                    }
+                },
+            ],
+        )
+
+    def test_assistant_message_with_content_and_function_call(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "input": [
+                {"role": "user", "content": "Check status"},
+                {
+                    "role": "assistant",
+                    "content": "Checking status now...",
+                    "function_call": {
+                        "name": "check_status",
+                        "arguments": json.dumps({"service": "api"}),
+                    },
+                },
+            ],
+        }
+        _, contents, _, _, _ = responses_to_cloudcode_request(payload, "test-project")
+        # Leading user turn + model turn + trailing continue
+        self.assertEqual(len(contents), 3)
+        self.assertEqual(contents[1]["role"], "model")
+        self.assertEqual(
+            contents[1]["parts"],
+            [
+                {"text": "Checking status now..."},
+                {"functionCall": {"name": "check_status", "args": {"service": "api"}}},
+            ],
+        )
+
+    def test_thought_signature_preservation_in_function_call(self):
+        sig = "dummy_signature_abc123"
+        payload = {
+            "model": "gemini-2.5-pro",
+            "input": [
+                {"role": "user", "content": "Find files"},
+                {
+                    "type": "function_call",
+                    "call_id": "call_sig_1",
+                    "name": "find",
+                    "arguments": {"pattern": "*.py"},
+                    "thoughtSignature": sig,
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_sig_1",
+                    "output": "main.py",
+                },
+            ],
+        }
+        _, contents, _, _, _ = responses_to_cloudcode_request(payload, "test-project")
+        self.assertEqual(len(contents), 3)
+        self.assertEqual(contents[1]["role"], "model")
+        self.assertEqual(
+            contents[1]["parts"][0],
+            {
+                "functionCall": {"name": "find", "args": {"pattern": "*.py"}},
+                "thoughtSignature": sig,
+            },
+        )
 
     def test_stop_sequences_preserve_newlines_and_filter_whitespace(self):
         payload = {

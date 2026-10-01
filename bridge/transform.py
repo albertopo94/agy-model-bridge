@@ -640,11 +640,20 @@ def extract_function_calls(event_dict: dict[str, Any]) -> list[dict[str, Any]]:
                         args = json.loads(args)
                     except Exception:
                         pass
-                calls.append({
+                call_info: dict[str, Any] = {
                     "id": call_id,
                     "name": name,
                     "args": args,
-                })
+                }
+                thought_sig = (
+                    part.get("thoughtSignature")
+                    or part.get("thought_signature")
+                    or fc.get("thoughtSignature")
+                    or fc.get("thought_signature")
+                )
+                if thought_sig:
+                    call_info["thought_signature"] = thought_sig
+                calls.append(call_info)
     return calls
 
 

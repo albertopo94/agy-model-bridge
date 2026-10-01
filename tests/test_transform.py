@@ -787,6 +787,29 @@ class TestExtractFunctionCalls(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0]["name"], "wrapped_tool")
 
+    def test_extract_function_call_with_thought_signature(self):
+        event = {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {
+                                "thoughtSignature": "sig_xyz_123",
+                                "functionCall": {
+                                    "name": "calc",
+                                    "args": {"expr": "1+1"},
+                                },
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+        calls = extract_function_calls(event)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["name"], "calc")
+        self.assertEqual(calls[0]["thought_signature"], "sig_xyz_123")
+
     def test_no_function_calls_returns_empty_list(self):
         self.assertEqual(extract_function_calls({}), [])
         self.assertEqual(extract_function_calls({"candidates": []}), [])
