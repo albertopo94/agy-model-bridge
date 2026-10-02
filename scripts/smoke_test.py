@@ -10,6 +10,14 @@ import urllib.request
 
 
 
+def get_default_api_key() -> str:
+    try:
+        from bridge.security import get_or_create_api_key
+        return get_or_create_api_key()
+    except Exception:
+        return "local-bridge"
+
+
 def test_healthz(base_url: str) -> None:
     print("[1/9] Verifying GET /healthz ... ", end="", flush=True)
     url = f"{base_url}/healthz"
@@ -28,10 +36,14 @@ def test_healthz(base_url: str) -> None:
     print("OK")
 
 
-def test_models(base_url: str) -> str:
+def test_models(base_url: str, api_key: str = "local-bridge") -> str:
     print("[2/9] Verifying GET /v1/models ... ", end="", flush=True)
     url = f"{base_url}/v1/models"
-    req = urllib.request.Request(url, method="GET")
+    req = urllib.request.Request(
+        url,
+        headers={"Authorization": f"Bearer {api_key}"},
+        method="GET",
+    )
     chosen_model = ""
     try:
         with urllib.request.urlopen(req, timeout=15.0) as resp:
@@ -101,7 +113,7 @@ def test_dashboard(base_url: str) -> None:
     print("OK")
 
 
-def test_chat_non_streaming(base_url: str, model: str) -> None:
+def test_chat_non_streaming(base_url: str, model: str, api_key: str = "local-bridge") -> None:
     print(f"[4/9] Verifying POST /v1/chat/completions (stream=False, model='{model}') ... ", end="", flush=True)
     url = f"{base_url}/v1/chat/completions"
     payload = {
@@ -115,7 +127,10 @@ def test_chat_non_streaming(base_url: str, model: str) -> None:
     req = urllib.request.Request(
         url,
         data=data,
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        },
         method="POST",
     )
     try:
@@ -136,7 +151,7 @@ def test_chat_non_streaming(base_url: str, model: str) -> None:
     print(f"OK (Received: {content.strip()!r})")
 
 
-def test_chat_streaming(base_url: str, model: str) -> None:
+def test_chat_streaming(base_url: str, model: str, api_key: str = "local-bridge") -> None:
     print(f"[5/9] Verifying POST /v1/chat/completions (stream=True, model='{model}') ... ", end="", flush=True)
     url = f"{base_url}/v1/chat/completions"
     payload = {
@@ -150,7 +165,10 @@ def test_chat_streaming(base_url: str, model: str) -> None:
     req = urllib.request.Request(
         url,
         data=data,
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        },
         method="POST",
     )
     received_chunks: list[str] = []
@@ -188,7 +206,7 @@ def test_chat_streaming(base_url: str, model: str) -> None:
     print(f"OK (Streamed: {full_text.strip()!r})")
 
 
-def test_anthropic_non_streaming(base_url: str, model: str) -> None:
+def test_anthropic_non_streaming(base_url: str, model: str, api_key: str = "local-bridge") -> None:
     print(f"[6/9] Verifying POST /v1/messages (stream=False, model='{model}') ... ", end="", flush=True)
     url = f"{base_url}/v1/messages"
     payload = {
@@ -203,7 +221,11 @@ def test_anthropic_non_streaming(base_url: str, model: str) -> None:
     req = urllib.request.Request(
         url,
         data=data,
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+        },
         method="POST",
     )
     try:
@@ -228,7 +250,7 @@ def test_anthropic_non_streaming(base_url: str, model: str) -> None:
     print(f"OK (Received: {text.strip()!r})")
 
 
-def test_anthropic_streaming(base_url: str, model: str) -> None:
+def test_anthropic_streaming(base_url: str, model: str, api_key: str = "local-bridge") -> None:
     print(f"[7/9] Verifying POST /v1/messages (stream=True, model='{model}') ... ", end="", flush=True)
     url = f"{base_url}/v1/messages"
     payload = {
@@ -243,7 +265,11 @@ def test_anthropic_streaming(base_url: str, model: str) -> None:
     req = urllib.request.Request(
         url,
         data=data,
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+        },
         method="POST",
     )
     received_chunks: list[str] = []
@@ -284,7 +310,7 @@ def test_anthropic_streaming(base_url: str, model: str) -> None:
     print(f"OK (Streamed: {full_text.strip()!r})")
 
 
-def test_responses_non_streaming(base_url: str, model: str) -> None:
+def test_responses_non_streaming(base_url: str, model: str, api_key: str = "local-bridge") -> None:
     print(f"[8/9] Verifying POST /v1/responses (stream=False, model='{model}') ... ", end="", flush=True)
     url = f"{base_url}/v1/responses"
     payload = {
@@ -298,7 +324,10 @@ def test_responses_non_streaming(base_url: str, model: str) -> None:
     req = urllib.request.Request(
         url,
         data=data,
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        },
         method="POST",
     )
     try:
@@ -327,7 +356,7 @@ def test_responses_non_streaming(base_url: str, model: str) -> None:
     print(f"OK (Received: {text.strip()!r})")
 
 
-def test_responses_streaming(base_url: str, model: str) -> None:
+def test_responses_streaming(base_url: str, model: str, api_key: str = "local-bridge") -> None:
     print(f"[9/9] Verifying POST /v1/responses (stream=True, model='{model}') ... ", end="", flush=True)
     url = f"{base_url}/v1/responses"
     payload = {
@@ -341,7 +370,10 @@ def test_responses_streaming(base_url: str, model: str) -> None:
     req = urllib.request.Request(
         url,
         data=data,
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        },
         method="POST",
     )
     received_chunks: list[str] = []
@@ -387,20 +419,22 @@ def main() -> None:
     parser.add_argument("--host", type=str, default="127.0.0.1", help="Bridge host (default: 127.0.0.1)")
     parser.add_argument("--port", type=int, default=24980, help="Bridge port (default: 24980)")
     parser.add_argument("--model", type=str, default=None, help="Model override")
+    parser.add_argument("--api-key", type=str, default=None, help="Bridge API key (default: read from ~/.agy-bridge/api_key)")
     args = parser.parse_args()
 
+    api_key = args.api_key or get_default_api_key()
     base_url = f"http://{args.host}:{args.port}"
     print(f"Starting 9-step multi-protocol smoke test against {base_url} ...\n")
 
     test_healthz(base_url)
-    model = args.model if args.model else test_models(base_url)
+    model = args.model if args.model else test_models(base_url, api_key)
     test_dashboard(base_url)
-    test_chat_non_streaming(base_url, model)
-    test_chat_streaming(base_url, model)
-    test_anthropic_non_streaming(base_url, model)
-    test_anthropic_streaming(base_url, model)
-    test_responses_non_streaming(base_url, model)
-    test_responses_streaming(base_url, model)
+    test_chat_non_streaming(base_url, model, api_key)
+    test_chat_streaming(base_url, model, api_key)
+    test_anthropic_non_streaming(base_url, model, api_key)
+    test_anthropic_streaming(base_url, model, api_key)
+    test_responses_non_streaming(base_url, model, api_key)
+    test_responses_streaming(base_url, model, api_key)
 
     print("\nAll 9 multi-protocol smoke tests passed successfully! [100% OK]")
     sys.exit(0)

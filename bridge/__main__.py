@@ -217,6 +217,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.add_argument("--no-open", action="store_true", help="Do not open web browser automatically")
         parser.add_argument("--project", type=str, default=None, help="Google Cloud project ID override")
         parser.add_argument("--base-url", type=str, default=None, help="Upstream API base URL override")
+        parser.add_argument("--api-key", type=str, default=None, help="Custom local API key")
+        parser.add_argument("--no-auth", action="store_true", help="Disable local API key authentication")
         parser.add_argument("--lang", type=str, default=None, help=t("cli_help_lang"))
         args = parser.parse_args(argv[1:])
 
@@ -226,6 +228,8 @@ def main(argv: list[str] | None = None) -> int:
             no_open=args.no_open,
             project=args.project,
             base_url=args.base_url,
+            api_key=args.api_key,
+            no_auth=args.no_auth,
         )
         st = res.get("status")
         if st == "started":
@@ -331,8 +335,8 @@ def main(argv: list[str] | None = None) -> int:
             "--auth-token",
             dest="auth_token",
             type=str,
-            default="antigravity",
-            help="Gateway auth token (default: antigravity)",
+            default=None,
+            help="Gateway auth token (default: persistent key)",
         )
         parser.add_argument(
             "--path",
@@ -382,6 +386,14 @@ def main(argv: list[str] | None = None) -> int:
             help="Gateway base URL override (with /v1)",
         )
         parser.add_argument(
+            "--token",
+            "--auth-token",
+            dest="auth_token",
+            type=str,
+            default=None,
+            help="Gateway auth token (default: persistent key)",
+        )
+        parser.add_argument(
             "--path",
             type=Path,
             default=None,
@@ -394,6 +406,7 @@ def main(argv: list[str] | None = None) -> int:
             base_url=args.base_url,
             port=args.port,
             model=args.model,
+            auth_token=args.auth_token,
         )
         if getattr(target, "backup_path", None):
             print(t("setup_backup_label", path=target.backup_path))
@@ -432,8 +445,8 @@ def main(argv: list[str] | None = None) -> int:
             "--auth-token",
             dest="auth_token",
             type=str,
-            default="local-bridge",
-            help="Gateway auth token (default: local-bridge)",
+            default=None,
+            help="Gateway auth token (default: persistent key)",
         )
         parser.add_argument(
             "--path",
@@ -483,6 +496,14 @@ def main(argv: list[str] | None = None) -> int:
             help="Gateway base URL override (with /v1)",
         )
         parser.add_argument(
+            "--token",
+            "--auth-token",
+            dest="auth_token",
+            type=str,
+            default=None,
+            help="Gateway auth token (default: persistent key)",
+        )
+        parser.add_argument(
             "--path",
             type=Path,
             default=None,
@@ -495,6 +516,7 @@ def main(argv: list[str] | None = None) -> int:
             base_url=args.base_url,
             port=args.port,
             model=args.model,
+            auth_token=args.auth_token,
         )
         if getattr(target, "backup_path", None):
             print(t("setup_backup_label", path=target.backup_path))
@@ -533,8 +555,8 @@ def main(argv: list[str] | None = None) -> int:
             "--auth-token",
             dest="auth_token",
             type=str,
-            default="local-bridge",
-            help="Gateway auth token (default: local-bridge)",
+            default=None,
+            help="Gateway auth token (default: persistent key)",
         )
         parser.add_argument(
             "--path",
@@ -583,6 +605,14 @@ def main(argv: list[str] | None = None) -> int:
             default="gemini-3.8-flash-high",
             help="Default model identifier (default: gemini-3.8-flash-high)",
         )
+        parser.add_argument(
+            "--token",
+            "--auth-token",
+            dest="auth_token",
+            type=str,
+            default=None,
+            help="Gateway auth token (default: persistent key)",
+        )
         parser.add_argument("--lang", type=str, default=None, help=t("cli_help_lang"))
         args = parser.parse_args(argv[1:])
 
@@ -591,6 +621,7 @@ def main(argv: list[str] | None = None) -> int:
             port=args.port,
             model=args.model,
             lang=args.lang,
+            auth_token=args.auth_token,
         )
 
         print(t("setup_cursor_title"))
@@ -629,6 +660,14 @@ def main(argv: list[str] | None = None) -> int:
             help="Gateway base URL override (with /v1)",
         )
         parser.add_argument(
+            "--token",
+            "--auth-token",
+            dest="auth_token",
+            type=str,
+            default=None,
+            help="Gateway auth token (default: persistent key)",
+        )
+        parser.add_argument(
             "--set-default",
             action="store_true",
             help="Set agy as defaultProvider and model as defaultModel in settings.json",
@@ -646,6 +685,7 @@ def main(argv: list[str] | None = None) -> int:
             base_url=args.base_url,
             port=args.port,
             model=args.model,
+            auth_token=args.auth_token,
             set_default=args.set_default,
         )
         if getattr(target, "backup_path", None):
@@ -808,13 +848,31 @@ def main(argv: list[str] | None = None) -> int:
         help=t("cli_help_base_url"),
     )
     parser.add_argument(
+        "--api-key",
+        type=str,
+        default=None,
+        help="Custom local API key",
+    )
+    parser.add_argument(
+        "--no-auth",
+        action="store_true",
+        help="Disable local API key authentication",
+    )
+    parser.add_argument(
         "--lang",
         type=str,
         default=None,
         help=t("cli_help_lang"),
     )
     args = parser.parse_args(argv)
-    run_server(host=args.host, port=args.port, project=args.project, base_url=args.base_url)
+    run_server(
+        host=args.host,
+        port=args.port,
+        project=args.project,
+        base_url=args.base_url,
+        api_key=args.api_key,
+        no_auth=args.no_auth,
+    )
     return 0
 
 

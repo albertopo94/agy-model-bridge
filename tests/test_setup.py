@@ -21,6 +21,7 @@ from bridge.setup import (
     build_hermes_block,
     create_backup,
     describe_backup,
+    get_active_api_key,
     get_configurator,
     list_backups,
     list_configurators,
@@ -346,7 +347,7 @@ class TestSetupClaude(unittest.TestCase):
         self.assertIn("env", data)
         env = data["env"]
         self.assertEqual(env["ANTHROPIC_BASE_URL"], "http://127.0.0.1:24980")
-        self.assertEqual(env["ANTHROPIC_AUTH_TOKEN"], "antigravity")
+        self.assertEqual(env["ANTHROPIC_AUTH_TOKEN"], get_active_api_key())
         self.assertEqual(env["ANTHROPIC_MODEL"], "gemini-3.8-flash-high")
         self.assertEqual(env["ANTHROPIC_DEFAULT_SONNET_MODEL"], "gemini-3.8-flash-high")
         self.assertEqual(env["ANTHROPIC_DEFAULT_HAIKU_MODEL"], "gemini-3.8-flash-high")
@@ -488,6 +489,7 @@ class TestSetupCodex(unittest.TestCase):
         self.assertIn('base_url = "http://127.0.0.1:24980/v1"', content)
         self.assertIn('wire_api = "responses"', content)
         self.assertIn("requires_openai_auth = false", content)
+        self.assertIn(f'http_headers = {{ Authorization = "Bearer {get_active_api_key()}" }}', content)
 
         # No backup should have been created for a fresh file
         backups = list(self.dir_path.glob("config.toml.backup-*"))
@@ -682,6 +684,8 @@ class TestCLIParsing(unittest.TestCase):
             port=9999,
             project="my-prj",
             base_url=None,
+            api_key=None,
+            no_auth=False,
         )
 
     def test_cli_help_flags(self):
@@ -1309,7 +1313,7 @@ class TestUpdateInstallation(unittest.TestCase):
 
         self.assertEqual(result["status"], "updated")
         self.assertTrue(result["restarted_daemon"])
-        self.assertEqual(result["version"], "0.10.2")
+        self.assertEqual(result["version"], "0.11.0")
         mock_run.assert_called_once_with(
             ["git", "-C", str(self.repo_dir), "pull", "--ff-only"],
             capture_output=True,
@@ -1501,7 +1505,7 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main([flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.10.2")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.11.0")
 
     def test_cli_subcommand_version_flags(self):
         from bridge.__main__ import main
@@ -1513,19 +1517,19 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main(["update", flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.10.2")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.11.0")
 
     def test_version_unification(self):
         import bridge
         from pathlib import Path
         import re
 
-        self.assertEqual(bridge.__version__, "0.10.2")
+        self.assertEqual(bridge.__version__, "0.11.0")
         pyproject_path = Path(__file__).resolve().parent.parent / "pyproject.toml"
         pyproject_text = pyproject_path.read_text(encoding="utf-8")
         match = re.search(r'version\s*=\s*"([^"]+)"', pyproject_text)
         self.assertIsNotNone(match)
-        self.assertEqual(match.group(1), "0.10.2")
+        self.assertEqual(match.group(1), "0.11.0")
 
 
 class TestClientConfiguratorRegistry(unittest.TestCase):
@@ -1814,7 +1818,7 @@ class TestHermesConfiguratorStrategy(unittest.TestCase):
         self.assertIn('provider: "custom:local-(127.0.0.1:24980)"', content)
         self.assertIn('base_url: "http://127.0.0.1:24980/v1"', content)
         self.assertIn('api_mode: "chat_completions"', content)
-        self.assertIn('api_key: "local-bridge"', content)
+        self.assertIn(f'api_key: "{get_active_api_key()}"', content)
         self.assertIn("# agy:end", content)
 
         # Permissions 0o600
@@ -2181,7 +2185,7 @@ class TestOpenCodeConfigurator(unittest.TestCase):
             agy_conf["options"],
             {
                 "baseURL": "http://127.0.0.1:24980/v1",
-                "apiKey": "local-bridge",
+                "apiKey": get_active_api_key(),
             },
         )
         self.assertIn("models", agy_conf)
@@ -2520,7 +2524,7 @@ class TestOpenClawConfigurator(unittest.TestCase):
 
         agy_provider = data["models"]["providers"]["agy"]
         self.assertEqual(agy_provider["baseUrl"], "http://127.0.0.1:24980/v1")
-        self.assertEqual(agy_provider["apiKey"], "local-bridge")
+        self.assertEqual(agy_provider["apiKey"], get_active_api_key())
         self.assertEqual(agy_provider["api"], "openai-completions")
         self.assertEqual(agy_provider["headers"], {"User-Agent": "openclaw"})
         self.assertEqual(len(agy_provider["models"]), 3)
@@ -2851,7 +2855,7 @@ class TestCursorConfigurator(unittest.TestCase):
         res = self.configurator.setup()
         self.assertIsInstance(res, dict)
         self.assertEqual(res["url"], "http://127.0.0.1:24980/v1")
-        self.assertEqual(res["apiKey"], "local-bridge")
+        self.assertEqual(res["apiKey"], get_active_api_key())
         self.assertEqual(res["model"], "gemini-3.8-flash-high")
         self.assertIsInstance(res["notes"], list)
         self.assertTrue(len(res["notes"]) > 0)
@@ -2893,7 +2897,7 @@ class TestCursorConfigurator(unittest.TestCase):
         res = setup_cursor(port=9999, model="gemini-2.5-flash")
         self.assertEqual(res["url"], "http://127.0.0.1:9999/v1")
         self.assertEqual(res["model"], "gemini-2.5-flash")
-        self.assertEqual(res["apiKey"], "local-bridge")
+        self.assertEqual(res["apiKey"], get_active_api_key())
 
 
 class TestCLICursor(unittest.TestCase):
@@ -2916,7 +2920,7 @@ class TestCLICursor(unittest.TestCase):
         self.assertIn("Cursor", output)
         self.assertTrue("cloud" in output.lower() or "nube" in output.lower())
         self.assertIn("http://127.0.0.1:24980/v1", output)
-        self.assertIn("local-bridge", output)
+        self.assertIn(get_active_api_key(), output)
         self.assertIn("gemini-3.8-flash-high", output)
 
     def test_cli_setup_cursor_dispatches_with_flags(self):
@@ -3069,7 +3073,7 @@ class TestPiConfigurator(unittest.TestCase):
         self.assertEqual(agy["name"], "AGY Bridge")
         self.assertEqual(agy["baseUrl"], "http://127.0.0.1:24980/v1")
         self.assertEqual(agy["api"], "openai-completions")
-        self.assertEqual(agy["apiKey"], "local-bridge")
+        self.assertEqual(agy["apiKey"], get_active_api_key())
         self.assertEqual(agy["headers"], {"User-Agent": "pi-coding-agent"})
 
         models = agy["models"]

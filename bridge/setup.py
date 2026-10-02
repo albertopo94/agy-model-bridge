@@ -381,7 +381,7 @@ class ClaudeConfigurator(ClientConfigurator):
     ) -> Path:
         target = self.get_config_path(config_path or kwargs.get("settings_path"))
         port = kwargs.get("port")
-        auth_token = kwargs.get("auth_token", "antigravity")
+        auth_token = kwargs.get("auth_token") or get_active_api_key()
 
         if base_url:
             resolved_url = base_url.rstrip("/")
@@ -523,14 +523,21 @@ CODEX_BLOCK_REGEX = re.compile(
     re.MULTILINE,
 )
 
+def get_active_api_key(daemon_dir: Path | None = None) -> str:
+    """Returns the active persistent API key for the bridge."""
+    from bridge.security import get_or_create_api_key
+    return get_or_create_api_key(daemon_dir=daemon_dir)
+
+
 CODEX_ROOT_CONFLICT_REGEX = re.compile(
     r"^[ \t]*(model|model_provider|model_context_window|model_auto_compact_token_limit)[ \t]*=.*$",
     re.MULTILINE,
 )
 
 
-def build_codex_block(model: str, base_url: str) -> str:
+def build_codex_block(model: str, base_url: str, auth_token: str | None = None) -> str:
     """Constructs the delimited agy configuration block for Codex config.toml."""
+    headers_line = f'http_headers = {{ Authorization = "Bearer {auth_token}" }}\n' if auth_token else ""
     return (
         "# agy:start\n"
         f'model = "{model}"\n'
@@ -542,6 +549,7 @@ def build_codex_block(model: str, base_url: str) -> str:
         f'base_url = "{base_url}"\n'
         'wire_api = "responses"\n'
         "requires_openai_auth = false\n"
+        f"{headers_line}"
         "# agy:end"
     )
 
@@ -591,7 +599,8 @@ class CodexConfigurator(ClientConfigurator):
         else:
             resolved_url = "http://127.0.0.1:24980/v1"
 
-        block = build_codex_block(model=model, base_url=resolved_url)
+        auth_token = kwargs.get("auth_token") or get_active_api_key()
+        block = build_codex_block(model=model, base_url=resolved_url, auth_token=auth_token)
 
         backup_path = None
         if target.exists():
@@ -758,7 +767,7 @@ class HermesConfigurator(ClientConfigurator):
     ) -> Path:
         target = self.get_config_path(config_path)
         port = kwargs.get("port")
-        auth_token = kwargs.get("auth_token", "local-bridge")
+        auth_token = kwargs.get("auth_token") or get_active_api_key()
 
         if base_url:
             resolved_url = base_url.rstrip("/")
@@ -914,7 +923,7 @@ class OpenCodeConfigurator(ClientConfigurator):
     ) -> Path:
         target = self.get_config_path(config_path)
         port = kwargs.get("port")
-        auth_token = kwargs.get("auth_token", "local-bridge")
+        auth_token = kwargs.get("auth_token") or get_active_api_key()
 
         if base_url:
             resolved_url = base_url.rstrip("/")
@@ -1109,7 +1118,7 @@ class OpenClawConfigurator(ClientConfigurator):
     ) -> Path:
         target = self.get_config_path(config_path)
         port = kwargs.get("port")
-        auth_token = kwargs.get("auth_token", "local-bridge")
+        auth_token = kwargs.get("auth_token") or get_active_api_key()
 
         if base_url:
             resolved_url = base_url.rstrip("/")
@@ -1264,7 +1273,7 @@ class CursorConfigurator(ClientConfigurator):
         **kwargs: Any,
     ) -> dict[str, Any]:
         port = kwargs.get("port")
-        auth_token = kwargs.get("auth_token", "local-bridge")
+        auth_token = kwargs.get("auth_token") or get_active_api_key()
 
         if base_url:
             resolved_url = base_url.rstrip("/")
@@ -1363,7 +1372,7 @@ class PiConfigurator(ClientConfigurator):
     ) -> Path:
         target = self.get_config_path(config_path)
         port = kwargs.get("port")
-        auth_token = kwargs.get("auth_token", "local-bridge")
+        auth_token = kwargs.get("auth_token") or get_active_api_key()
 
         if base_url:
             resolved_url = base_url.rstrip("/")
@@ -1526,7 +1535,7 @@ def setup_claude(
     base_url: str | None = None,
     port: int | None = None,
     model: str = "gemini-3.8-flash-high",
-    auth_token: str = "antigravity",
+    auth_token: str | None = None,
 ) -> Path:
     """Configures Claude Code settings.json with agy-model-bridge environment variables."""
     return get_configurator("claude").setup(
@@ -1543,6 +1552,7 @@ def setup_codex(
     base_url: str | None = None,
     port: int | None = None,
     model: str = "gemini-3.8-flash-high",
+    auth_token: str | None = None,
 ) -> Path:
     """Configures Codex CLI config.toml with delimited agy configuration block."""
     return get_configurator("codex").setup(
@@ -1550,6 +1560,7 @@ def setup_codex(
         model=model,
         config_path=config_path,
         port=port,
+        auth_token=auth_token,
     )
 
 
@@ -1580,7 +1591,7 @@ def setup_hermes(
     base_url: str | None = None,
     port: int | None = None,
     model: str = "gemini-3.8-flash-high",
-    auth_token: str = "local-bridge",
+    auth_token: str | None = None,
 ) -> Path:
     """Configures Hermes Agent config.yaml with delimited agy configuration block."""
     return get_configurator("hermes").setup(
@@ -1608,7 +1619,7 @@ def setup_opencode(
     base_url: str | None = None,
     port: int | None = None,
     model: str = "gemini-3.8-flash-high",
-    auth_token: str = "local-bridge",
+    auth_token: str | None = None,
 ) -> Path:
     """Configures OpenCode config.json with agy provider and model."""
     return get_configurator("opencode").setup(
@@ -1636,7 +1647,7 @@ def setup_openclaw(
     base_url: str | None = None,
     port: int | None = None,
     model: str = "gemini-3.8-flash-high",
-    auth_token: str = "local-bridge",
+    auth_token: str | None = None,
 ) -> Path:
     """Configures OpenClaw openclaw.json for agy-model-bridge gateway."""
     return get_configurator("openclaw").setup(
@@ -1664,6 +1675,7 @@ def setup_cursor(
     port: int | None = None,
     model: str = "gemini-3.8-flash-high",
     lang: str = "en",
+    auth_token: str | None = None,
 ) -> dict[str, Any]:
     """Returns setup guide parameters for Cursor."""
     return get_configurator("cursor").setup(
@@ -1671,6 +1683,7 @@ def setup_cursor(
         port=port,
         model=model,
         lang=lang,
+        auth_token=auth_token,
     )
 
 
@@ -1679,7 +1692,7 @@ def setup_pi(
     base_url: str | None = None,
     port: int | None = None,
     model: str = "gemini-3.8-flash-high",
-    auth_token: str = "local-bridge",
+    auth_token: str | None = None,
     set_default: bool = False,
 ) -> Path:
     """Configures Pi models.json for agy-model-bridge gateway."""

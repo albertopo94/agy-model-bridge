@@ -137,7 +137,7 @@ class TestDaemonLifecycle(unittest.TestCase):
     def test_start_daemon_already_running(self, mock_popen, mock_health):
         write_pid(33333, pid_file=self.pid_file)
 
-        with patch("bridge.daemon.is_pid_alive", return_value=True):
+        with patch("bridge.daemon.is_pid_alive", return_value=True), patch("bridge.daemon.is_bridge_process", return_value=True):
             res = start_daemon(
                 port=24980,
                 host="127.0.0.1",
@@ -240,6 +240,8 @@ class TestDaemonCLI(unittest.TestCase):
             no_open=True,
             project=None,
             base_url=None,
+            api_key=None,
+            no_auth=False,
         )
         output = out.getvalue()
         self.assertIn("11111", output)
@@ -309,6 +311,56 @@ class TestDaemonCLI(unittest.TestCase):
         self.assertEqual(code1, 0)
         self.assertEqual(code2, 0)
         self.assertEqual(mock_open.call_count, 2)
+
+    @patch("bridge.__main__.start_daemon")
+    def test_cli_start_with_auth_flags(self, mock_start):
+        from bridge.__main__ import main
+        mock_start.return_value = {"status": "started", "pid": 11111, "url": "http://127.0.0.1:24980/"}
+        main(["start", "--api-key", "my-secret-key"])
+        mock_start.assert_called_with(
+            port=24980,
+            host="127.0.0.1",
+            no_open=False,
+            project=None,
+            base_url=None,
+            api_key="my-secret-key",
+            no_auth=False,
+        )
+
+        main(["start", "--no-auth"])
+        mock_start.assert_called_with(
+            port=24980,
+            host="127.0.0.1",
+            no_open=False,
+            project=None,
+            base_url=None,
+            api_key=None,
+            no_auth=True,
+        )
+
+
+class TestProcessIdentity(unittest.TestCase):
+    def test_is_bridge_process_invalid_pids(self):
+        from bridge.daemon import is_bridge_process
+        self.assertFalse(is_bridge_process(None))
+        self.assertFalse(is_bridge_process(0))
+        self.assertFalse(is_bridge_process(-1))
+
+    def test_is_bridge_process_current_process(self):
+        from bridge.daemon import is_bridge_process
+        self.assertTrue(is_bridge_process(os.getpid()))
+
+    @patch("subprocess.run")
+    def test_is_bridge_process_unrelated_process(self, mock_run):
+        from bridge.daemon import is_bridge_process
+        mock_run.return_value = MagicMock(returncode=0, stdout="/usr/bin/postgres -D /data")
+        self.assertFalse(is_bridge_process(99999))
+
+    @patch("subprocess.run")
+    def test_is_bridge_process_matched_process(self, mock_run):
+        from bridge.daemon import is_bridge_process
+        mock_run.return_value = MagicMock(returncode=0, stdout="/path/to/bin/agy-bridge start")
+        self.assertTrue(is_bridge_process(99999))
 
 
 if __name__ == "__main__":

@@ -37,6 +37,7 @@ from bridge.transform import (
 )
 from bridge.dashboard import render_dashboard, get_status_data
 from bridge.i18n import parse_accept_language
+from bridge.security import validate_api_key
 from bridge.anthropic import (
     anthropic_to_cloudcode_request,
     build_anthropic_message,
@@ -57,13 +58,28 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
     timeout = 60.0
     client: CloudCodeClient
     project: str
+    api_key: str | None = None
 
     def log_message(self, format: str, *args: Any) -> None:
         """Suppress default HTTP request logging to stderr."""
         pass
 
+    def _is_authenticated(self) -> bool:
+        expected = getattr(self.server, "api_key", None)
+        if expected is None:
+            expected = getattr(self, "api_key", None)
+        return validate_api_key(expected, self.headers)
+
     def do_OPTIONS(self) -> None:
         """Handles CORS preflight requests."""
+        parsed_path = urllib.parse.urlparse(self.path).path
+        if parsed_path.startswith("/v1/"):
+            # Inference endpoints forbid browser cross-origin preflight requests
+            self.send_response(403)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
@@ -83,7 +99,9 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
         encoded = json.dumps(data).encode("utf-8")
         self.send_response(status_code)
         self.send_header("Content-Type", "application/json")
-        self.send_header("Access-Control-Allow-Origin", "*")
+        req_path = getattr(self, "path", "")
+        if not req_path.startswith("/v1/"):
+            self.send_header("Access-Control-Allow-Origin", "*")
         sent_connection = False
         if headers:
             for k, v in headers.items():
@@ -152,6 +170,7 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                 auth_status=status_data["auth"],
                 models_count=status_data["models_count"],
                 lang=client_lang,
+                api_key=getattr(self.server, "api_key", None),
             )
             encoded = html_content.encode("utf-8")
             self.send_response(200)
@@ -174,6 +193,10 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
             return
 
         if path == "/v1/models":
+            if not self._is_authenticated():
+                code, err = build_openai_error_response(401, "Invalid or missing API key", "authentication_error")
+                self._send_json(code, err)
+                return
             try:
                 models = self.client.fetch_available_models(self.project)
                 resp_data = build_openai_model_list(models)
@@ -245,6 +268,16 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                     }
                 },
             )
+            return
+
+        if not self._is_authenticated():
+            self.close_connection = True
+            if path == "/v1/messages":
+                code, err = build_anthropic_error_response(401, "Invalid or missing API key")
+                self._send_json(code, err, headers={"Connection": "close"})
+            else:
+                code, err = build_openai_error_response(401, "Invalid or missing API key", "authentication_error")
+                self._send_json(code, err, headers={"Connection": "close"})
             return
 
         raw_body = self.rfile.read(content_length) if content_length > 0 else b""
@@ -360,7 +393,6 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
             self.send_header("Content-Type", "text/event-stream; charset=utf-8")
             self.send_header("Cache-Control", "no-cache")
             self.send_header("Connection", "close")
-            self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
 
             combined_gen = itertools.chain(buffered_lines, stream_gen)
@@ -516,7 +548,6 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
             self.send_header("Content-Type", "text/event-stream; charset=utf-8")
             self.send_header("Cache-Control", "no-cache")
             self.send_header("Connection", "close")
-            self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
 
             response_id = f"resp_{uuid.uuid4().hex[:16]}"
@@ -666,7 +697,6 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Cache-Control", "no-cache")
             self.send_header("Connection", "close")
-            self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
 
             last_finish_reason: str = "stop"
@@ -853,6 +883,7 @@ def create_server(
     client: Any | None = None,
     project: str | None = None,
     base_url: str | None = None,
+    api_key: str | None = None,
 ) -> http.server.ThreadingHTTPServer:
     """Instantiates and configures a ThreadingHTTPServer instance."""
     if client is None:
@@ -876,9 +907,11 @@ def create_server(
 
     ConfiguredHandler.client = client
     ConfiguredHandler.project = project
+    ConfiguredHandler.api_key = api_key
 
     server = http.server.ThreadingHTTPServer((host, port), ConfiguredHandler)
     server.daemon_threads = True
+    server.api_key = api_key
     return server
 
 
@@ -887,9 +920,15 @@ def run_server(
     port: int = 24980,
     project: str | None = None,
     base_url: str | None = None,
+    api_key: str | None = None,
+    no_auth: bool = False,
 ) -> None:
     """Starts the ThreadingHTTPServer serving OpenAI-compatible endpoints."""
-    server = create_server(host=host, port=port, project=project, base_url=base_url)
+    if not no_auth and api_key is None:
+        from bridge.security import get_or_create_api_key
+        api_key = get_or_create_api_key()
+
+    server = create_server(host=host, port=port, project=project, base_url=base_url, api_key=api_key)
     actual_port = server.server_address[1]
     print(f"Antigravity Model Bridge listening on http://{host}:{actual_port}")
     try:

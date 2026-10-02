@@ -360,8 +360,9 @@ class TestServerEndpoints(unittest.TestCase):
 
     def test_options_cors_preflight(self):
         import http.client
+        # 1. Non-inference endpoints support CORS preflight
         conn = http.client.HTTPConnection("127.0.0.1", self.port)
-        conn.request("OPTIONS", "/v1/chat/completions")
+        conn.request("OPTIONS", "/healthz")
         resp = conn.getresponse()
         self.assertEqual(resp.status, 204)
         self.assertEqual(resp.headers.get("Access-Control-Allow-Origin"), "*")
@@ -370,6 +371,14 @@ class TestServerEndpoints(unittest.TestCase):
             resp.headers.get("Access-Control-Allow-Headers"),
             "Content-Type, Authorization, x-api-key, anthropic-version, anthropic-beta, anthropic-auth-token, openai-beta, openai-organization, openai-project",
         )
+        conn.close()
+
+        # 2. Inference endpoints explicitly block CORS preflight (403 without wildcard)
+        conn = http.client.HTTPConnection("127.0.0.1", self.port)
+        conn.request("OPTIONS", "/v1/chat/completions")
+        resp = conn.getresponse()
+        self.assertEqual(resp.status, 403)
+        self.assertIsNone(resp.headers.get("Access-Control-Allow-Origin"))
         conn.close()
 
     def test_cors_header_on_get_and_streaming(self):
@@ -383,7 +392,8 @@ class TestServerEndpoints(unittest.TestCase):
             "stream": True,
         }
         resp = self._http_post("/v1/chat/completions", payload, stream=True)
-        self.assertEqual(resp.headers.get("Access-Control-Allow-Origin"), "*")
+        # /v1/ streaming responses must NOT leak Access-Control-Allow-Origin
+        self.assertNotIn("Access-Control-Allow-Origin", resp.headers)
         resp.close()
 
     def test_content_length_invalid_returns_400(self):
@@ -1293,6 +1303,107 @@ class TestServerEndpoints(unittest.TestCase):
         self.assertEqual(get_thought_signature(name="terminal", args={"cmd": "date"}), sig)
 
 
+class TestServerAuthenticationAndCORS(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.mock_client = MockCloudCodeClient()
+        cls.api_key = "secure-test-token-777"
+        cls.server = create_server(
+            host="127.0.0.1",
+            port=0,
+            client=cls.mock_client,
+            project="test-project",
+            api_key=cls.api_key,
+        )
+        cls.port = cls.server.server_address[1]
+        cls.base_url = f"http://127.0.0.1:{cls.port}"
+        cls.server_thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.server_thread.start()
+        time.sleep(0.05)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+        cls.server_thread.join(timeout=2.0)
+
+    def _post(self, path: str, payload: dict, headers: dict | None = None):
+        url = f"{self.base_url}{path}"
+        req_headers = {"Content-Type": "application/json"}
+        if headers:
+            req_headers.update(headers)
+        req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers=req_headers, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=5.0) as resp:
+                return resp.status, resp.headers, json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as he:
+            return he.code, he.headers, json.loads(he.read().decode("utf-8"))
+
+    def _get(self, path: str, headers: dict | None = None):
+        url = f"{self.base_url}{path}"
+        req = urllib.request.Request(url, headers=headers or {}, method="GET")
+        try:
+            with urllib.request.urlopen(req, timeout=5.0) as resp:
+                return resp.status, resp.headers, json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as he:
+            return he.code, he.headers, json.loads(he.read().decode("utf-8"))
+
+    def test_inference_endpoints_require_valid_auth(self):
+        # 1. /v1/chat/completions without auth -> 401
+        payload = {"messages": [{"role": "user", "content": "hi"}]}
+        code, headers, body = self._post("/v1/chat/completions", payload)
+        self.assertEqual(code, 401)
+        self.assertEqual(body["error"]["type"], "authentication_error")
+
+        # 2. With wrong auth -> 401
+        code, _, _ = self._post("/v1/chat/completions", payload, {"Authorization": "Bearer wrong"})
+        self.assertEqual(code, 401)
+
+        # 3. With correct Bearer auth -> 200
+        code, headers, body = self._post("/v1/chat/completions", payload, {"Authorization": f"Bearer {self.api_key}"})
+        self.assertEqual(code, 200)
+
+        # 4. /v1/messages without auth -> 401 in Anthropic format
+        m_payload = {"messages": [{"role": "user", "content": "hi"}], "model": "gemini-2.5-flash"}
+        code, headers, body = self._post("/v1/messages", m_payload)
+        self.assertEqual(code, 401)
+        self.assertEqual(body["type"], "error")
+        self.assertEqual(body["error"]["type"], "authentication_error")
+
+        # 5. /v1/messages with x-api-key -> 200
+        code, headers, body = self._post("/v1/messages", m_payload, {"x-api-key": self.api_key})
+        self.assertEqual(code, 200)
+
+        # 6. /v1/responses with Authorization -> 200
+        r_payload = {"input": "hi"}
+        code, headers, body = self._post("/v1/responses", r_payload, {"Authorization": f"Bearer {self.api_key}"})
+        self.assertEqual(code, 200)
+
+        # 7. /v1/models without auth -> 401, with auth -> 200
+        code, _, _ = self._get("/v1/models")
+        self.assertEqual(code, 401)
+        code, _, _ = self._get("/v1/models", {"Authorization": f"Bearer {self.api_key}"})
+        self.assertEqual(code, 200)
+
+    def test_non_inference_endpoints_allow_unauthenticated_access(self):
+        url = f"{self.base_url}/healthz"
+        with urllib.request.urlopen(url, timeout=5.0) as resp:
+            self.assertEqual(resp.status, 200)
+
+        url = f"{self.base_url}/api/status"
+        with urllib.request.urlopen(url, timeout=5.0) as resp:
+            self.assertEqual(resp.status, 200)
+
+    def test_v1_endpoints_do_not_send_cors_wildcard(self):
+        payload = {"messages": [{"role": "user", "content": "hi"}]}
+        _, headers, _ = self._post("/v1/chat/completions", payload, {"Authorization": f"Bearer {self.api_key}"})
+        self.assertNotIn("Access-Control-Allow-Origin", headers)
+
+        _, headers, _ = self._get("/v1/models", {"Authorization": f"Bearer {self.api_key}"})
+        self.assertNotIn("Access-Control-Allow-Origin", headers)
+
+
 if __name__ == "__main__":
     unittest.main()
+
 

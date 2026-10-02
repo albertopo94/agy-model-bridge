@@ -187,7 +187,8 @@ class TestDashboardRendering(unittest.TestCase):
             'name = "agy"\n'
             'base_url = "http://127.0.0.1:24980/v1"\n'
             'wire_api = "responses"\n'
-            'requires_openai_auth = false'
+            'requires_openai_auth = false\n'
+            'http_headers = { Authorization = "Bearer local-bridge" }'
         )
         self.assertIn(expected_codex_toml, unescaped_html)
         self.assertIn('export ANTHROPIC_BASE_URL="http://127.0.0.1:24980"\nexport ANTHROPIC_AUTH_TOKEN="local-bridge"', unescaped_html)
@@ -287,7 +288,8 @@ class TestDashboardRendering(unittest.TestCase):
                 'name = "agy"\n'
                 'base_url = "http://127.0.0.1:24980/v1"\n'
                 'wire_api = "responses"\n'
-                'requires_openai_auth = false'
+                'requires_openai_auth = false\n'
+                'http_headers = { Authorization = "Bearer local-bridge" }'
             ),
         )
         self.assertEqual(by_id["codex"]["docs_url"], "https://github.com/openai/codex")

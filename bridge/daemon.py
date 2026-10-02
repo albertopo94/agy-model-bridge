@@ -87,9 +87,28 @@ def remove_pid(pid_file: Path | None = None) -> None:
         pass
 
 
+def is_bridge_process(pid: int | None) -> bool:
+    """Verifies that the process with the given PID is actually an agy-bridge process."""
+    if pid is None or pid <= 0:
+        return False
+    try:
+        res = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "command="],
+            capture_output=True,
+            text=True,
+            timeout=1.0,
+        )
+        if res.returncode == 0:
+            cmdline = res.stdout.strip().lower()
+            return "bridge" in cmdline or "agy" in cmdline or "python" in cmdline
+    except Exception:
+        pass
+    return True
+
+
 def check_server_healthy(host: str, port: int, timeout: float = 1.0) -> bool:
-    """Checks if the bridge HTTP server is responding to /api/status."""
-    url = f"http://{host}:{port}/api/status"
+    """Checks if the bridge HTTP server is responding to /healthz."""
+    url = f"http://{host}:{port}/healthz"
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "agy-bridge/1.0"})
         with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -122,6 +141,8 @@ def start_daemon(
     pid_file: Path | None = None,
     log_file: Path | None = None,
     health_timeout: float = 5.0,
+    api_key: str | None = None,
+    no_auth: bool = False,
 ) -> dict[str, Any]:
     """Starts the bridge server as a background daemon process.
 
@@ -133,14 +154,17 @@ def start_daemon(
     dashboard_url = f"http://{host}:{port}/"
 
     existing_pid = read_pid(pid_file=target_pid_file)
-    if existing_pid and is_pid_alive(existing_pid):
-        return {
-            "status": "already_running",
-            "pid": existing_pid,
-            "port": port,
-            "url": dashboard_url,
-            "opened_browser": False,
-        }
+    if existing_pid:
+        if is_pid_alive(existing_pid) and is_bridge_process(existing_pid):
+            return {
+                "status": "already_running",
+                "pid": existing_pid,
+                "port": port,
+                "url": dashboard_url,
+                "opened_browser": False,
+            }
+        else:
+            remove_pid(pid_file=target_pid_file)
 
     target_log_file.parent.mkdir(parents=True, exist_ok=True)
 
@@ -158,6 +182,10 @@ def start_daemon(
         cmd.extend(["--project", project])
     if base_url:
         cmd.extend(["--base-url", base_url])
+    if no_auth:
+        cmd.append("--no-auth")
+    elif api_key:
+        cmd.extend(["--api-key", api_key])
 
     with open(target_log_file, "a", encoding="utf-8") as out:
         proc = subprocess.Popen(
@@ -224,6 +252,10 @@ def stop_daemon(
         remove_pid(pid_file=target_pid_file)
         return {"status": "not_running", "pid": pid}
 
+    if not is_bridge_process(pid):
+        remove_pid(pid_file=target_pid_file)
+        return {"status": "not_running", "pid": None}
+
     try:
         os.kill(pid, signal.SIGTERM)
     except ProcessLookupError:
@@ -256,7 +288,7 @@ def get_daemon_status(
     """Returns active daemon runtime status."""
     target_pid_file = Path(pid_file) if pid_file is not None else DEFAULT_PID_FILE
     pid = read_pid(pid_file=target_pid_file)
-    alive = is_pid_alive(pid) if pid else False
+    alive = (is_pid_alive(pid) and is_bridge_process(pid)) if pid else False
     dashboard_url = f"http://{host}:{port}/"
 
     if alive:
