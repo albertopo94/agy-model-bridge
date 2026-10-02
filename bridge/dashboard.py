@@ -7,6 +7,8 @@ from typing import Any
 import html
 import time
 
+from bridge import __version__
+
 
 _models_cache: dict[str, tuple[float, int]] = {}
 
@@ -356,9 +358,9 @@ def render_dashboard(
     copy_btn_title = "Copiar" if is_es else "Copy"
     docs_link_title = "Documentación ↗" if is_es else "Documentation ↗"
     footer_text = (
-        "AGY Model Bridge &bull; Potenciado por Google Cloud Code Assist &bull; Gateway local"
+        f"AGY Model Bridge &bull; v{__version__} &bull; Gateway local"
         if is_es
-        else "AGY Model Bridge &bull; Powered by Google Cloud Code Assist &bull; Local Gateway"
+        else f"AGY Model Bridge &bull; v{__version__} &bull; Local Gateway"
     )
 
     cards_html_parts: list[str] = []
@@ -776,7 +778,7 @@ def render_dashboard(
         desc_pi: "A minimal, highly extensible terminal coding agent with tree-structured history.",
         tip_pi: "💡 Tip: Run agy-bridge setup-pi --set-default to make AGY the default provider in settings.json.",
         desc_freellmapi: "Custom Provider & Aider integration (Base URL with /v1)",
-        footer: "AGY Model Bridge &bull; Powered by Google Cloud Code Assist &bull; Local Gateway"
+        footer: "AGY Model Bridge &bull; v{__version__} &bull; Local Gateway"
       }},
       es: {{
         subtitle: "Gateway multiprotocolo sin dependencias para Google Cloud Code Assist",
@@ -799,7 +801,7 @@ def render_dashboard(
         desc_pi: "Un agente de código minimalista y extensible para terminal con historial en árbol.",
         tip_pi: "💡 Tip: Ejecut\u00e1 agy-bridge setup-pi --set-default para fijar AGY como proveedor por defecto en settings.json.",
         desc_freellmapi: "Integraci\u00f3n para Custom Provider y Aider (URL base con /v1)",
-        footer: "AGY Model Bridge &bull; Potenciado por Google Cloud Code Assist &bull; Gateway local"
+        footer: "AGY Model Bridge &bull; v{__version__} &bull; Gateway local"
       }}
     }};
 

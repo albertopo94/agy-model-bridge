@@ -1,6 +1,7 @@
 """Unit tests for the embedded local gateway dashboard and status endpoints."""
 
 import unittest
+from bridge import __version__
 from bridge.dashboard import render_dashboard, get_status_data
 
 
@@ -538,6 +539,7 @@ class TestDashboardBilingual(unittest.TestCase):
         self.assertIn("Manual connection", html)
         self.assertIn("Restore configuration", html)
         self.assertIn("10 Models Discovered", html)
+        self.assertIn(f"AGY Model Bridge &bull; v{__version__} &bull; Local Gateway", html)
 
     def test_render_dashboard_spanish(self):
         auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
@@ -549,6 +551,7 @@ class TestDashboardBilingual(unittest.TestCase):
         self.assertIn("Conexión manual", html)
         self.assertIn("Restaurar configuración", html)
         self.assertIn("10 Modelos Descubiertos", html)
+        self.assertIn(f"AGY Model Bridge &bull; v{__version__} &bull; Gateway local", html)
 
     def test_render_dashboard_client_side_i18n_script(self):
         auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
