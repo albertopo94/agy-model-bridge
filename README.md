@@ -1,6 +1,6 @@
 # AGY Model Bridge
 
-Zero-dependency, pure Python 3 local AI gateway that bridges the Google Cloud Code Assist backend (`daily-cloudcode-pa.googleapis.com`) to standard client protocols, providing native model access for **Claude Code**, **Codex CLI**, **Hermes Agent**, **OpenCode**, **OpenClaw**, and **FreeLLMAPI**.
+Zero-dependency, pure Python 3 local AI gateway that bridges the Google Cloud Code Assist backend (`daily-cloudcode-pa.googleapis.com`) to standard client protocols, providing native model access for **Claude Code**, **Codex CLI**, **Hermes Agent**, **OpenCode**, **OpenClaw**, **Cursor**, and **FreeLLMAPI**.
 
 ---
 
@@ -10,10 +10,10 @@ Zero-dependency, pure Python 3 local AI gateway that bridges the Google Cloud Co
 - **Multi-Protocol Gateway**:
   - `GET /` — Self-contained dark-mode dashboard (Geist/Vercel styling) with live Keychain auth badges, model count, and one-click copyable setup cards.
   - `GET /v1/models` — Dynamic model catalog discovered directly from upstream Cloud Code Assist with Codex serde compatibility (`data`, `models`, `slug`, `display_name`).
-  - `POST /v1/chat/completions` — OpenAI Chat Completions API with full streaming (SSE `text/event-stream`) and non-streaming support (for FreeLLMAPI, Hermes Agent, OpenCode, OpenClaw, Aider).
+  - `POST /v1/chat/completions` — OpenAI Chat Completions API with full streaming (SSE `text/event-stream`) and non-streaming support (for FreeLLMAPI, Hermes Agent, OpenCode, OpenClaw, Cursor, Aider).
   - `POST /v1/responses` — OpenAI Responses API shim for Codex CLI (`wire_api = "responses"`).
   - `POST /v1/messages` — Anthropic Messages API shim with dynamic SSE stream mapping (`thinking_delta`, `text_delta`, `tool_use`, `input_json_delta`), recursive OpenAPI 3.0 schema sanitization, and full tool calling for Claude Code CLI.
-- **Built-in Setup CLI**: Native subcommands (`setup-claude`, `setup-codex`, `setup-hermes`, `setup-opencode`, `setup-openclaw`) that surgically configure client environments with atomic writes, file permissions `0o600`, and automatic timestamped backups.
+- **Built-in Setup CLI**: Native subcommands (`setup-claude`, `setup-codex`, `setup-hermes`, `setup-opencode`, `setup-openclaw`, `setup-cursor`) that surgically configure client environments with atomic writes, file permissions `0o600`, and automatic timestamped backups.
 - **macOS Keychain OAuth Integration**: Seamlessly extracts Google OAuth credentials stored by Antigravity in Keychain (`service="gemini"`, `account="antigravity"`) with thread-safe TTL caching and automatic 401 re-read.
 - **Adaptive Thinking & Model Aliasing**: Intelligently resolves `gemini-3.8-flash-high` / `auto` to upstream `gemini-3.8-flash-tiered`, automatically configuring reasoning levels (`HIGH`, `MEDIUM`, `LOW`) and token budgets.
 
@@ -192,6 +192,20 @@ Once configured, launch OpenClaw:
 openclaw gateway
 ```
 
+### 🎴 Cursor
+
+Cursor routes AI requests through its cloud servers, so localhost requires an HTTPS tunnel (e.g. Cloudflare Tunnel, ngrok, or Tailscale) if Cursor cloud cannot reach localhost directly.
+
+Run the setup guide:
+```bash
+agy-bridge setup-cursor
+```
+Follow the on-screen guide to:
+1. Open Cursor **Settings** -> **Models** -> enable **Override OpenAI Base URL**.
+2. Enter your bridge endpoint (e.g., `http://127.0.0.1:24980/v1` or public HTTPS tunnel URL).
+3. Set API Key to `local-bridge`.
+4. Add models: `gemini-3.8-flash-high`, `gemini-2.5-pro`, `gemini-2.5-flash`.
+
 ### 🎴 FreeLLMAPI
 Register this bridge as an OpenAI-compatible Custom Provider in FreeLLMAPI:
 - **Base URL**: `http://127.0.0.1:24980/v1`
@@ -272,6 +286,7 @@ curl -fsSL https://raw.githubusercontent.com/albertopo94/agy-model-bridge/main/u
 | `agy-bridge restore-opencode` | Interactively restores an OpenCode configuration backup |
 | `agy-bridge setup-openclaw` | Surgically configures OpenClaw (`~/.openclaw/openclaw.json`) |
 | `agy-bridge restore-openclaw` | Interactively restores an OpenClaw configuration backup |
+| `agy-bridge setup-cursor` | Setup guide for Cursor AI editor |
 | `agy-bridge setup-hermes` | Surgically configures Hermes Agent (`~/.hermes/config.yaml`) |
 | `agy-bridge restore-hermes` | Interactively restores a Hermes Agent configuration backup |
 | `agy-bridge uninstall` | Uninstalls bridge, terminates daemon, and restores client configs |
@@ -288,7 +303,7 @@ Execute the complete test suite:
 python3 -m unittest discover -s tests -v
 ```
 
-All 504 tests run in ~1 second with zero external dependencies and zero network access.
+All 520 tests run in ~1 second with zero external dependencies and zero network access.
 
 ### End-to-End Smoke Test
 

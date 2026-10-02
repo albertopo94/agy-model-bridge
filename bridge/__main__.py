@@ -23,6 +23,7 @@ from bridge.setup import (
     restore_opencode,
     setup_claude,
     setup_codex,
+    setup_cursor,
     setup_hermes,
     setup_openclaw,
     setup_opencode,
@@ -553,6 +554,51 @@ def main(argv: list[str] | None = None) -> int:
         print(t("setup_openclaw_success", target=target))
         print(t("setup_openclaw_auto_read"))
         print(t("setup_openclaw_run_hint"))
+        return 0
+
+    if argv and argv[0] == "setup-cursor":
+        parser = argparse.ArgumentParser(
+            prog=f"{prog_base} setup-cursor",
+            description="Guide for configuring Cursor to use agy-model-bridge gateway.",
+        )
+        parser.add_argument(
+            "--port",
+            type=int,
+            default=None,
+            help="Gateway port (default: 24980)",
+        )
+        parser.add_argument(
+            "--url",
+            "--base-url",
+            dest="base_url",
+            type=str,
+            default=None,
+            help="Gateway base URL override (with /v1)",
+        )
+        parser.add_argument(
+            "--model",
+            type=str,
+            default="gemini-3.8-flash-high",
+            help="Default model identifier (default: gemini-3.8-flash-high)",
+        )
+        parser.add_argument("--lang", type=str, default=None, help=t("cli_help_lang"))
+        args = parser.parse_args(argv[1:])
+
+        res = setup_cursor(
+            base_url=args.base_url,
+            port=args.port,
+            model=args.model,
+            lang=args.lang,
+        )
+
+        print(t("setup_cursor_title"))
+        print(t("setup_cursor_notice"))
+        print(t("setup_cursor_step1", url=res["url"]))
+        print(t("setup_cursor_step2", url=res["url"]))
+        print(t("setup_cursor_step3", api_key=res["apiKey"]))
+        model_names = [res["model"]] + [m for m in ("gemini-3.8-flash-high", "gemini-2.5-pro", "gemini-2.5-flash") if m != res["model"]]
+        models_str = ", ".join(model_names)
+        print(t("setup_cursor_step4", models=models_str))
         return 0
 
     if argv and argv[0] == "restore-claude":

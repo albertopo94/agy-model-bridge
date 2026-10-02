@@ -133,6 +133,13 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "setup_openclaw_success": "OpenClaw configured successfully at {target}\n",
         "setup_openclaw_auto_read": "OpenClaw will read this configuration automatically.",
         "setup_openclaw_run_hint": "Run 'openclaw gateway' or 'openclaw agent' to start using it.",
+        # Cursor
+        "setup_cursor_title": "=== Cursor Configuration Guide ===",
+        "setup_cursor_notice": "Notice: Cursor routes AI requests through its cloud servers. A public HTTPS URL (via Cloudflare Tunnel, ngrok, or Tailscale) is required if Cursor cannot reach localhost directly.",
+        "setup_cursor_step1": "1. Gateway Endpoint: {url}",
+        "setup_cursor_step2": "2. In Cursor: Open Settings -> Models -> Enable 'Override OpenAI Base URL' and enter: {url}",
+        "setup_cursor_step3": "3. Set OpenAI API Key: {api_key}",
+        "setup_cursor_step4": "4. Add Models: Under 'Model Names', add: {models}",
         # Restore
         "restore_restored_from": "Restored configuration from: {name}",
         "restore_client_ready": "{client_name} ready at {target}",
@@ -209,6 +216,13 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "setup_openclaw_success": "OpenClaw configurado correctamente en {target}\n",
         "setup_openclaw_auto_read": "OpenClaw leerá esta configuración automáticamente.",
         "setup_openclaw_run_hint": "Ejecutá 'openclaw gateway' o 'openclaw agent' para empezar a usarlo.",
+        # Cursor
+        "setup_cursor_title": "=== Guía de Configuración para Cursor ===",
+        "setup_cursor_notice": "Aviso: Cursor enruta las peticiones de IA a través de sus servidores en la nube. Se requiere una URL pública HTTPS (vía Cloudflare Tunnel, ngrok o Tailscale) si Cursor no puede acceder directamente a localhost.",
+        "setup_cursor_step1": "1. Endpoint del Gateway: {url}",
+        "setup_cursor_step2": "2. En Cursor: Abrí Ajustes -> Models -> Activá 'Override OpenAI Base URL' e ingresá: {url}",
+        "setup_cursor_step3": "3. Configurá OpenAI API Key: {api_key}",
+        "setup_cursor_step4": "4. Añadir Modelos: En 'Model Names', agregá: {models}",
         # Restore
         "restore_restored_from": "Restaurada configuración desde: {name}",
         "restore_client_ready": "{client_name} listo en {target}",

@@ -138,6 +138,33 @@ class TestTranslate(unittest.TestCase):
         set_locale(None)
         # Resets to detect_locale()
 
+    def test_setup_cursor_translations(self):
+        title_en = t("setup_cursor_title", lang="en")
+        title_es = t("setup_cursor_title", lang="es")
+        self.assertIn("Cursor", title_en)
+        self.assertIn("Cursor", title_es)
+        self.assertNotEqual(title_en, title_es)
+
+        notice_en = t("setup_cursor_notice", lang="en")
+        notice_es = t("setup_cursor_notice", lang="es")
+        self.assertIn("cloud", notice_en.lower())
+        self.assertIn("nube", notice_es.lower())
+
+        step1_en = t("setup_cursor_step1", lang="en", url="http://127.0.0.1:24980/v1")
+        step1_es = t("setup_cursor_step1", lang="es", url="http://127.0.0.1:24980/v1")
+        self.assertIn("http://127.0.0.1:24980/v1", step1_en)
+        self.assertIn("http://127.0.0.1:24980/v1", step1_es)
+
+        step2_en = t("setup_cursor_step2", lang="en", url="http://127.0.0.1:24980/v1")
+        step2_es = t("setup_cursor_step2", lang="es", url="http://127.0.0.1:24980/v1")
+        self.assertIn("Override OpenAI Base URL", step2_en)
+        self.assertIn("Override OpenAI Base URL", step2_es)
+
+        step3_en = t("setup_cursor_step3", lang="en", api_key="local-bridge")
+        step3_es = t("setup_cursor_step3", lang="es", api_key="local-bridge")
+        self.assertIn("local-bridge", step3_en)
+        self.assertIn("local-bridge", step3_es)
+
 
 class TestIsYes(unittest.TestCase):
     def test_is_yes_spanish_affirmative(self):
@@ -205,6 +232,13 @@ class TestTranslationsParity(unittest.TestCase):
             "setup_openclaw_success",
             "setup_openclaw_auto_read",
             "setup_openclaw_run_hint",
+            # Cursor
+            "setup_cursor_title",
+            "setup_cursor_notice",
+            "setup_cursor_step1",
+            "setup_cursor_step2",
+            "setup_cursor_step3",
+            "setup_cursor_step4",
             # Restore
             "restore_restored_from",
             "restore_client_ready",

@@ -197,13 +197,14 @@ class TestDashboardRendering(unittest.TestCase):
         auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
         html = render_dashboard("127.0.0.1", 24980, auth_status, models_count=20)
 
-        # 16 independent snippet IDs and corresponding copy button calls
+        # 18 independent snippet IDs and corresponding copy button calls
         expected_ids = [
             "claude-auto", "claude-manual", "claude-restore",
             "codex-auto", "codex-manual", "codex-restore",
             "hermes-auto", "hermes-manual", "hermes-restore",
             "opencode-auto", "opencode-manual", "opencode-restore",
             "openclaw-auto", "openclaw-manual", "openclaw-restore",
+            "cursor-auto", "cursor-manual",
             "freellmapi-manual",
         ]
         for snippet_id in expected_ids:
@@ -211,6 +212,8 @@ class TestDashboardRendering(unittest.TestCase):
                 self.assertIn(f'id="{snippet_id}"', html)
                 self.assertIn(f"copySnippet(this, '{snippet_id}')", html)
 
+        self.assertNotIn('id="cursor-restore"', html)
+        self.assertNotIn("copySnippet(this, 'cursor-restore')", html)
         self.assertNotIn('id="freellmapi-auto"', html)
         self.assertNotIn("copySnippet(this, 'freellmapi-auto')", html)
 
@@ -235,13 +238,14 @@ class TestDashboardRendering(unittest.TestCase):
 
     def test_client_cards_schema(self):
         from bridge.dashboard import CLIENT_CARDS
-        self.assertEqual(len(CLIENT_CARDS), 6)
+        self.assertEqual(len(CLIENT_CARDS), 7)
         card_titles = [c["title"] for c in CLIENT_CARDS]
         self.assertIn("Claude Code", card_titles)
         self.assertIn("Codex CLI", card_titles)
         self.assertIn("Hermes Agent", card_titles)
         self.assertIn("OpenCode", card_titles)
         self.assertIn("OpenClaw", card_titles)
+        self.assertIn("Cursor", card_titles)
         self.assertIn("FreeLLMAPI", card_titles)
 
         by_id = {c["id"]: c for c in CLIENT_CARDS}
@@ -353,6 +357,22 @@ class TestDashboardRendering(unittest.TestCase):
             "BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY=local-bridge",
         )
         self.assertEqual(by_id["openclaw"]["docs_url"], "https://docs.openclaw.ai/gateway/config-tools/custom-providers")
+
+        self.assertIn('viewBox="0 0 24 24"', by_id["cursor"].get("icon_svg", ""))
+        self.assertEqual(
+            by_id["cursor"]["auto_cmd"]("127.0.0.1:24980"),
+            "agy-bridge setup-cursor",
+        )
+        self.assertEqual(
+            by_id["cursor"]["auto_cmd"]("127.0.0.1:9090"),
+            "agy-bridge setup-cursor --port 9090",
+        )
+        self.assertNotIn("restore_cmd", by_id["cursor"])
+        self.assertEqual(
+            by_id["cursor"]["manual_snippet"]("127.0.0.1:24980"),
+            "BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY=local-bridge",
+        )
+        self.assertEqual(by_id["cursor"]["docs_url"], "https://docs.cursor.com")
 
         self.assertNotIn("auto_cmd", by_id["freellmapi"])
         self.assertIn("icon_svg", by_id["freellmapi"])

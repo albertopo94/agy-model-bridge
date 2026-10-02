@@ -15,6 +15,7 @@ from bridge.setup import (
     HermesConfigurator,
     OpenClawConfigurator,
     OpenCodeConfigurator,
+    CursorConfigurator,
     atomic_write_file,
     build_hermes_block,
     create_backup,
@@ -31,6 +32,7 @@ from bridge.setup import (
     restore_opencode,
     setup_claude,
     setup_codex,
+    setup_cursor,
     setup_hermes,
     setup_openclaw,
     setup_opencode,
@@ -1304,7 +1306,7 @@ class TestUpdateInstallation(unittest.TestCase):
 
         self.assertEqual(result["status"], "updated")
         self.assertTrue(result["restarted_daemon"])
-        self.assertEqual(result["version"], "0.8.0")
+        self.assertEqual(result["version"], "0.9.0")
         mock_run.assert_called_once_with(
             ["git", "-C", str(self.repo_dir), "pull", "--ff-only"],
             capture_output=True,
@@ -1496,7 +1498,7 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main([flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.8.0")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.9.0")
 
     def test_cli_subcommand_version_flags(self):
         from bridge.__main__ import main
@@ -1508,19 +1510,19 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main(["update", flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.8.0")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.9.0")
 
     def test_version_unification(self):
         import bridge
         from pathlib import Path
         import re
 
-        self.assertEqual(bridge.__version__, "0.8.0")
+        self.assertEqual(bridge.__version__, "0.9.0")
         pyproject_path = Path(__file__).resolve().parent.parent / "pyproject.toml"
         pyproject_text = pyproject_path.read_text(encoding="utf-8")
         match = re.search(r'version\s*=\s*"([^"]+)"', pyproject_text)
         self.assertIsNotNone(match)
-        self.assertEqual(match.group(1), "0.8.0")
+        self.assertEqual(match.group(1), "0.9.0")
 
 
 class TestClientConfiguratorRegistry(unittest.TestCase):
@@ -1550,6 +1552,11 @@ class TestClientConfiguratorRegistry(unittest.TestCase):
         self.assertEqual(openclaw_cfg.name, "openclaw")
         self.assertEqual(openclaw_cfg.display_name, "OpenClaw")
 
+        cursor_cfg = get_configurator("cursor")
+        self.assertIsInstance(cursor_cfg, CursorConfigurator)
+        self.assertEqual(cursor_cfg.name, "cursor")
+        self.assertEqual(cursor_cfg.display_name, "Cursor")
+
     def test_get_configurator_unknown_raises_key_error(self):
         with self.assertRaises(KeyError):
             get_configurator("unknown_client")
@@ -1562,6 +1569,7 @@ class TestClientConfiguratorRegistry(unittest.TestCase):
         self.assertIn("hermes", names)
         self.assertIn("opencode", names)
         self.assertIn("openclaw", names)
+        self.assertIn("cursor", names)
 
     def test_register_custom_configurator(self):
         class DummyConfigurator(ClientConfigurator):
@@ -2815,6 +2823,154 @@ class TestUninstallOpenClaw(unittest.TestCase):
         self.assertTrue(res.get("openclaw_restored", False))
         cleaned = json.loads(openclaw_config.read_text(encoding="utf-8"))
         self.assertNotIn("agy", cleaned.get("models", {}).get("providers", {}))
+
+
+class TestCursorConfigurator(unittest.TestCase):
+    def setUp(self):
+        self.configurator = CursorConfigurator()
+
+    def test_properties(self):
+        self.assertEqual(self.configurator.name, "cursor")
+        self.assertEqual(self.configurator.display_name, "Cursor")
+        self.assertIsInstance(self.configurator.default_config_path, Path)
+
+    def test_is_configured_always_false(self):
+        self.assertFalse(self.configurator.is_configured())
+        self.assertFalse(self.configurator.is_configured(Path("/any/arbitrary/path")))
+
+    def test_setup_default(self):
+        res = self.configurator.setup()
+        self.assertIsInstance(res, dict)
+        self.assertEqual(res["url"], "http://127.0.0.1:24980/v1")
+        self.assertEqual(res["apiKey"], "local-bridge")
+        self.assertEqual(res["model"], "gemini-3.8-flash-high")
+        self.assertIsInstance(res["notes"], list)
+        self.assertTrue(len(res["notes"]) > 0)
+        joined_notes = " ".join(res["notes"])
+        self.assertIn("cloud", joined_notes.lower())
+        self.assertTrue("tunnel" in joined_notes.lower() or "override" in joined_notes.lower())
+
+    def test_setup_with_port(self):
+        res = self.configurator.setup(port=9090)
+        self.assertEqual(res["url"], "http://127.0.0.1:9090/v1")
+
+    def test_setup_with_base_url(self):
+        res1 = self.configurator.setup(base_url="https://tunnel.example.com")
+        self.assertEqual(res1["url"], "https://tunnel.example.com/v1")
+
+        res2 = self.configurator.setup(base_url="https://tunnel.example.com/v1")
+        self.assertEqual(res2["url"], "https://tunnel.example.com/v1")
+
+        res3 = self.configurator.setup(base_url="https://tunnel.example.com/v1/")
+        self.assertEqual(res3["url"], "https://tunnel.example.com/v1")
+
+    def test_setup_with_custom_model(self):
+        res = self.configurator.setup(model="gemini-2.5-pro")
+        self.assertEqual(res["model"], "gemini-2.5-pro")
+
+    def test_restore_always_false(self):
+        self.assertFalse(self.configurator.restore())
+        self.assertFalse(self.configurator.restore(config_path=Path("/tmp/foo"), backup_path=Path("/tmp/bar")))
+
+    def test_list_backups_empty(self):
+        self.assertEqual(self.configurator.list_backups(), [])
+        self.assertEqual(self.configurator.list_backups(Path("/tmp/foo")), [])
+
+    def test_purge_backups_zero(self):
+        self.assertEqual(self.configurator.purge_backups(), 0)
+        self.assertEqual(self.configurator.purge_backups(Path("/tmp/foo")), 0)
+
+    def test_setup_cursor_standalone(self):
+        res = setup_cursor(port=9999, model="gemini-2.5-flash")
+        self.assertEqual(res["url"], "http://127.0.0.1:9999/v1")
+        self.assertEqual(res["model"], "gemini-2.5-flash")
+        self.assertEqual(res["apiKey"], "local-bridge")
+
+
+class TestCLICursor(unittest.TestCase):
+    def setUp(self):
+        from bridge.i18n import set_locale
+        set_locale(None)
+
+    def tearDown(self):
+        from bridge.i18n import set_locale
+        set_locale(None)
+
+    def test_cli_setup_cursor_dispatches_with_defaults(self):
+        import io
+        from bridge.__main__ import main
+        out = io.StringIO()
+        with unittest.mock.patch("sys.stdout", out):
+            exit_code = main(["setup-cursor"])
+        self.assertEqual(exit_code, 0)
+        output = out.getvalue()
+        self.assertIn("Cursor", output)
+        self.assertTrue("cloud" in output.lower() or "nube" in output.lower())
+        self.assertIn("http://127.0.0.1:24980/v1", output)
+        self.assertIn("local-bridge", output)
+        self.assertIn("gemini-3.8-flash-high", output)
+
+    def test_cli_setup_cursor_dispatches_with_flags(self):
+        import io
+        from bridge.__main__ import main
+        out = io.StringIO()
+        with unittest.mock.patch("sys.stdout", out):
+            exit_code = main([
+                "setup-cursor",
+                "--port", "9090",
+                "--model", "gemini-2.5-pro",
+            ])
+        self.assertEqual(exit_code, 0)
+        output = out.getvalue()
+        self.assertIn("http://127.0.0.1:9090/v1", output)
+        self.assertIn("gemini-2.5-pro", output)
+
+    def test_cli_setup_cursor_dispatches_with_url_flag(self):
+        import io
+        from bridge.__main__ import main
+        out = io.StringIO()
+        with unittest.mock.patch("sys.stdout", out):
+            exit_code = main([
+                "setup-cursor",
+                "--url", "https://tunnel.myserver.com",
+            ])
+        self.assertEqual(exit_code, 0)
+        output = out.getvalue()
+        self.assertIn("https://tunnel.myserver.com/v1", output)
+
+    def test_cli_setup_cursor_respects_lang_es(self):
+        import io
+        from bridge.__main__ import main
+        out = io.StringIO()
+        with unittest.mock.patch("sys.stdout", out):
+            exit_code = main(["setup-cursor", "--lang", "es"])
+        self.assertEqual(exit_code, 0)
+        output = out.getvalue()
+        self.assertIn("Cursor", output)
+        self.assertIn("nube", output.lower())
+
+
+class TestUninstallCursor(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp_dir.name)
+        self.daemon_dir = self.root / ".agy-bridge"
+        self.daemon_dir.mkdir(parents=True, exist_ok=True)
+        self.bin_dir = self.root / ".local" / "bin"
+        self.bin_dir.mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_uninstall_runs_cleanly_with_cursor_in_registry(self):
+        res = uninstall(
+            daemon_dir=self.daemon_dir,
+            bin_dir=self.bin_dir,
+            restore_configs=True,
+            purge_backups=True,
+        )
+        self.assertIn("cursor", res["restored_clients"])
+        self.assertFalse(res["restored_clients"]["cursor"])
 
 
 if __name__ == "__main__":
