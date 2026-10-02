@@ -123,6 +123,15 @@ HERMES_ICON_SVG = (
     '</svg>'
 )
 
+FREELLMAPI_ICON_SVG = (
+    '<svg class="card-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="24" height="24" aria-hidden="true">'
+    '<rect width="64" height="64" rx="14" fill="#09090b"/>'
+    '<circle cx="32" cy="32" r="9.5" fill="#fafafa"/>'
+    '<circle cx="32" cy="32" r="18" fill="none" stroke="#fafafa" stroke-opacity=".4" '
+    'stroke-width="3.5" stroke-linecap="round" stroke-dasharray="86 27" transform="rotate(-60 32 32)"/>'
+    '</svg>'
+)
+
 
 CLIENT_CARDS: list[dict[str, Any]] = [
     {
@@ -190,8 +199,8 @@ CLIENT_CARDS: list[dict[str, Any]] = [
         "desc": "Custom Provider & Aider integration (Base URL with /v1)",
         "desc_en": "Custom Provider & Aider integration (Base URL with /v1)",
         "desc_es": "Integración para Custom Provider y Aider (URL base con /v1)",
-        "auto_cmd": lambda addr: f"http://{addr}/v1",
-        "manual_snippet": lambda addr: f'BASE_URL=http://{addr}/v1\nAPI_KEY=local-bridge',
+        "icon_svg": FREELLMAPI_ICON_SVG,
+        "manual_snippet": lambda addr: f"BASE_URL=http://{addr}/v1\nAPI_KEY=local-bridge",
         "docs_url": "https://github.com/tashfeenahmed/freellmapi",
     },
 ]
@@ -252,11 +261,23 @@ def render_dashboard(
 
     cards_html_parts: list[str] = []
     for card in CLIENT_CARDS:
-        auto_text = card["auto_cmd"](snippet_address)
-        manual_text = card["manual_snippet"](snippet_address)
         card_id = card["id"]
         icon_html = card.get("icon_svg", "")
         desc_text = card.get("desc_es" if is_es else "desc_en", card.get("desc", ""))
+
+        auto_block_html = ""
+        if "auto_cmd" in card and card["auto_cmd"]:
+            auto_text = card["auto_cmd"](snippet_address)
+            auto_block_html = f"""
+        <div class="setup-block">
+          <div class="setup-header">
+            <span class="setup-title" data-i18n="setup_auto">{setup_auto_title}</span>
+            <button class="copy-btn" data-i18n="btn_copy" onclick="copySnippet(this, '{card_id}-auto')">{copy_btn_title}</button>
+          </div>
+          <pre id="{card_id}-auto"><code>{html.escape(auto_text)}</code></pre>
+        </div>"""
+
+        manual_text = card["manual_snippet"](snippet_address)
 
         restore_block_html = ""
         if "restore_cmd" in card:
@@ -274,15 +295,7 @@ def render_dashboard(
         <div class="card-header">
           <h2 class="card-title">{icon_html}{html.escape(card["title"])}</h2>
         </div>
-        <p class="card-desc" data-i18n="desc_{card_id}">{html.escape(desc_text)}</p>
-
-        <div class="setup-block">
-          <div class="setup-header">
-            <span class="setup-title" data-i18n="setup_auto">{setup_auto_title}</span>
-            <button class="copy-btn" data-i18n="btn_copy" onclick="copySnippet(this, '{card_id}-auto')">{copy_btn_title}</button>
-          </div>
-          <pre id="{card_id}-auto"><code>{html.escape(auto_text)}</code></pre>
-        </div>
+        <p class="card-desc" data-i18n="desc_{card_id}">{html.escape(desc_text)}</p>{auto_block_html}
 
         <div class="setup-block">
           <div class="setup-header">

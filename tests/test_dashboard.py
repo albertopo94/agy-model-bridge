@@ -150,7 +150,9 @@ class TestDashboardRendering(unittest.TestCase):
         self.assertIn("codex-linear-gradient", html)
         self.assertIn('viewBox="0 0 270.35 270.35"', html)
         self.assertIn('viewBox="0 0 24 24"', html)
+        self.assertIn('viewBox="0 0 64 64"', html)
         self.assertNotIn("npx freellmapi setup", html)
+        self.assertNotIn('id="freellmapi-auto"', html)
         self.assertIn("BASE_URL", html)
         self.assertIn("API_KEY", html)
 
@@ -185,17 +187,20 @@ class TestDashboardRendering(unittest.TestCase):
         auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
         html = render_dashboard("127.0.0.1", 24980, auth_status, models_count=20)
 
-        # 11 independent snippet IDs and corresponding copy button calls
+        # 10 independent snippet IDs and corresponding copy button calls
         expected_ids = [
             "claude-auto", "claude-manual", "claude-restore",
             "codex-auto", "codex-manual", "codex-restore",
             "hermes-auto", "hermes-manual", "hermes-restore",
-            "freellmapi-auto", "freellmapi-manual",
+            "freellmapi-manual",
         ]
         for snippet_id in expected_ids:
             with self.subTest(snippet_id=snippet_id):
                 self.assertIn(f'id="{snippet_id}"', html)
                 self.assertIn(f"copySnippet(this, '{snippet_id}')", html)
+
+        self.assertNotIn('id="freellmapi-auto"', html)
+        self.assertNotIn("copySnippet(this, 'freellmapi-auto')", html)
 
         # External doc links
         self.assertIn("Documentación ↗", html)
@@ -295,10 +300,9 @@ class TestDashboardRendering(unittest.TestCase):
         )
         self.assertEqual(by_id["hermes"]["docs_url"], "https://hermes-agent.nousresearch.com")
 
-        self.assertEqual(
-            by_id["freellmapi"]["auto_cmd"]("127.0.0.1:24980"),
-            'http://127.0.0.1:24980/v1',
-        )
+        self.assertNotIn("auto_cmd", by_id["freellmapi"])
+        self.assertIn("icon_svg", by_id["freellmapi"])
+        self.assertIn('viewBox="0 0 64 64"', by_id["freellmapi"]["icon_svg"])
         self.assertEqual(
             by_id["freellmapi"]["manual_snippet"]("127.0.0.1:24980"),
             'BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY=local-bridge',
