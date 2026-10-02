@@ -69,10 +69,13 @@ def _strip_json_comments(text: str) -> str:
     return pattern.sub(replacer, text)
 
 
+BACKUP_TIMESTAMP_REGEX = re.compile(r"\.backup-(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}(?:-\d+)?)$")
+
+
 def create_backup(path: Path) -> Path | None:
     """Creates a timestamped backup of path if it exists.
 
-    Backup filename pattern: <path>.backup-YYYY-MM-DDTHH-MM-SS
+    Backup filename pattern: <path>.backup-YYYY-MM-DDTHH-MM-SS-ffffff
 
     Args:
         path: Path to file to backup.
@@ -84,7 +87,7 @@ def create_backup(path: Path) -> Path | None:
     if not path.exists() or not path.is_file():
         return None
 
-    timestamp = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
+    timestamp = datetime.now().strftime("%Y-%m-%dT%H-%M-%S-%f")
     backup_path = path.with_name(f"{path.name}.backup-{timestamp}")
     shutil.copy2(path, backup_path)
     return backup_path

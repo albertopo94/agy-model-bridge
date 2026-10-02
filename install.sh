@@ -74,14 +74,28 @@ if [ -d "$INSTALL_DIR/.git" ]; then
     else
         echo -e "Updating existing repository in ${INSTALL_DIR}..."
     fi
-    git -C "$INSTALL_DIR" pull --quiet || true
+    if ! git -C "$INSTALL_DIR" pull --quiet; then
+        if [ "$IS_ES" = "1" ]; then
+            echo -e "${RED}Error: Falló la actualización del repositorio en ${INSTALL_DIR}.${RESET}"
+        else
+            echo -e "${RED}Error: Failed to update existing repository in ${INSTALL_DIR}.${RESET}"
+        fi
+        exit 1
+    fi
 else
     if [ "$IS_ES" = "1" ]; then
         echo -e "Descargando en ${INSTALL_DIR}..."
     else
         echo -e "Downloading to ${INSTALL_DIR}..."
     fi
-    git clone --quiet "$REPO_URL" "$INSTALL_DIR"
+    if ! git clone --quiet "$REPO_URL" "$INSTALL_DIR"; then
+        if [ "$IS_ES" = "1" ]; then
+            echo -e "${RED}Error: Falló la clonación del repositorio en ${INSTALL_DIR}.${RESET}"
+        else
+            echo -e "${RED}Error: Failed to clone repository into ${INSTALL_DIR}.${RESET}"
+        fi
+        exit 1
+    fi
 fi
 
 # 4. Create binary launcher wrapper in ~/.local/bin

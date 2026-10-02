@@ -8,6 +8,7 @@ import unittest.mock
 from pathlib import Path
 
 from bridge.setup import (
+    BACKUP_TIMESTAMP_REGEX,
     CLIENT_CONFIGURATORS,
     ClaudeConfigurator,
     ClientConfigurator,
@@ -129,12 +130,43 @@ class TestCreateBackup(unittest.TestCase):
         self.assertNotEqual(target, backup_path)
         self.assertEqual(backup_path.read_text(encoding="utf-8"), 'model = "gemini"\n')
 
-        # Check timestamp pattern: *.backup-YYYY-MM-DDTHH-MM-SS
-        iso_pattern = re.compile(r"^config\.toml\.backup-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}$")
+        # Check timestamp pattern: *.backup-YYYY-MM-DDTHH-MM-SS-ffffff
+        iso_pattern = re.compile(r"^config\.toml\.backup-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{6}$")
         self.assertTrue(
             bool(iso_pattern.match(backup_path.name)),
-            f"Backup name '{backup_path.name}' does not match expected ISO pattern",
+            f"Backup name '{backup_path.name}' does not match expected microsecond pattern",
         )
+        self.assertTrue(bool(BACKUP_TIMESTAMP_REGEX.search(backup_path.name)))
+
+    def test_create_backup_prevents_timestamp_collisions(self):
+        target = self.dir_path / "config.toml"
+        target.write_text('model = "gemini-1"\n', encoding="utf-8")
+        backup1 = create_backup(target)
+        target.write_text('model = "gemini-2"\n', encoding="utf-8")
+        backup2 = create_backup(target)
+
+        self.assertIsNotNone(backup1)
+        self.assertIsNotNone(backup2)
+        self.assertNotEqual(backup1, backup2)
+        self.assertTrue(backup1.exists())
+        self.assertTrue(backup2.exists())
+        self.assertEqual(backup1.read_text(encoding="utf-8"), 'model = "gemini-1"\n')
+        self.assertEqual(backup2.read_text(encoding="utf-8"), 'model = "gemini-2"\n')
+
+    def test_backup_timestamp_regex_matches_legacy_and_microsecond_formats(self):
+        legacy = "settings.json.backup-2026-09-30T12-15-44"
+        micro = "settings.json.backup-2026-09-30T12-15-44-123456"
+        non_matching = "settings.json.backup-invalid"
+
+        m_legacy = BACKUP_TIMESTAMP_REGEX.search(legacy)
+        self.assertIsNotNone(m_legacy)
+        self.assertEqual(m_legacy.group(1), "2026-09-30T12-15-44")
+
+        m_micro = BACKUP_TIMESTAMP_REGEX.search(micro)
+        self.assertIsNotNone(m_micro)
+        self.assertEqual(m_micro.group(1), "2026-09-30T12-15-44-123456")
+
+        self.assertIsNone(BACKUP_TIMESTAMP_REGEX.search(non_matching))
 
 
 class TestListBackups(unittest.TestCase):
@@ -1313,7 +1345,7 @@ class TestUpdateInstallation(unittest.TestCase):
 
         self.assertEqual(result["status"], "updated")
         self.assertTrue(result["restarted_daemon"])
-        self.assertEqual(result["version"], "0.11.0")
+        self.assertEqual(result["version"], "0.12.0")
         mock_run.assert_called_once_with(
             ["git", "-C", str(self.repo_dir), "pull", "--ff-only"],
             capture_output=True,
@@ -1505,7 +1537,7 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main([flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.11.0")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.12.0")
 
     def test_cli_subcommand_version_flags(self):
         from bridge.__main__ import main
@@ -1517,19 +1549,19 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main(["update", flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.11.0")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.12.0")
 
     def test_version_unification(self):
         import bridge
         from pathlib import Path
         import re
 
-        self.assertEqual(bridge.__version__, "0.11.0")
+        self.assertEqual(bridge.__version__, "0.12.0")
         pyproject_path = Path(__file__).resolve().parent.parent / "pyproject.toml"
         pyproject_text = pyproject_path.read_text(encoding="utf-8")
         match = re.search(r'version\s*=\s*"([^"]+)"', pyproject_text)
         self.assertIsNotNone(match)
-        self.assertEqual(match.group(1), "0.11.0")
+        self.assertEqual(match.group(1), "0.12.0")
 
 
 class TestClientConfiguratorRegistry(unittest.TestCase):

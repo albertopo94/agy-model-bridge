@@ -3,11 +3,23 @@
 import base64
 from datetime import datetime, timezone
 import json
+from pathlib import Path
 import re
+import shutil
 import subprocess
 import threading
 import time
 from typing import Any
+
+
+def get_security_binary() -> str:
+    """Returns the absolute path to the macOS security binary or falls back to PATH/name."""
+    if Path("/usr/bin/security").is_file():
+        return "/usr/bin/security"
+    return shutil.which("security") or "security"
+
+
+SECURITY_PATH: str = get_security_binary()
 
 
 class AuthenticationError(Exception):
@@ -58,7 +70,7 @@ class KeychainTokenProvider:
     def _read_keychain(self) -> str:
         """Executes macOS security CLI to read stored generic password."""
         cmd = [
-            "security",
+            SECURITY_PATH,
             "find-generic-password",
             "-s",
             self.service,

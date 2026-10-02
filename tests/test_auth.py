@@ -7,7 +7,12 @@ import time
 from datetime import datetime, timezone, timedelta
 import threading
 
-from bridge.auth import KeychainTokenProvider, AuthenticationError
+from bridge.auth import (
+    KeychainTokenProvider,
+    AuthenticationError,
+    SECURITY_PATH,
+    get_security_binary,
+)
 
 
 class TestKeychainTokenProvider(unittest.TestCase):
@@ -42,7 +47,7 @@ class TestKeychainTokenProvider(unittest.TestCase):
         token = self.provider.get_token()
         self.assertEqual(token, "ya29.test_token_123")
         mock_run.assert_called_once_with(
-            ["security", "find-generic-password", "-s", "gemini", "-a", "antigravity", "-w"],
+            [SECURITY_PATH, "find-generic-password", "-s", "gemini", "-a", "antigravity", "-w"],
             capture_output=True,
             text=True,
             check=False,
@@ -308,6 +313,42 @@ class TestKeychainTokenProvider(unittest.TestCase):
         self.assertEqual(token, "ya29.naive_token")
         expected_dt = datetime(2030, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
         self.assertEqual(expiry, expected_dt.timestamp())
+
+
+
+class TestSecurityBinaryResolution(unittest.TestCase):
+    @patch("bridge.auth.Path.is_file")
+    def test_get_security_binary_when_usr_bin_security_exists(self, mock_is_file):
+        mock_is_file.return_value = True
+        self.assertEqual(get_security_binary(), "/usr/bin/security")
+
+    @patch("bridge.auth.Path.is_file")
+    @patch("bridge.auth.shutil.which")
+    def test_get_security_binary_when_usr_bin_security_missing_uses_which(self, mock_which, mock_is_file):
+        mock_is_file.return_value = False
+        mock_which.return_value = "/opt/homebrew/bin/security"
+        self.assertEqual(get_security_binary(), "/opt/homebrew/bin/security")
+
+    @patch("bridge.auth.Path.is_file")
+    @patch("bridge.auth.shutil.which")
+    def test_get_security_binary_when_both_missing_falls_back_to_name(self, mock_which, mock_is_file):
+        mock_is_file.return_value = False
+        mock_which.return_value = None
+        self.assertEqual(get_security_binary(), "security")
+
+    @patch("bridge.auth.SECURITY_PATH", "/custom/bin/security")
+    @patch("subprocess.run")
+    def test_read_keychain_invokes_resolved_security_path(self, mock_run):
+        provider = KeychainTokenProvider(service="test-service", account="test-account")
+        mock_run.return_value = MagicMock(returncode=0, stdout="test-secret\n", stderr="")
+        provider._read_keychain()
+        mock_run.assert_called_once_with(
+            ["/custom/bin/security", "find-generic-password", "-s", "test-service", "-a", "test-account", "-w"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10.0,
+        )
 
 
 if __name__ == "__main__":

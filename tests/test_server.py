@@ -443,19 +443,63 @@ class TestServerEndpoints(unittest.TestCase):
         self.assertEqual(last_chunk["usage"]["prompt_tokens"], 5)
         self.assertEqual(last_chunk["usage"]["completion_tokens"], 7)
 
-    def test_offline_startup_resilience(self):
+    @patch.dict("os.environ", {}, clear=True)
+    def test_create_server_raises_runtime_error_when_discovery_fails(self):
         failing_client = MagicMock()
         failing_client.load_code_assist.side_effect = Exception("network unavailable")
-        test_server = create_server(
+        with self.assertRaises(RuntimeError) as ctx:
+            create_server(
+                host="127.0.0.1",
+                port=0,
+                client=failing_client,
+                project=None,
+            )
+        self.assertIn("Could not discover Google Cloud project ID", str(ctx.exception))
+        self.assertIn("network unavailable", str(ctx.exception))
+        self.assertIn("Ensure Antigravity is running and authenticated, or specify --project.", str(ctx.exception))
+
+    @patch.dict("os.environ", {}, clear=True)
+    def test_create_server_raises_runtime_error_when_project_empty(self):
+        empty_client = MagicMock()
+        empty_client.load_code_assist.return_value = {"project": ""}
+        with self.assertRaises(RuntimeError) as ctx:
+            create_server(
+                host="127.0.0.1",
+                port=0,
+                client=empty_client,
+                project=None,
+            )
+        self.assertIn("Could not discover Google Cloud project ID", str(ctx.exception))
+        self.assertIn("Ensure Antigravity is running and authenticated, or specify --project.", str(ctx.exception))
+
+    @patch.dict("os.environ", {}, clear=True)
+    def test_create_server_discovers_project_successfully(self):
+        ok_client = MagicMock()
+        ok_client.load_code_assist.return_value = {"project": "discovered-project-123"}
+        server = create_server(
             host="127.0.0.1",
             port=0,
-            client=failing_client,
+            client=ok_client,
             project=None,
         )
         try:
-            self.assertEqual(test_server.RequestHandlerClass.project, "aicode-consumers")
+            self.assertEqual(server.RequestHandlerClass.project, "discovered-project-123")
         finally:
-            test_server.server_close()
+            server.server_close()
+
+    def test_create_server_explicit_project_bypasses_discovery(self):
+        client_mock = MagicMock()
+        server = create_server(
+            host="127.0.0.1",
+            port=0,
+            client=client_mock,
+            project="my-override",
+        )
+        try:
+            self.assertEqual(server.RequestHandlerClass.project, "my-override")
+            client_mock.load_code_assist.assert_not_called()
+        finally:
+            server.server_close()
 
     def test_streaming_broken_pipe_suppressed(self):
         handler = self.server.RequestHandlerClass.__new__(self.server.RequestHandlerClass)

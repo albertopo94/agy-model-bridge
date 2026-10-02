@@ -898,9 +898,18 @@ def create_server(
         if not project:
             try:
                 discovery = client.load_code_assist()
-                project = discovery.get("project") or "aicode-consumers"
-            except Exception:
-                project = "aicode-consumers"
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Could not discover Google Cloud project ID: {exc}. "
+                    "Ensure Antigravity is running and authenticated, or specify --project."
+                ) from exc
+            discovered = discovery.get("project")
+            if not discovered:
+                raise RuntimeError(
+                    "Could not discover Google Cloud project ID. "
+                    "Ensure Antigravity is running and authenticated, or specify --project."
+                )
+            project = discovered
 
     class ConfiguredHandler(OpenAIRequestHandler):
         pass

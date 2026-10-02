@@ -21,7 +21,7 @@ Zero-dependency, pure Python 3 local AI gateway that bridges the Google Cloud Co
 
 ## Requirements
 
-- **Operating System**: macOS (Apple Silicon or Intel)
+- **Operating System**: macOS (Apple Silicon or Intel). *Automatic Keychain OAuth extraction is macOS-native; Linux/POSIX systems can run the bridge by passing `--project` and managing credentials.*
 - **Python**: 3.10+
 - **Google Antigravity**: Installed and logged in (`agy login` or open Antigravity application).
 
@@ -329,7 +329,7 @@ Execute the complete test suite:
 python3 -m unittest discover -s tests -v
 ```
 
-All 568 tests run in ~1 second with zero external dependencies and zero network access.
+All 580 tests run in ~1 second with zero external dependencies and zero network access.
 
 ### End-to-End Smoke Test
 
