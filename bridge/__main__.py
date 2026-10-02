@@ -21,12 +21,14 @@ from bridge.setup import (
     restore_hermes,
     restore_openclaw,
     restore_opencode,
+    restore_pi,
     setup_claude,
     setup_codex,
     setup_cursor,
     setup_hermes,
     setup_openclaw,
     setup_opencode,
+    setup_pi,
     uninstall,
     update_installation,
 )
@@ -601,6 +603,58 @@ def main(argv: list[str] | None = None) -> int:
         print(t("setup_cursor_step4", models=models_str))
         return 0
 
+    if argv and argv[0] == "setup-pi":
+        parser = argparse.ArgumentParser(
+            prog=f"{prog_base} setup-pi",
+            description="Configure Pi for agy-model-bridge gateway.",
+        )
+        parser.add_argument(
+            "--port",
+            type=int,
+            default=None,
+            help="Gateway port (default: 24980)",
+        )
+        parser.add_argument(
+            "--model",
+            type=str,
+            default="gemini-3.8-flash-high",
+            help="Default model identifier (default: gemini-3.8-flash-high)",
+        )
+        parser.add_argument(
+            "--url",
+            "--base-url",
+            dest="base_url",
+            type=str,
+            default=None,
+            help="Gateway base URL override (with /v1)",
+        )
+        parser.add_argument(
+            "--set-default",
+            action="store_true",
+            help="Set agy as defaultProvider and model as defaultModel in settings.json",
+        )
+        parser.add_argument(
+            "--path",
+            type=Path,
+            default=None,
+            help=f"Path to Pi models.json (default: {get_configurator('pi').default_config_path})",
+        )
+        parser.add_argument("--lang", type=str, default=None, help=t("cli_help_lang"))
+        args = parser.parse_args(argv[1:])
+        target = setup_pi(
+            config_path=args.path,
+            base_url=args.base_url,
+            port=args.port,
+            model=args.model,
+            set_default=args.set_default,
+        )
+        if getattr(target, "backup_path", None):
+            print(t("setup_backup_label", path=target.backup_path))
+        print(t("setup_pi_success", target=target))
+        print(t("setup_pi_auto_read"))
+        print(t("setup_pi_run_hint"))
+        return 0
+
     if argv and argv[0] == "restore-claude":
         return _handle_restore_cli(
             client_name="Claude Code",
@@ -639,6 +693,14 @@ def main(argv: list[str] | None = None) -> int:
             default_target=get_configurator("openclaw").get_config_path(),
             argv=argv[1:],
             prog_name=f"{prog_base} restore-openclaw",
+        )
+
+    if argv and argv[0] == "restore-pi":
+        return _handle_restore_cli(
+            client_name="Pi",
+            default_target=get_configurator("pi").get_config_path(),
+            argv=argv[1:],
+            prog_name=f"{prog_base} restore-pi",
         )
 
     if argv and argv[0] == "uninstall":
@@ -700,6 +762,8 @@ def main(argv: list[str] | None = None) -> int:
             print(t("uninstall_opencode_restored"))
         if res.get("openclaw_restored"):
             print(t("uninstall_openclaw_restored"))
+        if res.get("pi_restored"):
+            print(t("uninstall_pi_restored"))
         if res.get("backups_purged"):
             print(t("uninstall_backups_purged"))
         return 0

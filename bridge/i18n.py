@@ -133,6 +133,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "setup_openclaw_success": "OpenClaw configured successfully at {target}\n",
         "setup_openclaw_auto_read": "OpenClaw will read this configuration automatically.",
         "setup_openclaw_run_hint": "Run 'openclaw gateway' or 'openclaw agent' to start using it.",
+        # Pi
+        "setup_pi_success": "Pi configured successfully at {target}\n",
+        "setup_pi_auto_read": "Pi will read this configuration automatically.",
+        "setup_pi_run_hint": "Run 'pi' and switch models with /model (or run 'pi --model agy/gemini-3.8-flash-high').",
         # Cursor
         "setup_cursor_title": "=== Cursor Configuration Guide ===",
         "setup_cursor_notice": "Notice: Cursor routes AI requests through its cloud servers. A public HTTPS URL (via Cloudflare Tunnel, ngrok, or Tailscale) is required if Cursor cannot reach localhost directly.",
@@ -161,6 +165,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "uninstall_hermes_restored": "  - Hermes Agent configuration restored.",
         "uninstall_opencode_restored": "  - OpenCode configuration restored.",
         "uninstall_openclaw_restored": "  - OpenClaw configuration restored.",
+        "uninstall_pi_restored": "  - Pi configuration restored.",
         "uninstall_backups_purged": "  - Backups history purged.",
         # Update
         "update_success": "✔ Repository updated to version v{ver}.",
@@ -216,6 +221,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "setup_openclaw_success": "OpenClaw configurado correctamente en {target}\n",
         "setup_openclaw_auto_read": "OpenClaw leerá esta configuración automáticamente.",
         "setup_openclaw_run_hint": "Ejecutá 'openclaw gateway' o 'openclaw agent' para empezar a usarlo.",
+        # Pi
+        "setup_pi_success": "Pi configurado correctamente en {target}\n",
+        "setup_pi_auto_read": "Pi leerá esta configuración automáticamente.",
+        "setup_pi_run_hint": "Ejecutá 'pi' y cambiá de modelo con /model (o ejecutá 'pi --model agy/gemini-3.8-flash-high').",
         # Cursor
         "setup_cursor_title": "=== Guía de Configuración para Cursor ===",
         "setup_cursor_notice": "Aviso: Cursor enruta las peticiones de IA a través de sus servidores en la nube. Se requiere una URL pública HTTPS (vía Cloudflare Tunnel, ngrok o Tailscale) si Cursor no puede acceder directamente a localhost.",
@@ -244,6 +253,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "uninstall_hermes_restored": "  - Configuración de Hermes Agent restaurada.",
         "uninstall_opencode_restored": "  - Configuración de OpenCode restaurada.",
         "uninstall_openclaw_restored": "  - Configuración de OpenClaw restaurada.",
+        "uninstall_pi_restored": "  - Configuración de Pi restaurada.",
         "uninstall_backups_purged": "  - Historial de backups purgado.",
         # Update
         "update_success": "✔ Repositorio actualizado a la versión v{ver}.",

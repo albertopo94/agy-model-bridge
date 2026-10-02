@@ -63,6 +63,7 @@ class TestDashboardRendering(unittest.TestCase):
         self.assertIn("agy-bridge restore-hermes", html)
         self.assertIn("agy-bridge restore-opencode", html)
         self.assertIn("agy-bridge restore-openclaw", html)
+        self.assertIn("agy-bridge restore-pi", html)
 
         # Copy buttons and pre IDs for restore
         self.assertIn('id="claude-restore"', html)
@@ -75,6 +76,8 @@ class TestDashboardRendering(unittest.TestCase):
         self.assertIn("copySnippet(this, 'opencode-restore')", html)
         self.assertIn('id="openclaw-restore"', html)
         self.assertIn("copySnippet(this, 'openclaw-restore')", html)
+        self.assertIn('id="pi-restore"', html)
+        self.assertIn("copySnippet(this, 'pi-restore')", html)
 
     def test_render_dashboard_vercel_styling_and_responsive_grid(self):
         auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
@@ -134,6 +137,7 @@ class TestDashboardRendering(unittest.TestCase):
         self.assertIn("Hermes Agent", html)
         self.assertIn("OpenCode", html)
         self.assertIn("OpenClaw", html)
+        self.assertIn("Pi", html)
         self.assertIn("FreeLLMAPI", html)
 
         # Two-tier headings
@@ -150,6 +154,7 @@ class TestDashboardRendering(unittest.TestCase):
         self.assertIn("agy-bridge setup-hermes", html)
         self.assertIn("agy-bridge setup-opencode", html)
         self.assertIn("agy-bridge setup-openclaw", html)
+        self.assertIn("agy-bridge setup-pi", html)
         self.assertNotIn("ANTHROPIC_CUSTOM_MODEL_OPTION", html)
         self.assertNotIn("mkdir -p ~/.codex", html)
 
@@ -160,6 +165,7 @@ class TestDashboardRendering(unittest.TestCase):
         self.assertIn("codex-linear-gradient", html)
         self.assertIn('viewBox="0 0 270.35 270.35"', html)
         self.assertIn('viewBox="0 0 24 24"', html)
+        self.assertIn('viewBox="0 0 470 470"', html)
         self.assertIn('viewBox="0 0 64 64"', html)
         self.assertNotIn("npx freellmapi setup", html)
         self.assertNotIn('id="freellmapi-auto"', html)
@@ -197,7 +203,7 @@ class TestDashboardRendering(unittest.TestCase):
         auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
         html = render_dashboard("127.0.0.1", 24980, auth_status, models_count=20)
 
-        # 18 independent snippet IDs and corresponding copy button calls
+        # 21 independent snippet IDs and corresponding copy button calls
         expected_ids = [
             "claude-auto", "claude-manual", "claude-restore",
             "codex-auto", "codex-manual", "codex-restore",
@@ -205,6 +211,7 @@ class TestDashboardRendering(unittest.TestCase):
             "opencode-auto", "opencode-manual", "opencode-restore",
             "openclaw-auto", "openclaw-manual", "openclaw-restore",
             "cursor-auto", "cursor-manual",
+            "pi-auto", "pi-manual", "pi-restore",
             "freellmapi-manual",
         ]
         for snippet_id in expected_ids:
@@ -226,6 +233,7 @@ class TestDashboardRendering(unittest.TestCase):
         self.assertIn("https://hermes-agent.nousresearch.com", html)
         self.assertIn("https://opencode.ai/docs", html)
         self.assertIn("https://docs.openclaw.ai/gateway/config-tools/custom-providers", html)
+        self.assertIn("https://pi.dev/docs/latest", html)
         self.assertIn("https://github.com/tashfeenahmed/freellmapi", html)
 
         # Robust clipboard JavaScript
@@ -238,7 +246,7 @@ class TestDashboardRendering(unittest.TestCase):
 
     def test_client_cards_schema(self):
         from bridge.dashboard import CLIENT_CARDS
-        self.assertEqual(len(CLIENT_CARDS), 7)
+        self.assertEqual(len(CLIENT_CARDS), 8)
         card_titles = [c["title"] for c in CLIENT_CARDS]
         self.assertIn("Claude Code", card_titles)
         self.assertIn("Codex CLI", card_titles)
@@ -246,7 +254,11 @@ class TestDashboardRendering(unittest.TestCase):
         self.assertIn("OpenCode", card_titles)
         self.assertIn("OpenClaw", card_titles)
         self.assertIn("Cursor", card_titles)
+        self.assertIn("Pi", card_titles)
         self.assertIn("FreeLLMAPI", card_titles)
+
+        card_ids = [c["id"] for c in CLIENT_CARDS]
+        self.assertEqual(card_ids, ["claude", "codex", "hermes", "opencode", "openclaw", "cursor", "pi", "freellmapi"])
 
         by_id = {c["id"]: c for c in CLIENT_CARDS}
         self.assertEqual(
@@ -373,6 +385,26 @@ class TestDashboardRendering(unittest.TestCase):
             "BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY=local-bridge",
         )
         self.assertEqual(by_id["cursor"]["docs_url"], "https://docs.cursor.com")
+
+        self.assertIn("pi", by_id)
+        self.assertIn('viewBox="0 0 470 470"', by_id["pi"].get("icon_svg", ""))
+        self.assertEqual(
+            by_id["pi"]["auto_cmd"]("127.0.0.1:24980"),
+            "agy-bridge setup-pi",
+        )
+        self.assertEqual(
+            by_id["pi"]["auto_cmd"]("127.0.0.1:9090"),
+            "agy-bridge setup-pi --port 9090",
+        )
+        self.assertEqual(
+            by_id["pi"]["restore_cmd"]("127.0.0.1:24980"),
+            "agy-bridge restore-pi",
+        )
+        self.assertEqual(
+            by_id["pi"]["manual_snippet"]("127.0.0.1:24980"),
+            "BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY=local-bridge",
+        )
+        self.assertEqual(by_id["pi"]["docs_url"], "https://pi.dev/docs/latest")
 
         self.assertNotIn("auto_cmd", by_id["freellmapi"])
         self.assertIn("icon_svg", by_id["freellmapi"])

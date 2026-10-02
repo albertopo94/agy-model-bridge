@@ -165,6 +165,35 @@ class TestTranslate(unittest.TestCase):
         self.assertIn("local-bridge", step3_en)
         self.assertIn("local-bridge", step3_es)
 
+    def test_setup_pi_translations(self):
+        success_en = t("setup_pi_success", lang="en", target="/home/user/.pi/agent/models.json")
+        success_es = t("setup_pi_success", lang="es", target="/home/user/.pi/agent/models.json")
+        self.assertIn("Pi", success_en)
+        self.assertIn("Pi", success_es)
+        self.assertIn("/home/user/.pi/agent/models.json", success_en)
+        self.assertIn("/home/user/.pi/agent/models.json", success_es)
+        self.assertIn("successfully", success_en)
+        self.assertIn("correctamente", success_es)
+
+        auto_en = t("setup_pi_auto_read", lang="en")
+        auto_es = t("setup_pi_auto_read", lang="es")
+        self.assertIn("automatically", auto_en)
+        self.assertIn("automáticamente", auto_es)
+
+        hint_en = t("setup_pi_run_hint", lang="en")
+        hint_es = t("setup_pi_run_hint", lang="es")
+        self.assertIn("/model", hint_en)
+        self.assertIn("/model", hint_es)
+        self.assertIn("pi --model agy/gemini-3.8-flash-high", hint_en)
+        self.assertIn("pi --model agy/gemini-3.8-flash-high", hint_es)
+
+        uninst_en = t("uninstall_pi_restored", lang="en")
+        uninst_es = t("uninstall_pi_restored", lang="es")
+        self.assertIn("Pi", uninst_en)
+        self.assertIn("Pi", uninst_es)
+        self.assertIn("restored", uninst_en)
+        self.assertIn("restaurada", uninst_es)
+
 
 class TestIsYes(unittest.TestCase):
     def test_is_yes_spanish_affirmative(self):
@@ -232,6 +261,10 @@ class TestTranslationsParity(unittest.TestCase):
             "setup_openclaw_success",
             "setup_openclaw_auto_read",
             "setup_openclaw_run_hint",
+            # Pi
+            "setup_pi_success",
+            "setup_pi_auto_read",
+            "setup_pi_run_hint",
             # Cursor
             "setup_cursor_title",
             "setup_cursor_notice",
@@ -260,6 +293,7 @@ class TestTranslationsParity(unittest.TestCase):
             "uninstall_hermes_restored",
             "uninstall_opencode_restored",
             "uninstall_openclaw_restored",
+            "uninstall_pi_restored",
             "uninstall_backups_purged",
             # Update
             "update_success",

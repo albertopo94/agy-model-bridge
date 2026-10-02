@@ -16,6 +16,7 @@ from bridge.setup import (
     OpenClawConfigurator,
     OpenCodeConfigurator,
     CursorConfigurator,
+    PiConfigurator,
     atomic_write_file,
     build_hermes_block,
     create_backup,
@@ -30,12 +31,14 @@ from bridge.setup import (
     restore_hermes,
     restore_openclaw,
     restore_opencode,
+    restore_pi,
     setup_claude,
     setup_codex,
     setup_cursor,
     setup_hermes,
     setup_openclaw,
     setup_opencode,
+    setup_pi,
     uninstall,
     update_installation,
 )
@@ -1306,7 +1309,7 @@ class TestUpdateInstallation(unittest.TestCase):
 
         self.assertEqual(result["status"], "updated")
         self.assertTrue(result["restarted_daemon"])
-        self.assertEqual(result["version"], "0.9.0")
+        self.assertEqual(result["version"], "0.10.0")
         mock_run.assert_called_once_with(
             ["git", "-C", str(self.repo_dir), "pull", "--ff-only"],
             capture_output=True,
@@ -1498,7 +1501,7 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main([flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.9.0")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.10.0")
 
     def test_cli_subcommand_version_flags(self):
         from bridge.__main__ import main
@@ -1510,19 +1513,19 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main(["update", flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.9.0")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.10.0")
 
     def test_version_unification(self):
         import bridge
         from pathlib import Path
         import re
 
-        self.assertEqual(bridge.__version__, "0.9.0")
+        self.assertEqual(bridge.__version__, "0.10.0")
         pyproject_path = Path(__file__).resolve().parent.parent / "pyproject.toml"
         pyproject_text = pyproject_path.read_text(encoding="utf-8")
         match = re.search(r'version\s*=\s*"([^"]+)"', pyproject_text)
         self.assertIsNotNone(match)
-        self.assertEqual(match.group(1), "0.9.0")
+        self.assertEqual(match.group(1), "0.10.0")
 
 
 class TestClientConfiguratorRegistry(unittest.TestCase):
@@ -1557,6 +1560,11 @@ class TestClientConfiguratorRegistry(unittest.TestCase):
         self.assertEqual(cursor_cfg.name, "cursor")
         self.assertEqual(cursor_cfg.display_name, "Cursor")
 
+        pi_cfg = get_configurator("pi")
+        self.assertIsInstance(pi_cfg, PiConfigurator)
+        self.assertEqual(pi_cfg.name, "pi")
+        self.assertEqual(pi_cfg.display_name, "Pi")
+
     def test_get_configurator_unknown_raises_key_error(self):
         with self.assertRaises(KeyError):
             get_configurator("unknown_client")
@@ -1570,6 +1578,7 @@ class TestClientConfiguratorRegistry(unittest.TestCase):
         self.assertIn("opencode", names)
         self.assertIn("openclaw", names)
         self.assertIn("cursor", names)
+        self.assertIn("pi", names)
 
     def test_register_custom_configurator(self):
         class DummyConfigurator(ClientConfigurator):
@@ -2971,6 +2980,430 @@ class TestUninstallCursor(unittest.TestCase):
         )
         self.assertIn("cursor", res["restored_clients"])
         self.assertFalse(res["restored_clients"]["cursor"])
+
+
+class TestPiConfigurator(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.dir_path = Path(self.temp_dir.name)
+        self.configurator = PiConfigurator()
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_properties(self):
+        self.assertEqual(self.configurator.name, "pi")
+        self.assertEqual(self.configurator.display_name, "Pi")
+        self.assertIsInstance(self.configurator.default_config_path, Path)
+        self.assertEqual(
+            self.configurator.default_config_path,
+            Path.home() / ".pi" / "agent" / "models.json",
+        )
+
+    def test_default_config_path_with_env_var(self):
+        custom_dir = str(self.dir_path / "custom_pi")
+        with unittest.mock.patch.dict(os.environ, {"PI_CODING_AGENT_DIR": custom_dir}):
+            self.assertEqual(
+                self.configurator.default_config_path,
+                Path(custom_dir) / "models.json",
+            )
+
+    def test_is_configured_non_existent(self):
+        target = self.dir_path / "models.json"
+        self.assertFalse(self.configurator.is_configured(target))
+
+    def test_is_configured_directory(self):
+        target = self.dir_path / "models.json"
+        target.mkdir()
+        self.assertFalse(self.configurator.is_configured(target))
+
+    def test_is_configured_empty_file(self):
+        target = self.dir_path / "models.json"
+        target.write_text("", encoding="utf-8")
+        self.assertFalse(self.configurator.is_configured(target))
+
+    def test_is_configured_no_agy(self):
+        target = self.dir_path / "models.json"
+        target.write_text(json.dumps({"providers": {"openai": {}}}), encoding="utf-8")
+        self.assertFalse(self.configurator.is_configured(target))
+
+    def test_is_configured_with_providers_agy(self):
+        target = self.dir_path / "models.json"
+        target.write_text(json.dumps({"providers": {"agy": {"baseUrl": "http://127.0.0.1:24980/v1"}}}), encoding="utf-8")
+        self.assertTrue(self.configurator.is_configured(target))
+
+    def test_is_configured_with_24980_in_content(self):
+        target = self.dir_path / "models.json"
+        target.write_text('{"customUrl": "http://127.0.0.1:24980/v1"}', encoding="utf-8")
+        self.assertTrue(self.configurator.is_configured(target))
+
+    def test_is_configured_handles_json_comments(self):
+        target = self.dir_path / "models.json"
+        content = """// Comment header
+        {
+            // Providers list
+            "providers": {
+                "agy": {
+                    "name": "AGY Bridge"
+                }
+            }
+        }"""
+        target.write_text(content, encoding="utf-8")
+        self.assertTrue(self.configurator.is_configured(target))
+
+    def test_setup_default_models_json(self):
+        target = self.dir_path / "agent" / "models.json"
+        res = self.configurator.setup(config_path=target)
+
+        self.assertTrue(target.exists())
+        file_stat = target.stat()
+        self.assertEqual(stat.S_IMODE(file_stat.st_mode), 0o600)
+        self.assertEqual(res, target)
+        self.assertIsNone(res.backup_path)
+
+        data = json.loads(target.read_text(encoding="utf-8"))
+        self.assertIn("providers", data)
+        self.assertIn("agy", data["providers"])
+
+        agy = data["providers"]["agy"]
+        self.assertEqual(agy["name"], "AGY Bridge")
+        self.assertEqual(agy["baseUrl"], "http://127.0.0.1:24980/v1")
+        self.assertEqual(agy["api"], "openai-completions")
+        self.assertEqual(agy["apiKey"], "local-bridge")
+        self.assertEqual(agy["headers"], {"User-Agent": "pi-coding-agent"})
+
+        models = agy["models"]
+        self.assertEqual(len(models), 3)
+        expected_ids = ["gemini-3.8-flash-high", "gemini-2.5-pro", "gemini-2.5-flash"]
+        self.assertEqual([m["id"] for m in models], expected_ids)
+        for m in models:
+            self.assertFalse(m["reasoning"])
+            self.assertEqual(m["input"], ["text"])
+            self.assertEqual(m["contextWindow"], 1048576)
+            self.assertEqual(m["maxTokens"], 65536)
+
+    def test_setup_with_port(self):
+        target = self.dir_path / "models.json"
+        self.configurator.setup(config_path=target, port=9090)
+        data = json.loads(target.read_text(encoding="utf-8"))
+        self.assertEqual(data["providers"]["agy"]["baseUrl"], "http://127.0.0.1:9090/v1")
+
+    def test_setup_with_base_url(self):
+        target = self.dir_path / "models.json"
+        self.configurator.setup(config_path=target, base_url="http://custom.gateway:8080")
+        data = json.loads(target.read_text(encoding="utf-8"))
+        self.assertEqual(data["providers"]["agy"]["baseUrl"], "http://custom.gateway:8080/v1")
+
+        self.configurator.setup(config_path=target, base_url="http://custom.gateway:8080/v1/")
+        data = json.loads(target.read_text(encoding="utf-8"))
+        self.assertEqual(data["providers"]["agy"]["baseUrl"], "http://custom.gateway:8080/v1")
+
+    def test_setup_with_auth_token(self):
+        target = self.dir_path / "models.json"
+        self.configurator.setup(config_path=target, auth_token="my-secret-token")
+        data = json.loads(target.read_text(encoding="utf-8"))
+        self.assertEqual(data["providers"]["agy"]["apiKey"], "my-secret-token")
+
+    def test_setup_preserves_existing_providers(self):
+        target = self.dir_path / "models.json"
+        existing = {
+            "providers": {
+                "anthropic": {"name": "Anthropic", "baseUrl": "https://api.anthropic.com"}
+            },
+            "customSetting": True,
+        }
+        target.write_text(json.dumps(existing), encoding="utf-8")
+
+        res = self.configurator.setup(config_path=target)
+        self.assertIsNotNone(res.backup_path)
+        self.assertTrue(res.backup_path.exists())
+
+        data = json.loads(target.read_text(encoding="utf-8"))
+        self.assertIn("anthropic", data["providers"])
+        self.assertEqual(data["providers"]["anthropic"]["name"], "Anthropic")
+        self.assertEqual(data["customSetting"], True)
+        self.assertIn("agy", data["providers"])
+
+    def test_setup_handles_json_with_comments(self):
+        target = self.dir_path / "models.json"
+        raw_jsonc = """// Pi models configuration
+        {
+            /* Other provider */
+            "providers": {
+                "ollama": {
+                    "baseUrl": "http://localhost:11434"
+                }
+            }
+        }"""
+        target.write_text(raw_jsonc, encoding="utf-8")
+
+        self.configurator.setup(config_path=target)
+        data = json.loads(target.read_text(encoding="utf-8"))
+        self.assertIn("ollama", data["providers"])
+        self.assertIn("agy", data["providers"])
+
+    def test_setup_handles_corrupt_existing_json(self):
+        target = self.dir_path / "models.json"
+        target.write_text("NOT_VALID_JSON{{{", encoding="utf-8")
+
+        res = self.configurator.setup(config_path=target)
+        self.assertIsNotNone(res.backup_path)
+        data = json.loads(target.read_text(encoding="utf-8"))
+        self.assertIn("agy", data["providers"])
+
+    def test_setup_with_set_default(self):
+        target = self.dir_path / "agent" / "models.json"
+        settings_target = self.dir_path / "agent" / "settings.json"
+        existing_settings = {"theme": "monokai"}
+        settings_target.parent.mkdir(parents=True, exist_ok=True)
+        settings_target.write_text(json.dumps(existing_settings), encoding="utf-8")
+
+        self.configurator.setup(
+            config_path=target,
+            model="gemini-2.5-pro",
+            set_default=True,
+        )
+
+        self.assertTrue(settings_target.exists())
+        self.assertEqual(stat.S_IMODE(settings_target.stat().st_mode), 0o600)
+        settings_data = json.loads(settings_target.read_text(encoding="utf-8"))
+        self.assertEqual(settings_data["theme"], "monokai")
+        self.assertEqual(settings_data["defaultProvider"], "agy")
+        self.assertEqual(settings_data["defaultModel"], "gemini-2.5-pro")
+
+        settings_backups = list(settings_target.parent.glob("settings.json.backup-*"))
+        self.assertTrue(len(settings_backups) > 0)
+
+    def test_restore_with_backup_path(self):
+        target = self.dir_path / "models.json"
+        target.write_text(json.dumps({"providers": {"agy": {}}}), encoding="utf-8")
+
+        backup = self.dir_path / "models.json.backup-custom"
+        backup.write_text(json.dumps({"providers": {"original": {}}}), encoding="utf-8")
+
+        success = self.configurator.restore(config_path=target, backup_path=backup)
+        self.assertTrue(success)
+        restored_data = json.loads(target.read_text(encoding="utf-8"))
+        self.assertIn("original", restored_data["providers"])
+        self.assertNotIn("agy", restored_data["providers"])
+
+    def test_restore_from_latest_backup(self):
+        target = self.dir_path / "models.json"
+        target.write_text(json.dumps({"providers": {"agy": {}}}), encoding="utf-8")
+
+        b1 = self.dir_path / "models.json.backup-1"
+        b1.write_text(json.dumps({"version": 1}), encoding="utf-8")
+        os.utime(b1, (1000.0, 1000.0))
+
+        b2 = self.dir_path / "models.json.backup-2"
+        b2.write_text(json.dumps({"version": 2}), encoding="utf-8")
+        os.utime(b2, (2000.0, 2000.0))
+
+        success = self.configurator.restore(config_path=target)
+        self.assertTrue(success)
+        restored_data = json.loads(target.read_text(encoding="utf-8"))
+        self.assertEqual(restored_data.get("version"), 2)
+
+    def test_restore_without_backups_surgically_removes_agy(self):
+        target = self.dir_path / "models.json"
+        target.write_text(
+            json.dumps({
+                "providers": {
+                    "agy": {"name": "AGY Bridge"},
+                    "openai": {"name": "OpenAI"},
+                },
+                "other": 123,
+            }),
+            encoding="utf-8",
+        )
+
+        success = self.configurator.restore(config_path=target)
+        self.assertTrue(success)
+        cleaned = json.loads(target.read_text(encoding="utf-8"))
+        self.assertNotIn("agy", cleaned.get("providers", {}))
+        self.assertIn("openai", cleaned.get("providers", {}))
+        self.assertEqual(cleaned.get("other"), 123)
+
+    def test_restore_non_existent_returns_false(self):
+        target = self.dir_path / "non_existent.json"
+        success = self.configurator.restore(config_path=target)
+        self.assertFalse(success)
+
+    def test_describe_backup_pi(self):
+        p_agy = self.dir_path / "models.json.backup-2026-01-01"
+        p_agy.write_text(json.dumps({"providers": {"agy": {}}}), encoding="utf-8")
+        self.assertEqual(describe_backup(p_agy), "AGY Bridge")
+
+        p_orig = self.dir_path / "models.json.backup-2026-01-02"
+        p_orig.write_text(json.dumps({"providers": {"ollama": {}}}), encoding="utf-8")
+        self.assertEqual(describe_backup(p_orig), "Pi Original")
+
+    def test_setup_pi_and_restore_pi_standalone(self):
+        target = self.dir_path / "models.json"
+        res = setup_pi(config_path=target, port=9090)
+        self.assertEqual(res, target)
+        data = json.loads(target.read_text(encoding="utf-8"))
+        self.assertIn("agy", data["providers"])
+
+        restored = restore_pi(config_path=target)
+        self.assertTrue(restored)
+
+
+class TestCLIPi(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.dir_path = Path(self.temp_dir.name)
+        from bridge.i18n import set_locale
+        set_locale(None)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+        from bridge.i18n import set_locale
+        set_locale(None)
+
+    def test_cli_setup_pi_outputs_backup_and_guidance(self):
+        import io
+        from bridge.__main__ import main
+        target = self.dir_path / "models.json"
+        target.write_text(json.dumps({"providers": {}}), encoding="utf-8")
+
+        out = io.StringIO()
+        with unittest.mock.patch("sys.stdout", out):
+            exit_code = main(["setup-pi", "--path", str(target)])
+        self.assertEqual(exit_code, 0)
+        output = out.getvalue()
+        self.assertIn("Backup: ", output)
+        self.assertIn(f"Pi configured successfully at {target}", output)
+        self.assertIn("Pi will read this configuration automatically.", output)
+        self.assertTrue(
+            "Run 'pi' and switch models with /model" in output
+            or "Ejecutá 'pi' y cambiá de modelo con /model" in output
+        )
+        self.assertIn("pi --model agy/gemini-3.8-flash-high", output)
+
+    def test_cli_setup_pi_flags(self):
+        from bridge.__main__ import main
+        target = self.dir_path / "models.json"
+        settings_target = self.dir_path / "settings.json"
+
+        exit_code = main([
+            "setup-pi",
+            "--path", str(target),
+            "--port", "9090",
+            "--model", "gemini-2.5-pro",
+            "--set-default",
+        ])
+        self.assertEqual(exit_code, 0)
+        data = json.loads(target.read_text(encoding="utf-8"))
+        self.assertEqual(data["providers"]["agy"]["baseUrl"], "http://127.0.0.1:9090/v1")
+        self.assertTrue(settings_target.exists())
+        settings_data = json.loads(settings_target.read_text(encoding="utf-8"))
+        self.assertEqual(settings_data["defaultProvider"], "agy")
+        self.assertEqual(settings_data["defaultModel"], "gemini-2.5-pro")
+
+    def test_cli_restore_pi_latest(self):
+        import io
+        from bridge.__main__ import main
+        target = self.dir_path / "models.json"
+        target.write_text(json.dumps({"version": "bridge"}), encoding="utf-8")
+
+        b1 = self.dir_path / "models.json.backup-1"
+        b1.write_text(json.dumps({"version": "latest_backup"}), encoding="utf-8")
+
+        out = io.StringIO()
+        with unittest.mock.patch("sys.stdout", out):
+            exit_code = main(["restore-pi", "--path", str(target), "--latest"])
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(json.loads(target.read_text(encoding="utf-8")), {"version": "latest_backup"})
+        self.assertIn("Pi", out.getvalue())
+
+    def test_cli_restore_pi_backup_flag(self):
+        from bridge.__main__ import main
+        target = self.dir_path / "models.json"
+        target.write_text(json.dumps({"version": "bridge"}), encoding="utf-8")
+
+        b1 = self.dir_path / "models.json.backup-1"
+        b1.write_text(json.dumps({"version": "specific"}), encoding="utf-8")
+
+        exit_code = main(["restore-pi", "--path", str(target), "--backup", str(b1)])
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(json.loads(target.read_text(encoding="utf-8")), {"version": "specific"})
+
+    def test_cli_restore_pi_no_backups_returns_1(self):
+        import io
+        from bridge.__main__ import main
+        target = self.dir_path / "models.json"
+        out = io.StringIO()
+        with unittest.mock.patch("sys.stdout", out):
+            exit_code = main(["restore-pi", "--path", str(target)])
+        self.assertEqual(exit_code, 1)
+
+
+class TestUninstallPi(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp_dir.name)
+        self.daemon_dir = self.root / ".agy-bridge"
+        self.daemon_dir.mkdir(parents=True, exist_ok=True)
+        self.bin_dir = self.root / ".local" / "bin"
+        self.bin_dir.mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_uninstall_discovers_and_cleans_pi(self):
+        pi_config = self.root / ".pi" / "agent" / "models.json"
+        pi_config.parent.mkdir(parents=True, exist_ok=True)
+        pi_config.write_text(
+            json.dumps({
+                "providers": {
+                    "agy": {"baseUrl": "http://127.0.0.1:24980/v1"},
+                    "other": {"baseUrl": "http://other"},
+                }
+            }),
+            encoding="utf-8",
+        )
+
+        res = uninstall(
+            daemon_dir=self.daemon_dir,
+            bin_dir=self.bin_dir,
+            custom_config_paths={"pi": pi_config},
+            restore_configs=True,
+            purge_backups=False,
+        )
+
+        self.assertIn("pi", res["restored_clients"])
+        self.assertTrue(res["restored_clients"]["pi"])
+        self.assertTrue(res.get("pi_restored", False))
+        cleaned = json.loads(pi_config.read_text(encoding="utf-8"))
+        self.assertNotIn("agy", cleaned.get("providers", {}))
+        self.assertIn("other", cleaned.get("providers", {}))
+
+    def test_uninstall_kwarg_pi_config_path(self):
+        pi_config = self.root / ".pi" / "agent" / "models.json"
+        pi_config.parent.mkdir(parents=True, exist_ok=True)
+        pi_config.write_text(
+            json.dumps({
+                "providers": {
+                    "agy": {"baseUrl": "http://127.0.0.1:24980/v1"},
+                }
+            }),
+            encoding="utf-8",
+        )
+
+        res = uninstall(
+            daemon_dir=self.daemon_dir,
+            bin_dir=self.bin_dir,
+            pi_config_path=pi_config,
+            restore_configs=True,
+            purge_backups=False,
+        )
+
+        self.assertIn("pi", res["restored_clients"])
+        self.assertTrue(res["restored_clients"]["pi"])
+        self.assertTrue(res.get("pi_restored", False))
+        cleaned = json.loads(pi_config.read_text(encoding="utf-8"))
+        self.assertNotIn("agy", cleaned.get("providers", {}))
 
 
 if __name__ == "__main__":

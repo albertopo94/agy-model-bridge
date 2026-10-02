@@ -148,6 +148,14 @@ CURSOR_ICON_SVG = (
     '</svg>'
 )
 
+PI_ICON_SVG = (
+    '<svg class="card-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 470 470" width="24" height="24" aria-hidden="true">'
+    '<path fill="#F09082" d="M0 0H352.07V234.71H234.71V117.36H0Z"/>'
+    '<path fill="#4D9ABF" d="M0 117.36H117.36V234.71H234.71V352.07H117.36V469.43H0Z"/>'
+    '<path fill="#F1BE58" d="M352.07 234.71H469.43V469.43H352.07V234.71Z"/>'
+    '</svg>'
+)
+
 FREELLMAPI_ICON_SVG = (
     '<svg class="card-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="24" height="24" aria-hidden="true">'
     '<rect width="64" height="64" rx="14" fill="#09090b"/>'
@@ -265,6 +273,22 @@ CLIENT_CARDS: list[dict[str, Any]] = [
         # Note: No restore_cmd because Cursor is guide-only and writes no files!
         "manual_snippet": lambda addr: f"BASE_URL=http://{addr}/v1\nAPI_KEY=local-bridge",
         "docs_url": "https://docs.cursor.com",
+    },
+    {
+        "id": "pi",
+        "title": "Pi",
+        "desc": "A minimal, highly extensible terminal coding agent with tree-structured history.",
+        "desc_en": "A minimal, highly extensible terminal coding agent with tree-structured history.",
+        "desc_es": "Un agente de código minimalista y extensible para terminal con historial en árbol.",
+        "icon_svg": PI_ICON_SVG,
+        "auto_cmd": lambda addr: (
+            f"agy-bridge setup-pi --port {addr.rsplit(':', 1)[1]}"
+            if ":" in addr and addr.rsplit(":", 1)[1].isdigit() and addr.rsplit(":", 1)[1] != "24980"
+            else "agy-bridge setup-pi"
+        ),
+        "restore_cmd": lambda addr: "agy-bridge restore-pi",
+        "manual_snippet": lambda addr: f"BASE_URL=http://{addr}/v1\nAPI_KEY=local-bridge",
+        "docs_url": "https://pi.dev/docs/latest",
     },
     {
         "id": "freellmapi",
@@ -725,6 +749,7 @@ def render_dashboard(
         desc_opencode: "A provider-agnostic terminal agent with a full-screen text interface.",
         desc_openclaw: "An always-on personal assistant that answers on WhatsApp, Telegram, Discord, and more from your own machine.",
         desc_cursor: "The AI-native editor; routes through Cursor's cloud, so it requires a public URL.",
+        desc_pi: "A minimal, highly extensible terminal coding agent with tree-structured history.",
         desc_freellmapi: "Custom Provider & Aider integration (Base URL with /v1)",
         footer: "AGY Model Bridge &bull; Powered by Google Cloud Code Assist &bull; Local Gateway"
       }},
@@ -746,6 +771,7 @@ def render_dashboard(
         desc_opencode: "Un agente de terminal independiente del proveedor, con interfaz de texto a pantalla completa.",
         desc_openclaw: "Un asistente personal siempre activo que responde en WhatsApp, Telegram, Discord y más desde tu propia máquina.",
         desc_cursor: "El editor centrado en la IA; pasa por la nube de Cursor, así que necesita una URL pública.",
+        desc_pi: "Un agente de código minimalista y extensible para terminal con historial en árbol.",
         desc_freellmapi: "Integraci\u00f3n para Custom Provider y Aider (URL base con /v1)",
         footer: "AGY Model Bridge &bull; Potenciado por Google Cloud Code Assist &bull; Gateway local"
       }}
