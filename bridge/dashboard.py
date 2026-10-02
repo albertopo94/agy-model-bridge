@@ -227,6 +227,24 @@ CLIENT_CARDS: list[dict[str, Any]] = [
         "docs_url": "https://hermes-agent.nousresearch.com",
     },
     {
+        "id": "pi",
+        "title": "Pi",
+        "desc": "A minimal, highly extensible terminal coding agent with tree-structured history.",
+        "desc_en": "A minimal, highly extensible terminal coding agent with tree-structured history.",
+        "desc_es": "Un agente de código minimalista y extensible para terminal con historial en árbol.",
+        "tip_en": "Tip: Run agy-bridge setup-pi --set-default to make AGY the default provider in settings.json.",
+        "tip_es": "Tip: Ejecutá agy-bridge setup-pi --set-default para fijar AGY como proveedor por defecto en settings.json.",
+        "icon_svg": PI_ICON_SVG,
+        "auto_cmd": lambda addr: (
+            f"agy-bridge setup-pi --port {addr.rsplit(':', 1)[1]}"
+            if ":" in addr and addr.rsplit(":", 1)[1].isdigit() and addr.rsplit(":", 1)[1] != "24980"
+            else "agy-bridge setup-pi"
+        ),
+        "restore_cmd": lambda addr: "agy-bridge restore-pi",
+        "manual_snippet": lambda addr: f"BASE_URL=http://{addr}/v1\nAPI_KEY=local-bridge",
+        "docs_url": "https://pi.dev/docs/latest",
+    },
+    {
         "id": "opencode",
         "title": "OpenCode",
         "desc": "A provider-agnostic terminal agent with a full-screen text interface.",
@@ -273,24 +291,6 @@ CLIENT_CARDS: list[dict[str, Any]] = [
         # Note: No restore_cmd because Cursor is guide-only and writes no files!
         "manual_snippet": lambda addr: f"BASE_URL=http://{addr}/v1\nAPI_KEY=local-bridge",
         "docs_url": "https://docs.cursor.com",
-    },
-    {
-        "id": "pi",
-        "title": "Pi",
-        "desc": "A minimal, highly extensible terminal coding agent with tree-structured history.",
-        "desc_en": "A minimal, highly extensible terminal coding agent with tree-structured history.",
-        "desc_es": "Un agente de código minimalista y extensible para terminal con historial en árbol.",
-        "tip_en": "Tip: Run agy-bridge setup-pi --set-default to make AGY the default provider in settings.json.",
-        "tip_es": "Tip: Ejecutá agy-bridge setup-pi --set-default para fijar AGY como proveedor por defecto en settings.json.",
-        "icon_svg": PI_ICON_SVG,
-        "auto_cmd": lambda addr: (
-            f"agy-bridge setup-pi --port {addr.rsplit(':', 1)[1]}"
-            if ":" in addr and addr.rsplit(":", 1)[1].isdigit() and addr.rsplit(":", 1)[1] != "24980"
-            else "agy-bridge setup-pi"
-        ),
-        "restore_cmd": lambda addr: "agy-bridge restore-pi",
-        "manual_snippet": lambda addr: f"BASE_URL=http://{addr}/v1\nAPI_KEY=local-bridge",
-        "docs_url": "https://pi.dev/docs/latest",
     },
     {
         "id": "freellmapi",
