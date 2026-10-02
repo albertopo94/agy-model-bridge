@@ -1309,7 +1309,7 @@ class TestUpdateInstallation(unittest.TestCase):
 
         self.assertEqual(result["status"], "updated")
         self.assertTrue(result["restarted_daemon"])
-        self.assertEqual(result["version"], "0.10.0")
+        self.assertEqual(result["version"], "0.10.1")
         mock_run.assert_called_once_with(
             ["git", "-C", str(self.repo_dir), "pull", "--ff-only"],
             capture_output=True,
@@ -1501,7 +1501,7 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main([flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.10.0")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.10.1")
 
     def test_cli_subcommand_version_flags(self):
         from bridge.__main__ import main
@@ -1513,19 +1513,19 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main(["update", flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.10.0")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.10.1")
 
     def test_version_unification(self):
         import bridge
         from pathlib import Path
         import re
 
-        self.assertEqual(bridge.__version__, "0.10.0")
+        self.assertEqual(bridge.__version__, "0.10.1")
         pyproject_path = Path(__file__).resolve().parent.parent / "pyproject.toml"
         pyproject_text = pyproject_path.read_text(encoding="utf-8")
         match = re.search(r'version\s*=\s*"([^"]+)"', pyproject_text)
         self.assertIsNotNone(match)
-        self.assertEqual(match.group(1), "0.10.0")
+        self.assertEqual(match.group(1), "0.10.1")
 
 
 class TestClientConfiguratorRegistry(unittest.TestCase):
@@ -3174,6 +3174,37 @@ class TestPiConfigurator(unittest.TestCase):
         settings_backups = list(settings_target.parent.glob("settings.json.backup-*"))
         self.assertTrue(len(settings_backups) > 0)
 
+    def test_setup_with_set_default_syncs_enabled_models(self):
+        target = self.dir_path / "agent" / "models.json"
+        settings_target = self.dir_path / "agent" / "settings.json"
+        existing_settings = {
+            "theme": "dark",
+            "enabledModels": ["google/gemini-3.7-flash"],
+        }
+        settings_target.parent.mkdir(parents=True, exist_ok=True)
+        settings_target.write_text(json.dumps(existing_settings), encoding="utf-8")
+
+        self.configurator.setup(
+            config_path=target,
+            model="gemini-3.8-flash-high",
+            set_default=True,
+        )
+
+        settings_data = json.loads(settings_target.read_text(encoding="utf-8"))
+        self.assertEqual(settings_data["defaultProvider"], "agy")
+        self.assertEqual(settings_data["defaultModel"], "gemini-3.8-flash-high")
+        self.assertIn("agy/gemini-3.8-flash-high", settings_data["enabledModels"])
+        self.assertEqual(len(settings_data["enabledModels"]), 2)
+
+        # Calling again does not duplicate
+        self.configurator.setup(
+            config_path=target,
+            model="gemini-3.8-flash-high",
+            set_default=True,
+        )
+        settings_data2 = json.loads(settings_target.read_text(encoding="utf-8"))
+        self.assertEqual(settings_data2["enabledModels"].count("agy/gemini-3.8-flash-high"), 1)
+
     def test_restore_with_backup_path(self):
         target = self.dir_path / "models.json"
         target.write_text(json.dumps({"providers": {"agy": {}}}), encoding="utf-8")
@@ -3280,20 +3311,26 @@ class TestCLIPi(unittest.TestCase):
             or "Ejecutá 'pi' y cambiá de modelo con /model" in output
         )
         self.assertIn("pi --model agy/gemini-3.8-flash-high", output)
+        self.assertIn("--set-default", output)
 
     def test_cli_setup_pi_flags(self):
+        import io
         from bridge.__main__ import main
         target = self.dir_path / "models.json"
         settings_target = self.dir_path / "settings.json"
 
-        exit_code = main([
-            "setup-pi",
-            "--path", str(target),
-            "--port", "9090",
-            "--model", "gemini-2.5-pro",
-            "--set-default",
-        ])
+        out = io.StringIO()
+        with unittest.mock.patch("sys.stdout", out):
+            exit_code = main([
+                "setup-pi",
+                "--path", str(target),
+                "--port", "9090",
+                "--model", "gemini-2.5-pro",
+                "--set-default",
+            ])
         self.assertEqual(exit_code, 0)
+        output = out.getvalue()
+        self.assertIn("settings.json", output)
         data = json.loads(target.read_text(encoding="utf-8"))
         self.assertEqual(data["providers"]["agy"]["baseUrl"], "http://127.0.0.1:9090/v1")
         self.assertTrue(settings_target.exists())

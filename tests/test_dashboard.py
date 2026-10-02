@@ -155,6 +155,8 @@ class TestDashboardRendering(unittest.TestCase):
         self.assertIn("agy-bridge setup-opencode", html)
         self.assertIn("agy-bridge setup-openclaw", html)
         self.assertIn("agy-bridge setup-pi", html)
+        self.assertIn('class="card-tip"', html)
+        self.assertIn('data-i18n="tip_pi"', html)
         self.assertNotIn("ANTHROPIC_CUSTOM_MODEL_OPTION", html)
         self.assertNotIn("mkdir -p ~/.codex", html)
 
@@ -405,6 +407,10 @@ class TestDashboardRendering(unittest.TestCase):
             "BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY=local-bridge",
         )
         self.assertEqual(by_id["pi"]["docs_url"], "https://pi.dev/docs/latest")
+        self.assertIn("tip_en", by_id["pi"])
+        self.assertIn("tip_es", by_id["pi"])
+        self.assertIn("--set-default", by_id["pi"]["tip_en"])
+        self.assertIn("--set-default", by_id["pi"]["tip_es"])
 
         self.assertNotIn("auto_cmd", by_id["freellmapi"])
         self.assertIn("icon_svg", by_id["freellmapi"])

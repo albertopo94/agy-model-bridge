@@ -218,7 +218,7 @@ This surgically configures `~/.pi/agent/models.json` with:
 - Base URL: `http://127.0.0.1:24980/v1`
 
 Options:
-- `--set-default`: Also sets `agy` and the default model as defaults in `~/.pi/agent/settings.json`.
+- `--set-default`: Also sets `agy` and the default model as defaults in `~/.pi/agent/settings.json` (and synchronizes `enabledModels` if scoped).
 - `--model <name>`: Specify a default model (default: `gemini-3.8-flash-high`).
 
 Once configured, launch Pi or select an AGY model:
@@ -329,7 +329,7 @@ Execute the complete test suite:
 python3 -m unittest discover -s tests -v
 ```
 
-All 551 tests run in ~1 second with zero external dependencies and zero network access.
+All 553 tests run in ~1 second with zero external dependencies and zero network access.
 
 ### End-to-End Smoke Test
 

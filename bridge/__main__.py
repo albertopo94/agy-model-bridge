@@ -653,6 +653,10 @@ def main(argv: list[str] | None = None) -> int:
         print(t("setup_pi_success", target=target))
         print(t("setup_pi_auto_read"))
         print(t("setup_pi_run_hint"))
+        if not args.set_default:
+            print(t("setup_pi_set_default_tip"))
+        else:
+            print(t("setup_pi_set_default_done"))
         return 0
 
     if argv and argv[0] == "restore-claude":

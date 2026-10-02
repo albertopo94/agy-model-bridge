@@ -404,6 +404,15 @@ class TestCLIInternationalization(unittest.TestCase):
             self.assertIn("Active", out_en.getvalue())
 
 
+class TestPiTranslations(unittest.TestCase):
+    def test_pi_set_default_keys_present_in_both_locales(self):
+        for lang in ("en", "es"):
+            tip = t("setup_pi_set_default_tip", lang=lang)
+            done = t("setup_pi_set_default_done", lang=lang)
+            self.assertIn("--set-default", tip)
+            self.assertIn("settings.json", done)
+
+
 if __name__ == "__main__":
     unittest.main()
 

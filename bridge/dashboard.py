@@ -280,6 +280,8 @@ CLIENT_CARDS: list[dict[str, Any]] = [
         "desc": "A minimal, highly extensible terminal coding agent with tree-structured history.",
         "desc_en": "A minimal, highly extensible terminal coding agent with tree-structured history.",
         "desc_es": "Un agente de código minimalista y extensible para terminal con historial en árbol.",
+        "tip_en": "Tip: Run agy-bridge setup-pi --set-default to make AGY the default provider in settings.json.",
+        "tip_es": "Tip: Ejecutá agy-bridge setup-pi --set-default para fijar AGY como proveedor por defecto en settings.json.",
         "icon_svg": PI_ICON_SVG,
         "auto_cmd": lambda addr: (
             f"agy-bridge setup-pi --port {addr.rsplit(':', 1)[1]}"
@@ -376,6 +378,10 @@ def render_dashboard(
 
         manual_text = card["manual_snippet"](snippet_address)
 
+        tip_text = card.get("tip_es" if is_es else "tip_en", card.get("tip", ""))
+        tip_html = f"""
+        <p class="card-tip" data-i18n="tip_{card_id}">💡 {html.escape(tip_text)}</p>""" if tip_text else ""
+
         restore_block_html = ""
         if "restore_cmd" in card:
             restore_text = card["restore_cmd"](snippet_address)
@@ -392,7 +398,7 @@ def render_dashboard(
         <div class="card-header">
           <h2 class="card-title">{icon_html}{html.escape(card["title"])}</h2>
         </div>
-        <p class="card-desc" data-i18n="desc_{card_id}">{html.escape(desc_text)}</p>{auto_block_html}
+        <p class="card-desc" data-i18n="desc_{card_id}">{html.escape(desc_text)}</p>{auto_block_html}{tip_html}
 
         <div class="setup-block">
           <div class="setup-header">
@@ -618,6 +624,16 @@ def render_dashboard(
       color: var(--text-secondary);
       margin-bottom: 0.75rem;
     }}
+    .card-tip {{
+      font-size: 0.78rem;
+      color: #38bdf8;
+      background: rgba(56, 189, 248, 0.08);
+      border: 1px solid rgba(56, 189, 248, 0.2);
+      border-radius: 8px;
+      padding: 0.45rem 0.65rem;
+      margin-top: 0.6rem;
+      line-height: 1.4;
+    }}
     .setup-block {{
       margin-top: 0.75rem;
     }}
@@ -750,6 +766,7 @@ def render_dashboard(
         desc_openclaw: "An always-on personal assistant that answers on WhatsApp, Telegram, Discord, and more from your own machine.",
         desc_cursor: "The AI-native editor; routes through Cursor's cloud, so it requires a public URL.",
         desc_pi: "A minimal, highly extensible terminal coding agent with tree-structured history.",
+        tip_pi: "💡 Tip: Run agy-bridge setup-pi --set-default to make AGY the default provider in settings.json.",
         desc_freellmapi: "Custom Provider & Aider integration (Base URL with /v1)",
         footer: "AGY Model Bridge &bull; Powered by Google Cloud Code Assist &bull; Local Gateway"
       }},
@@ -772,6 +789,7 @@ def render_dashboard(
         desc_openclaw: "Un asistente personal siempre activo que responde en WhatsApp, Telegram, Discord y más desde tu propia máquina.",
         desc_cursor: "El editor centrado en la IA; pasa por la nube de Cursor, así que necesita una URL pública.",
         desc_pi: "Un agente de código minimalista y extensible para terminal con historial en árbol.",
+        tip_pi: "💡 Tip: Ejecut\u00e1 agy-bridge setup-pi --set-default para fijar AGY como proveedor por defecto en settings.json.",
         desc_freellmapi: "Integraci\u00f3n para Custom Provider y Aider (URL base con /v1)",
         footer: "AGY Model Bridge &bull; Potenciado por Google Cloud Code Assist &bull; Gateway local"
       }}

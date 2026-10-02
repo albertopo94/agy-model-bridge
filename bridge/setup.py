@@ -1445,6 +1445,10 @@ class PiConfigurator(ClientConfigurator):
                     settings_config = {}
             settings_config["defaultProvider"] = "agy"
             settings_config["defaultModel"] = model
+            if "enabledModels" in settings_config and isinstance(settings_config["enabledModels"], list):
+                scoped_name = f"agy/{model}"
+                if scoped_name not in settings_config["enabledModels"]:
+                    settings_config["enabledModels"].append(scoped_name)
             atomic_write_file(settings_path, json.dumps(settings_config, indent=2) + "\n", mode=0o600)
 
         formatted_json = json.dumps(config, indent=2) + "\n"

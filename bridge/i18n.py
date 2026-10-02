@@ -137,6 +137,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "setup_pi_success": "Pi configured successfully at {target}\n",
         "setup_pi_auto_read": "Pi will read this configuration automatically.",
         "setup_pi_run_hint": "Run 'pi' and switch models with /model (or run 'pi --model agy/gemini-3.8-flash-high').",
+        "setup_pi_set_default_tip": "Tip: Run 'agy-bridge setup-pi --set-default' to set AGY as Pi's default provider.",
+        "setup_pi_set_default_done": "✔ AGY configured as default provider in settings.json.",
         # Cursor
         "setup_cursor_title": "=== Cursor Configuration Guide ===",
         "setup_cursor_notice": "Notice: Cursor routes AI requests through its cloud servers. A public HTTPS URL (via Cloudflare Tunnel, ngrok, or Tailscale) is required if Cursor cannot reach localhost directly.",
@@ -225,6 +227,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "setup_pi_success": "Pi configurado correctamente en {target}\n",
         "setup_pi_auto_read": "Pi leerá esta configuración automáticamente.",
         "setup_pi_run_hint": "Ejecutá 'pi' y cambiá de modelo con /model (o ejecutá 'pi --model agy/gemini-3.8-flash-high').",
+        "setup_pi_set_default_tip": "Tip: Ejecutá 'agy-bridge setup-pi --set-default' para dejar AGY como proveedor por defecto.",
+        "setup_pi_set_default_done": "✔ AGY configurado como proveedor por defecto en settings.json.",
         # Cursor
         "setup_cursor_title": "=== Guía de Configuración para Cursor ===",
         "setup_cursor_notice": "Aviso: Cursor enruta las peticiones de IA a través de sus servidores en la nube. Se requiere una URL pública HTTPS (vía Cloudflare Tunnel, ngrok o Tailscale) si Cursor no puede acceder directamente a localhost.",
