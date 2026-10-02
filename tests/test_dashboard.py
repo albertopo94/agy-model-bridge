@@ -61,6 +61,7 @@ class TestDashboardRendering(unittest.TestCase):
         self.assertIn("agy-bridge restore-claude", html)
         self.assertIn("agy-bridge restore-codex", html)
         self.assertIn("agy-bridge restore-hermes", html)
+        self.assertIn("agy-bridge restore-opencode", html)
 
         # Copy buttons and pre IDs for restore
         self.assertIn('id="claude-restore"', html)
@@ -69,6 +70,8 @@ class TestDashboardRendering(unittest.TestCase):
         self.assertIn("copySnippet(this, 'codex-restore')", html)
         self.assertIn('id="hermes-restore"', html)
         self.assertIn("copySnippet(this, 'hermes-restore')", html)
+        self.assertIn('id="opencode-restore"', html)
+        self.assertIn("copySnippet(this, 'opencode-restore')", html)
 
     def test_render_dashboard_vercel_styling_and_responsive_grid(self):
         auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
@@ -122,10 +125,11 @@ class TestDashboardRendering(unittest.TestCase):
         auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
         html = render_dashboard("127.0.0.1", 24980, auth_status, models_count=20)
 
-        # All 4 client cards
+        # All 5 client cards
         self.assertIn("Claude Code", html)
         self.assertIn("Codex CLI", html)
         self.assertIn("Hermes Agent", html)
+        self.assertIn("OpenCode", html)
         self.assertIn("FreeLLMAPI", html)
 
         # Two-tier headings
@@ -140,10 +144,11 @@ class TestDashboardRendering(unittest.TestCase):
         self.assertIn("agy-bridge setup-claude", html)
         self.assertIn("agy-bridge setup-codex", html)
         self.assertIn("agy-bridge setup-hermes", html)
+        self.assertIn("agy-bridge setup-opencode", html)
         self.assertNotIn("ANTHROPIC_CUSTOM_MODEL_OPTION", html)
         self.assertNotIn("mkdir -p ~/.codex", html)
 
-        # Claude Code mascot icon, Codex CLI icon, and Hermes Agent icon
+        # Mascot and client icons
         self.assertIn('class="card-icon"', html)
         self.assertIn("#d77757", html)
         self.assertIn("#ffc400", html)
@@ -187,11 +192,12 @@ class TestDashboardRendering(unittest.TestCase):
         auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
         html = render_dashboard("127.0.0.1", 24980, auth_status, models_count=20)
 
-        # 10 independent snippet IDs and corresponding copy button calls
+        # 13 independent snippet IDs and corresponding copy button calls
         expected_ids = [
             "claude-auto", "claude-manual", "claude-restore",
             "codex-auto", "codex-manual", "codex-restore",
             "hermes-auto", "hermes-manual", "hermes-restore",
+            "opencode-auto", "opencode-manual", "opencode-restore",
             "freellmapi-manual",
         ]
         for snippet_id in expected_ids:
@@ -209,6 +215,7 @@ class TestDashboardRendering(unittest.TestCase):
         self.assertIn("https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview", html)
         self.assertIn("https://github.com/openai/codex", html)
         self.assertIn("https://hermes-agent.nousresearch.com", html)
+        self.assertIn("https://opencode.ai/docs", html)
         self.assertIn("https://github.com/tashfeenahmed/freellmapi", html)
 
         # Robust clipboard JavaScript
@@ -221,11 +228,12 @@ class TestDashboardRendering(unittest.TestCase):
 
     def test_client_cards_schema(self):
         from bridge.dashboard import CLIENT_CARDS
-        self.assertEqual(len(CLIENT_CARDS), 4)
+        self.assertEqual(len(CLIENT_CARDS), 5)
         card_titles = [c["title"] for c in CLIENT_CARDS]
         self.assertIn("Claude Code", card_titles)
         self.assertIn("Codex CLI", card_titles)
         self.assertIn("Hermes Agent", card_titles)
+        self.assertIn("OpenCode", card_titles)
         self.assertIn("FreeLLMAPI", card_titles)
 
         by_id = {c["id"]: c for c in CLIENT_CARDS}
@@ -299,6 +307,25 @@ class TestDashboardRendering(unittest.TestCase):
             "BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY=local-bridge",
         )
         self.assertEqual(by_id["hermes"]["docs_url"], "https://hermes-agent.nousresearch.com")
+
+        self.assertIn('viewBox="0 0 24 24"', by_id["opencode"].get("icon_svg", ""))
+        self.assertEqual(
+            by_id["opencode"]["auto_cmd"]("127.0.0.1:24980"),
+            "agy-bridge setup-opencode",
+        )
+        self.assertEqual(
+            by_id["opencode"]["auto_cmd"]("127.0.0.1:9090"),
+            "agy-bridge setup-opencode --port 9090",
+        )
+        self.assertEqual(
+            by_id["opencode"]["restore_cmd"]("127.0.0.1:24980"),
+            "agy-bridge restore-opencode",
+        )
+        self.assertEqual(
+            by_id["opencode"]["manual_snippet"]("127.0.0.1:24980"),
+            "BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY=local-bridge",
+        )
+        self.assertEqual(by_id["opencode"]["docs_url"], "https://opencode.ai/docs")
 
         self.assertNotIn("auto_cmd", by_id["freellmapi"])
         self.assertIn("icon_svg", by_id["freellmapi"])

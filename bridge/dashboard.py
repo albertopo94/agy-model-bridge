@@ -123,6 +123,13 @@ HERMES_ICON_SVG = (
     '</svg>'
 )
 
+OPENCODE_ICON_SVG = (
+    '<svg class="card-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill-rule="evenodd" aria-hidden="true">'
+    '<path fill="currentColor" fill-opacity="0.35" d="M15.68 10.26v7.04H8.35v-7.04z"/>'
+    '<path fill="currentColor" d="M19.35 20.82H4.68V3.22h14.67zM15.68 6.74H8.35v10.56h7.33z"/>'
+    '</svg>'
+)
+
 FREELLMAPI_ICON_SVG = (
     '<svg class="card-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="24" height="24" aria-hidden="true">'
     '<rect width="64" height="64" rx="14" fill="#09090b"/>'
@@ -192,6 +199,22 @@ CLIENT_CARDS: list[dict[str, Any]] = [
         "restore_cmd": lambda addr: "agy-bridge restore-hermes",
         "manual_snippet": lambda addr: f"BASE_URL=http://{addr}/v1\nAPI_KEY=local-bridge",
         "docs_url": "https://hermes-agent.nousresearch.com",
+    },
+    {
+        "id": "opencode",
+        "title": "OpenCode",
+        "desc": "A provider-agnostic terminal agent with a full-screen text interface.",
+        "desc_en": "A provider-agnostic terminal agent with a full-screen text interface.",
+        "desc_es": "Un agente de terminal independiente del proveedor, con interfaz de texto a pantalla completa.",
+        "icon_svg": OPENCODE_ICON_SVG,
+        "auto_cmd": lambda addr: (
+            f"agy-bridge setup-opencode --port {addr.rsplit(':', 1)[1]}"
+            if ":" in addr and addr.rsplit(":", 1)[1].isdigit() and addr.rsplit(":", 1)[1] != "24980"
+            else "agy-bridge setup-opencode"
+        ),
+        "restore_cmd": lambda addr: "agy-bridge restore-opencode",
+        "manual_snippet": lambda addr: f"BASE_URL=http://{addr}/v1\nAPI_KEY=local-bridge",
+        "docs_url": "https://opencode.ai/docs",
     },
     {
         "id": "freellmapi",
@@ -649,6 +672,7 @@ def render_dashboard(
         desc_claude: "Anthropic Messages API CLI (Base URL without /v1)",
         desc_codex: "OpenAI Responses API CLI (wire_api = 'responses')",
         desc_hermes: "NousResearch Hermes Agent CLI & Desktop (Base URL with /v1)",
+        desc_opencode: "A provider-agnostic terminal agent with a full-screen text interface.",
         desc_freellmapi: "Custom Provider & Aider integration (Base URL with /v1)",
         footer: "AGY Model Bridge &bull; Powered by Google Cloud Code Assist &bull; Local Gateway"
       }},
@@ -667,6 +691,7 @@ def render_dashboard(
         desc_claude: "CLI con Anthropic Messages API (URL base sin /v1)",
         desc_codex: "CLI con OpenAI Responses API (wire_api = 'responses')",
         desc_hermes: "Hermes Agent CLI y Desktop de NousResearch (URL base con /v1)",
+        desc_opencode: "Un agente de terminal independiente del proveedor, con interfaz de texto a pantalla completa.",
         desc_freellmapi: "Integraci\u00f3n para Custom Provider y Aider (URL base con /v1)",
         footer: "AGY Model Bridge &bull; Potenciado por Google Cloud Code Assist &bull; Gateway local"
       }}

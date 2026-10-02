@@ -54,6 +54,21 @@ def atomic_write_file(path: Path, content: str, mode: int = 0o600) -> None:
                 pass
 
 
+def _strip_json_comments(text: str) -> str:
+    """Strips single-line and multi-line comments from JSONC text while preserving string literals."""
+    def replacer(match: re.Match[str]) -> str:
+        s = match.group(0)
+        if s.startswith("/"):
+            return " "
+        return s
+
+    pattern = re.compile(
+        r'//.*?$|/\*[\s\S]*?\*/|"(?:\\.|[^"\\])*"',
+        re.DOTALL | re.MULTILINE,
+    )
+    return pattern.sub(replacer, text)
+
+
 def create_backup(path: Path) -> Path | None:
     """Creates a timestamped backup of path if it exists.
 
@@ -106,6 +121,7 @@ def describe_backup(backup_path: Path) -> str:
     - "FreeLLMAPI": FreeLLMAPI configuration
     - "Anthropic Original": Original un-proxied Claude Code configuration
     - "Codex Original": Original un-proxied Codex CLI configuration
+    - "OpenCode Original": Original un-proxied OpenCode configuration
     - "Personalizado": Other custom proxy/endpoint configuration
     - "Desconocido": Unreadable or empty file
 
@@ -126,6 +142,12 @@ def describe_backup(backup_path: Path) -> str:
 
     if not content.strip():
         return "Desconocido"
+
+    # OpenCode JSON config inspection
+    if "opencode.json" in path.name or "opencode.jsonc" in path.name:
+        if '"agy"' in content or ":24980" in content or "agy/" in content:
+            return "AGY Bridge"
+        return "OpenCode Original"
 
     # Claude Code JSON settings inspection
     if "settings.json" in path.name or content.lstrip().startswith("{"):
@@ -812,6 +834,199 @@ class HermesConfigurator(ClientConfigurator):
 CLIENT_CONFIGURATORS["hermes"] = HermesConfigurator()
 
 
+class OpenCodeConfigurator(ClientConfigurator):
+    """Configurator strategy for OpenCode CLI."""
+
+    name = "opencode"
+    display_name = "OpenCode"
+
+    @property
+    def default_config_path(self) -> Path:
+        return Path.home() / ".config" / "opencode" / "opencode.json"
+
+    def get_config_path(self, custom_path: Path | None = None) -> Path:
+        if custom_path is not None:
+            return Path(custom_path)
+        jsonc_path = Path.home() / ".config" / "opencode" / "opencode.jsonc"
+        json_path = self.default_config_path
+        if jsonc_path.exists() and not json_path.exists():
+            return jsonc_path
+        return json_path
+
+    def is_configured(self, config_path: Path | None = None) -> bool:
+        target = self.get_config_path(config_path)
+        if not target.exists() or not target.is_file():
+            return False
+        try:
+            content = target.read_text(encoding="utf-8")
+            if not content.strip():
+                return False
+            data = None
+            try:
+                data = json.loads(content)
+            except json.JSONDecodeError:
+                cleaned = _strip_json_comments(content)
+                try:
+                    data = json.loads(cleaned)
+                except json.JSONDecodeError:
+                    pass
+            if isinstance(data, dict):
+                provider = data.get("provider")
+                if isinstance(provider, dict) and "agy" in provider:
+                    return True
+                model = str(data.get("model", ""))
+                if model.startswith("agy/"):
+                    return True
+                if isinstance(provider, dict):
+                    for prov in provider.values():
+                        if isinstance(prov, dict):
+                            opts = prov.get("options")
+                            if isinstance(opts, dict) and ":24980" in str(opts.get("baseURL", "")):
+                                return True
+            if '"provider"' in content and '"agy"' in content:
+                return True
+            if '"model"' in content and "agy/" in content:
+                return True
+            if ":24980" in content:
+                return True
+            return False
+        except OSError:
+            return False
+
+    def setup(
+        self,
+        base_url: str | None = None,
+        model: str = "gemini-3.8-flash-high",
+        config_path: Path | None = None,
+        **kwargs: Any,
+    ) -> Path:
+        target = self.get_config_path(config_path)
+        port = kwargs.get("port")
+        auth_token = kwargs.get("auth_token", "local-bridge")
+
+        if base_url:
+            resolved_url = base_url.rstrip("/")
+            if not resolved_url.endswith("/v1"):
+                resolved_url = f"{resolved_url}/v1"
+        elif port is not None:
+            resolved_url = f"http://127.0.0.1:{port}/v1"
+        else:
+            resolved_url = "http://127.0.0.1:24980/v1"
+
+        backup_path = None
+        config: dict[str, Any] = {}
+        if target.exists():
+            backup_path = create_backup(target)
+            try:
+                raw_text = target.read_text(encoding="utf-8").strip()
+                if raw_text:
+                    try:
+                        loaded = json.loads(raw_text)
+                    except json.JSONDecodeError:
+                        cleaned = _strip_json_comments(raw_text)
+                        loaded = json.loads(cleaned)
+                    if isinstance(loaded, dict):
+                        config = loaded
+            except (json.JSONDecodeError, OSError):
+                config = {}
+
+        if "$schema" not in config:
+            config["$schema"] = "https://opencode.ai/config.json"
+
+        config["model"] = f"agy/{model}"
+
+        provider_map = config.get("provider")
+        if not isinstance(provider_map, dict):
+            provider_map = {}
+            config["provider"] = provider_map
+
+        provider_map["agy"] = {
+            "npm": "@ai-sdk/openai-compatible",
+            "name": "AGY Bridge",
+            "options": {
+                "baseURL": resolved_url,
+                "apiKey": auth_token,
+            },
+            "models": {
+                "gemini-3.8-flash-high": {
+                    "name": "Gemini 3.8 Flash (High)",
+                    "limit": {
+                        "context": 1048576,
+                        "output": 65536,
+                    },
+                },
+                "gemini-2.5-pro": {
+                    "name": "Gemini 2.5 Pro",
+                    "limit": {
+                        "context": 1048576,
+                        "output": 65536,
+                    },
+                },
+                "gemini-2.5-flash": {
+                    "name": "Gemini 2.5 Flash",
+                    "limit": {
+                        "context": 1048576,
+                        "output": 65536,
+                    },
+                },
+            },
+        }
+
+        formatted_json = json.dumps(config, indent=2) + "\n"
+        atomic_write_file(target, formatted_json, mode=0o600)
+        res = ConfigPath(target)
+        res.backup_path = backup_path
+        return res
+
+    def restore(
+        self,
+        config_path: Path | None = None,
+        backup_path: Path | None = None,
+        **kwargs: Any,
+    ) -> bool:
+        target = self.get_config_path(config_path)
+        if backup_path is not None:
+            try:
+                restore_backup(target, backup_path=backup_path)
+                return True
+            except (OSError, FileNotFoundError):
+                return False
+
+        backups = self.list_backups(target)
+        if backups:
+            try:
+                restore_backup(target, backup_path=backups[0])
+                return True
+            except OSError:
+                return False
+        elif target.exists() and target.is_file():
+            try:
+                raw_text = target.read_text(encoding="utf-8").strip()
+                if raw_text:
+                    try:
+                        config = json.loads(raw_text)
+                    except json.JSONDecodeError:
+                        cleaned = _strip_json_comments(raw_text)
+                        config = json.loads(cleaned)
+
+                    if isinstance(config, dict):
+                        prov = config.get("provider")
+                        if isinstance(prov, dict):
+                            prov.pop("agy", None)
+                        if str(config.get("model", "")).startswith("agy/"):
+                            config.pop("model", None)
+
+                        formatted_json = json.dumps(config, indent=2) + "\n"
+                        atomic_write_file(target, formatted_json, mode=0o600)
+                        return True
+            except (json.JSONDecodeError, OSError):
+                return False
+        return False
+
+
+CLIENT_CONFIGURATORS["opencode"] = OpenCodeConfigurator()
+
+
 def register_configurator(configurator: ClientConfigurator) -> None:
     """Registers a client configurator into the global registry."""
     CLIENT_CONFIGURATORS[configurator.name] = configurator
@@ -911,6 +1126,34 @@ def restore_hermes(
     )
 
 
+def setup_opencode(
+    config_path: Path | None = None,
+    base_url: str | None = None,
+    port: int | None = None,
+    model: str = "gemini-3.8-flash-high",
+    auth_token: str = "local-bridge",
+) -> Path:
+    """Configures OpenCode config.json with agy provider and model."""
+    return get_configurator("opencode").setup(
+        base_url=base_url,
+        model=model,
+        config_path=config_path,
+        port=port,
+        auth_token=auth_token,
+    )
+
+
+def restore_opencode(
+    config_path: Path | None = None,
+    backup_path: Path | None = None,
+) -> bool:
+    """Restores OpenCode config from backup or surgically removes agy provider and model."""
+    return get_configurator("opencode").restore(
+        config_path=config_path,
+        backup_path=backup_path,
+    )
+
+
 def uninstall(
     daemon_dir: Path | None = None,
     bin_dir: Path | None = None,
@@ -921,6 +1164,7 @@ def uninstall(
     claude_settings_path: Path | None = None,
     codex_config_path: Path | None = None,
     hermes_config_path: Path | None = None,
+    opencode_config_path: Path | None = None,
 ) -> dict[str, Any]:
     """Uninstalls Antigravity Model Bridge and optionally restores client configurations.
 
@@ -934,6 +1178,7 @@ def uninstall(
         claude_settings_path: Backward-compatible override for Claude settings.json path.
         codex_config_path: Backward-compatible override for Codex config.toml path.
         hermes_config_path: Backward-compatible override for Hermes config.yaml path.
+        opencode_config_path: Backward-compatible override for OpenCode opencode.json path.
 
     Returns:
         Structured dictionary reporting actions performed:
@@ -942,6 +1187,7 @@ def uninstall(
             "claude_restored": bool,
             "codex_restored": bool,
             "hermes_restored": bool,
+            "opencode_restored": bool,
             "restored_clients": dict[str, bool],
             "binaries_removed": list[str],
             "daemon_dir_removed": bool,
@@ -967,6 +1213,8 @@ def uninstall(
         paths_map["codex"] = Path(codex_config_path)
     if hermes_config_path is not None:
         paths_map["hermes"] = Path(hermes_config_path)
+    if opencode_config_path is not None:
+        paths_map["opencode"] = Path(opencode_config_path)
 
     # 3. Restore or surgically clean client configurations & purge backups if requested
     restored_clients: dict[str, bool] = {}
@@ -1011,6 +1259,7 @@ def uninstall(
         "claude_restored": restored_clients.get("claude", False),
         "codex_restored": restored_clients.get("codex", False),
         "hermes_restored": restored_clients.get("hermes", False),
+        "opencode_restored": restored_clients.get("opencode", False),
         "restored_clients": restored_clients,
         "binaries_removed": binaries_removed,
         "daemon_dir_removed": daemon_dir_removed,

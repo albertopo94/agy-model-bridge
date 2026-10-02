@@ -127,6 +127,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "setup_hermes_success": "Hermes Agent configured successfully at {target}\n",
         "setup_hermes_auto_read": "Hermes Agent will read this configuration automatically.",
         "setup_hermes_run_hint": "Run 'hermes' or open Hermes Desktop to start chatting.",
+        "setup_opencode_success": "OpenCode configured successfully at {target}\n",
+        "setup_opencode_auto_read": "OpenCode will read this configuration automatically.",
+        "setup_opencode_run_hint": "Run 'opencode' to start coding with Gemini 3.8 Flash · high (1M context).",
         # Restore
         "restore_restored_from": "Restored configuration from: {name}",
         "restore_client_ready": "{client_name} ready at {target}",
@@ -146,6 +149,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "uninstall_claude_restored": "  - Claude Code configuration restored.",
         "uninstall_codex_restored": "  - Codex CLI configuration restored.",
         "uninstall_hermes_restored": "  - Hermes Agent configuration restored.",
+        "uninstall_opencode_restored": "  - OpenCode configuration restored.",
         "uninstall_backups_purged": "  - Backups history purged.",
         # Update
         "update_success": "✔ Repository updated to version v{ver}.",
@@ -195,6 +199,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "setup_hermes_success": "Hermes Agent configurado correctamente en {target}\n",
         "setup_hermes_auto_read": "Hermes Agent leerá esta configuración automáticamente.",
         "setup_hermes_run_hint": "Ejecutá 'hermes' o abrí Hermes Desktop para empezar a chatear.",
+        "setup_opencode_success": "OpenCode configurado correctamente en {target}\n",
+        "setup_opencode_auto_read": "OpenCode leerá esta configuración automáticamente.",
+        "setup_opencode_run_hint": "Ejecutá 'opencode' para empezar a programar con Gemini 3.8 Flash · high (1M de contexto).",
         # Restore
         "restore_restored_from": "Restaurada configuración desde: {name}",
         "restore_client_ready": "{client_name} listo en {target}",
@@ -214,6 +221,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "uninstall_claude_restored": "  - Configuración de Claude Code restaurada.",
         "uninstall_codex_restored": "  - Configuración de Codex CLI restaurada.",
         "uninstall_hermes_restored": "  - Configuración de Hermes Agent restaurada.",
+        "uninstall_opencode_restored": "  - Configuración de OpenCode restaurada.",
         "uninstall_backups_purged": "  - Historial de backups purgado.",
         # Update
         "update_success": "✔ Repositorio actualizado a la versión v{ver}.",

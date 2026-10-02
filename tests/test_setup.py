@@ -13,6 +13,7 @@ from bridge.setup import (
     ClientConfigurator,
     CodexConfigurator,
     HermesConfigurator,
+    OpenCodeConfigurator,
     atomic_write_file,
     build_hermes_block,
     create_backup,
@@ -25,9 +26,11 @@ from bridge.setup import (
     restore_claude,
     restore_codex,
     restore_hermes,
+    restore_opencode,
     setup_claude,
     setup_codex,
     setup_hermes,
+    setup_opencode,
     uninstall,
     update_installation,
 )
@@ -219,6 +222,21 @@ class TestDescribeBackup(unittest.TestCase):
         b = self.dir_path / "config.toml.backup-2026-09-26T21-34-23-420Z"
         b.write_text('[projects]\nactive = "main"', encoding="utf-8")
         self.assertEqual(describe_backup(b), "Codex Original")
+
+    def test_describe_opencode_agy_bridge_backup(self):
+        b = self.dir_path / "opencode.json.backup-2026-10-02T10-00-00"
+        b.write_text(json.dumps({
+            "model": "agy/gemini-3.8-flash-high",
+            "provider": {"agy": {"options": {"baseURL": "http://127.0.0.1:24980/v1"}}},
+        }), encoding="utf-8")
+        self.assertEqual(describe_backup(b), "AGY Bridge")
+
+    def test_describe_opencode_original_backup(self):
+        b = self.dir_path / "opencode.json.backup-2026-10-02T09-00-00"
+        b.write_text(json.dumps({
+            "model": "anthropic/claude-3-5-sonnet",
+        }), encoding="utf-8")
+        self.assertEqual(describe_backup(b), "OpenCode Original")
 
     def test_describe_missing_or_invalid_file(self):
         missing = self.dir_path / "does_not_exist"
@@ -1269,7 +1287,7 @@ class TestUpdateInstallation(unittest.TestCase):
 
         self.assertEqual(result["status"], "updated")
         self.assertTrue(result["restarted_daemon"])
-        self.assertEqual(result["version"], "0.6.3")
+        self.assertEqual(result["version"], "0.7.0")
         mock_run.assert_called_once_with(
             ["git", "-C", str(self.repo_dir), "pull", "--ff-only"],
             capture_output=True,
@@ -1461,7 +1479,7 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main([flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.6.3")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.7.0")
 
     def test_cli_subcommand_version_flags(self):
         from bridge.__main__ import main
@@ -1473,19 +1491,19 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main(["update", flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.6.3")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.7.0")
 
     def test_version_unification(self):
         import bridge
         from pathlib import Path
         import re
 
-        self.assertEqual(bridge.__version__, "0.6.3")
+        self.assertEqual(bridge.__version__, "0.7.0")
         pyproject_path = Path(__file__).resolve().parent.parent / "pyproject.toml"
         pyproject_text = pyproject_path.read_text(encoding="utf-8")
         match = re.search(r'version\s*=\s*"([^"]+)"', pyproject_text)
         self.assertIsNotNone(match)
-        self.assertEqual(match.group(1), "0.6.3")
+        self.assertEqual(match.group(1), "0.7.0")
 
 
 class TestClientConfiguratorRegistry(unittest.TestCase):
@@ -1500,6 +1518,16 @@ class TestClientConfiguratorRegistry(unittest.TestCase):
         self.assertEqual(codex_cfg.name, "codex")
         self.assertEqual(codex_cfg.display_name, "Codex CLI")
 
+        hermes_cfg = get_configurator("hermes")
+        self.assertIsInstance(hermes_cfg, HermesConfigurator)
+        self.assertEqual(hermes_cfg.name, "hermes")
+        self.assertEqual(hermes_cfg.display_name, "Hermes Agent")
+
+        opencode_cfg = get_configurator("opencode")
+        self.assertIsInstance(opencode_cfg, OpenCodeConfigurator)
+        self.assertEqual(opencode_cfg.name, "opencode")
+        self.assertEqual(opencode_cfg.display_name, "OpenCode")
+
     def test_get_configurator_unknown_raises_key_error(self):
         with self.assertRaises(KeyError):
             get_configurator("unknown_client")
@@ -1509,6 +1537,8 @@ class TestClientConfiguratorRegistry(unittest.TestCase):
         names = [c.name for c in configurators]
         self.assertIn("claude", names)
         self.assertIn("codex", names)
+        self.assertIn("hermes", names)
+        self.assertIn("opencode", names)
 
     def test_register_custom_configurator(self):
         class DummyConfigurator(ClientConfigurator):
@@ -2011,6 +2041,367 @@ class TestStandaloneWrappers(unittest.TestCase):
         self.assertEqual(p3, hermes_path)
         self.assertTrue(get_configurator("hermes").is_configured(hermes_path))
         self.assertTrue(restore_hermes(config_path=hermes_path))
+
+        opencode_path = self.dir_path / "opencode.json"
+        p4 = setup_opencode(config_path=opencode_path)
+        self.assertEqual(p4, opencode_path)
+        self.assertTrue(get_configurator("opencode").is_configured(opencode_path))
+        self.assertTrue(restore_opencode(config_path=opencode_path))
+
+
+class TestOpenCodeConfigurator(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.dir_path = Path(self.temp_dir.name)
+        self.configurator = OpenCodeConfigurator()
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_paths(self):
+        with unittest.mock.patch("pathlib.Path.home", return_value=self.dir_path):
+            self.assertEqual(
+                self.configurator.default_config_path,
+                self.dir_path / ".config" / "opencode" / "opencode.json",
+            )
+            # When neither exists, returns default opencode.json
+            self.assertEqual(
+                self.configurator.get_config_path(),
+                self.dir_path / ".config" / "opencode" / "opencode.json",
+            )
+
+            # When opencode.jsonc exists and opencode.json does NOT exist: returns opencode.jsonc
+            opencode_dir = self.dir_path / ".config" / "opencode"
+            opencode_dir.mkdir(parents=True, exist_ok=True)
+            jsonc_file = opencode_dir / "opencode.jsonc"
+            jsonc_file.write_text("{}", encoding="utf-8")
+            self.assertEqual(
+                self.configurator.get_config_path(),
+                jsonc_file,
+            )
+
+            # When opencode.json ALSO exists: returns opencode.json
+            json_file = opencode_dir / "opencode.json"
+            json_file.write_text("{}", encoding="utf-8")
+            self.assertEqual(
+                self.configurator.get_config_path(),
+                json_file,
+            )
+
+        custom = self.dir_path / "custom.json"
+        self.assertEqual(self.configurator.get_config_path(custom), custom)
+
+    def test_is_configured_false_when_file_missing_or_clean(self):
+        target = self.dir_path / "opencode.json"
+        self.assertFalse(self.configurator.is_configured(target))
+
+        target.write_text(json.dumps({"agent": {"test": 1}}), encoding="utf-8")
+        self.assertFalse(self.configurator.is_configured(target))
+
+    def test_is_configured_true_variations(self):
+        target = self.dir_path / "opencode.json"
+        for sample in (
+            json.dumps({"provider": {"agy": {"npm": "@ai-sdk/openai-compatible"}}}),
+            json.dumps({"model": "agy/gemini-3.8-flash-high"}),
+            json.dumps({"provider": {"custom": {"options": {"baseURL": "http://127.0.0.1:24980/v1"}}}}),
+            '{"provider": {"agy": {}}}',
+            '{"model": "agy/gemini-2.5-pro"}',
+        ):
+            with self.subTest(sample=sample):
+                target.write_text(sample, encoding="utf-8")
+                self.assertTrue(self.configurator.is_configured(target))
+
+    def test_setup_fresh_file(self):
+        target = self.dir_path / "opencode.json"
+        res = self.configurator.setup(config_path=target)
+        self.assertEqual(res, target)
+        self.assertTrue(target.exists())
+        self.assertTrue(self.configurator.is_configured(target))
+
+        # Permissions 0o600
+        mode = stat.S_IMODE(target.stat().st_mode)
+        self.assertEqual(mode, 0o600)
+
+        data = json.loads(target.read_text(encoding="utf-8"))
+        self.assertEqual(data.get("$schema"), "https://opencode.ai/config.json")
+        self.assertEqual(data.get("model"), "agy/gemini-3.8-flash-high")
+        self.assertIn("provider", data)
+        self.assertIn("agy", data["provider"])
+
+        agy_conf = data["provider"]["agy"]
+        self.assertEqual(agy_conf["npm"], "@ai-sdk/openai-compatible")
+        self.assertEqual(agy_conf["name"], "AGY Bridge")
+        self.assertEqual(
+            agy_conf["options"],
+            {
+                "baseURL": "http://127.0.0.1:24980/v1",
+                "apiKey": "local-bridge",
+            },
+        )
+        self.assertIn("models", agy_conf)
+        self.assertEqual(
+            agy_conf["models"]["gemini-3.8-flash-high"],
+            {
+                "name": "Gemini 3.8 Flash (High)",
+                "limit": {
+                    "context": 1048576,
+                    "output": 65536,
+                },
+            },
+        )
+        self.assertEqual(
+            agy_conf["models"]["gemini-2.5-pro"],
+            {
+                "name": "Gemini 2.5 Pro",
+                "limit": {
+                    "context": 1048576,
+                    "output": 65536,
+                },
+            },
+        )
+        self.assertEqual(
+            agy_conf["models"]["gemini-2.5-flash"],
+            {
+                "name": "Gemini 2.5 Flash",
+                "limit": {
+                    "context": 1048576,
+                    "output": 65536,
+                },
+            },
+        )
+
+    def test_setup_preserves_existing_keys_and_other_providers(self):
+        target = self.dir_path / "opencode.json"
+        initial = {
+            "$schema": "https://custom.schema/config.json",
+            "agent": {"build": {"tools": ["terminal"]}},
+            "permission": {"allow": ["all"]},
+            "provider": {
+                "anthropic": {
+                    "npm": "@ai-sdk/anthropic",
+                    "name": "Anthropic",
+                }
+            },
+        }
+        target.write_text(json.dumps(initial, indent=2), encoding="utf-8")
+
+        res = self.configurator.setup(config_path=target)
+        self.assertIsNotNone(res.backup_path)
+        self.assertTrue(res.backup_path.exists())
+
+        data = json.loads(target.read_text(encoding="utf-8"))
+        self.assertEqual(data["$schema"], "https://custom.schema/config.json")
+        self.assertEqual(data["agent"], {"build": {"tools": ["terminal"]}})
+        self.assertEqual(data["permission"], {"allow": ["all"]})
+        self.assertEqual(data["model"], "agy/gemini-3.8-flash-high")
+        self.assertIn("anthropic", data["provider"])
+        self.assertEqual(data["provider"]["anthropic"]["name"], "Anthropic")
+        self.assertIn("agy", data["provider"])
+
+    def test_setup_jsonc_with_comments_stripping(self):
+        target = self.dir_path / "opencode.jsonc"
+        jsonc_content = (
+            "{\n"
+            "  // This is a single line comment\n"
+            '  "agent": {\n'
+            '    /* Multiline comment here */\n'
+            '    "url": "http://example.com/api//v1"\n'
+            "  }\n"
+            "}\n"
+        )
+        target.write_text(jsonc_content, encoding="utf-8")
+
+        res = self.configurator.setup(config_path=target)
+        self.assertTrue(target.exists())
+        data = json.loads(target.read_text(encoding="utf-8"))
+        self.assertEqual(data["agent"]["url"], "http://example.com/api//v1")
+        self.assertEqual(data["model"], "agy/gemini-3.8-flash-high")
+        self.assertIn("agy", data["provider"])
+
+    def test_setup_custom_port_and_url_and_model_and_token(self):
+        target = self.dir_path / "opencode.json"
+        self.configurator.setup(
+            config_path=target,
+            port=9090,
+            model="gemini-2.5-pro",
+            auth_token="custom-secret-key",
+        )
+        data = json.loads(target.read_text(encoding="utf-8"))
+        self.assertEqual(data["model"], "agy/gemini-2.5-pro")
+        self.assertEqual(data["provider"]["agy"]["options"]["baseURL"], "http://127.0.0.1:9090/v1")
+        self.assertEqual(data["provider"]["agy"]["options"]["apiKey"], "custom-secret-key")
+
+        # Custom URL without /v1 gets /v1 appended
+        target2 = self.dir_path / "opencode2.json"
+        self.configurator.setup(
+            config_path=target2,
+            base_url="http://custom.host:1234",
+        )
+        data2 = json.loads(target2.read_text(encoding="utf-8"))
+        self.assertEqual(data2["provider"]["agy"]["options"]["baseURL"], "http://custom.host:1234/v1")
+
+    def test_restore_from_backup(self):
+        target = self.dir_path / "opencode.json"
+        target.write_text(json.dumps({"model": "original-opencode"}), encoding="utf-8")
+
+        self.configurator.setup(config_path=target)
+        self.assertTrue(self.configurator.is_configured(target))
+
+        restored = self.configurator.restore(config_path=target)
+        self.assertTrue(restored)
+        data = json.loads(target.read_text(encoding="utf-8"))
+        self.assertEqual(data.get("model"), "original-opencode")
+
+    def test_restore_surgical_clean_without_backups(self):
+        target = self.dir_path / "opencode.json"
+        data = {
+            "$schema": "https://opencode.ai/config.json",
+            "model": "agy/gemini-3.8-flash-high",
+            "agent": {"tools": ["bash"]},
+            "provider": {
+                "agy": {"name": "AGY Bridge"},
+                "other": {"name": "Other Provider"},
+            },
+        }
+        target.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        self.assertTrue(self.configurator.is_configured(target))
+
+        restored = self.configurator.restore(config_path=target)
+        self.assertTrue(restored)
+
+        cleaned = json.loads(target.read_text(encoding="utf-8"))
+        self.assertNotIn("agy", cleaned.get("provider", {}))
+        self.assertIn("other", cleaned.get("provider", {}))
+        self.assertNotIn("model", cleaned)
+        self.assertEqual(cleaned.get("agent"), {"tools": ["bash"]})
+
+    def test_purge_backups(self):
+        target = self.dir_path / "opencode.json"
+        target.write_text("{}", encoding="utf-8")
+        b1 = self.dir_path / "opencode.json.backup-2026-10-02T10-00-00"
+        b1.write_text("{}", encoding="utf-8")
+
+        purged_count = self.configurator.purge_backups(target)
+        self.assertEqual(purged_count, 1)
+        self.assertEqual(len(self.configurator.list_backups(target)), 0)
+
+
+class TestCLIOpenCode(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.dir_path = Path(self.temp_dir.name)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_cli_setup_opencode_dispatches_with_flags(self):
+        from bridge.__main__ import main
+        target = self.dir_path / "opencode_config.json"
+        exit_code = main(["setup-opencode", "--port", "9090", "--model", "gemini-2.5-pro", "--path", str(target)])
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(target.exists())
+        data = json.loads(target.read_text(encoding="utf-8"))
+        self.assertEqual(data["model"], "agy/gemini-2.5-pro")
+        self.assertEqual(data["provider"]["agy"]["options"]["baseURL"], "http://127.0.0.1:9090/v1")
+
+    def test_cli_setup_opencode_outputs_backup_and_guidance(self):
+        import io
+        from bridge.__main__ import main
+        target = self.dir_path / "opencode_config.json"
+        target.write_text(json.dumps({"model": "old"}), encoding="utf-8")
+        out = io.StringIO()
+        with unittest.mock.patch("sys.stdout", out):
+            exit_code = main(["setup-opencode", "--path", str(target)])
+        self.assertEqual(exit_code, 0)
+        output = out.getvalue()
+        self.assertIn("Backup: ", output)
+        self.assertIn(f"OpenCode configured successfully at {target}", output)
+        self.assertIn("OpenCode will read this configuration automatically.", output)
+        self.assertTrue(
+            "Run 'opencode' to start coding" in output
+            or "Ejecutá 'opencode' para empezar a programar" in output
+        )
+
+    def test_cli_restore_opencode_no_backups_returns_1(self):
+        import io
+        from bridge.__main__ import main
+        target = self.dir_path / "opencode.json"
+        out = io.StringIO()
+        with unittest.mock.patch("sys.stdout", out):
+            exit_code = main(["restore-opencode", "--path", str(target)])
+        self.assertEqual(exit_code, 1)
+
+    def test_cli_restore_opencode_with_latest_flag(self):
+        import io
+        from bridge.__main__ import main
+        target = self.dir_path / "opencode.json"
+        target.write_text(json.dumps({"model": "bridge"}), encoding="utf-8")
+
+        b1 = self.dir_path / "opencode.json.backup-1"
+        b1.write_text(json.dumps({"model": "older"}), encoding="utf-8")
+        os.utime(b1, (1000.0, 1000.0))
+
+        b2 = self.dir_path / "opencode.json.backup-2"
+        b2.write_text(json.dumps({"model": "immediate_previous"}), encoding="utf-8")
+        os.utime(b2, (2000.0, 2000.0))
+
+        out = io.StringIO()
+        with unittest.mock.patch("sys.stdout", out):
+            exit_code = main(["restore-opencode", "--path", str(target), "--latest"])
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(json.loads(target.read_text(encoding="utf-8")), {"model": "immediate_previous"})
+        self.assertIn("OpenCode", out.getvalue())
+
+    def test_cli_restore_opencode_with_backup_flag(self):
+        from bridge.__main__ import main
+        target = self.dir_path / "opencode.json"
+        target.write_text(json.dumps({"model": "bridge"}), encoding="utf-8")
+
+        b1 = self.dir_path / "opencode.json.backup-1"
+        b1.write_text(json.dumps({"model": "specific"}), encoding="utf-8")
+
+        exit_code = main(["restore-opencode", "--path", str(target), "--backup", str(b1)])
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(json.loads(target.read_text(encoding="utf-8")), {"model": "specific"})
+
+
+class TestUninstallOpenCode(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp_dir.name)
+        self.daemon_dir = self.root / ".agy-bridge"
+        self.daemon_dir.mkdir(parents=True, exist_ok=True)
+        self.bin_dir = self.root / ".local" / "bin"
+        self.bin_dir.mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_uninstall_discovers_and_cleans_opencode(self):
+        opencode_config = self.root / ".config" / "opencode" / "opencode.json"
+        opencode_config.parent.mkdir(parents=True, exist_ok=True)
+        opencode_config.write_text(
+            json.dumps({
+                "model": "agy/gemini-3.8-flash-high",
+                "provider": {"agy": {"name": "AGY Bridge"}},
+            }),
+            encoding="utf-8",
+        )
+
+        res = uninstall(
+            daemon_dir=self.daemon_dir,
+            bin_dir=self.bin_dir,
+            custom_config_paths={"opencode": opencode_config},
+            restore_configs=True,
+            purge_backups=False,
+        )
+
+        self.assertIn("opencode", res["restored_clients"])
+        self.assertTrue(res["restored_clients"]["opencode"])
+        self.assertTrue(res.get("opencode_restored", False))
+        cleaned = json.loads(opencode_config.read_text(encoding="utf-8"))
+        self.assertNotIn("agy", cleaned.get("provider", {}))
+        self.assertNotIn("model", cleaned)
 
 
 if __name__ == "__main__":
