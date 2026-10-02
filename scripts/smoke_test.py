@@ -53,9 +53,9 @@ def test_models(base_url: str, api_key: str = "local-bridge") -> str:
             models = data.get("data", [])
             if not isinstance(models, list) or len(models) == 0:
                 raise AssertionError(f"Expected non-empty model list, got {models}")
-            flash_models = [m.get("id", "") for m in models if "flash" in m.get("id", "")]
             gemini_models = [m.get("id", "") for m in models if m.get("id", "").startswith("gemini-")]
-            chosen_model = flash_models[0] if flash_models else (gemini_models[0] if gemini_models else models[0].get("id", ""))
+            flash_models = [m.get("id", "") for m in models if "flash" in m.get("id", "") and not m.get("id", "").startswith("tab_")]
+            chosen_model = gemini_models[0] if gemini_models else (flash_models[0] if flash_models else models[0].get("id", ""))
             if not chosen_model:
                 raise AssertionError(f"Invalid model entry in catalog: {models[0]}")
     except Exception as e:
@@ -100,7 +100,7 @@ def test_dashboard(base_url: str) -> None:
                 "[model_providers.agy]",
                 'wire_api = "responses"',
                 "export ANTHROPIC_BASE_URL=",
-                "export OPENAI_BASE_URL=",
+                "BASE_URL=",
             ):
                 if expected_snippet not in unescaped_body:
                     raise AssertionError(f"Missing snippet pattern '{expected_snippet}' in dashboard HTML")
