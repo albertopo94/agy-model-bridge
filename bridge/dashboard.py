@@ -130,6 +130,18 @@ OPENCODE_ICON_SVG = (
     '</svg>'
 )
 
+OPENCLAW_ICON_SVG = (
+    '<svg class="card-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="#FF4D4D" aria-hidden="true">'
+    '<g transform="translate(0 0) scale(0.2)">'
+    '<path d="M60 10 C30 10 15 35 15 55 C15 75 30 95 45 100 L45 110 L55 110 L55 100 C55 100 60 102 65 100 L65 110 L75 110 L75 100 C90 95 105 75 105 55 C105 35 90 10 60 10Z"/>'
+    '<path d="M20 45 C5 40 0 50 5 60 C10 70 20 65 25 55 C28 48 25 45 20 45Z"/>'
+    '<path d="M100 45 C115 40 120 50 115 60 C110 70 100 65 95 55 C92 48 95 45 100 45Z"/>'
+    '<path d="M45 15 Q35 5 30 8" fill="none" stroke="#FF4D4D" stroke-width="3" stroke-linecap="round"/>'
+    '<path d="M75 15 Q85 5 90 8" fill="none" stroke="#FF4D4D" stroke-width="3" stroke-linecap="round"/>'
+    '</g>'
+    '</svg>'
+)
+
 FREELLMAPI_ICON_SVG = (
     '<svg class="card-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="24" height="24" aria-hidden="true">'
     '<rect width="64" height="64" rx="14" fill="#09090b"/>'
@@ -215,6 +227,22 @@ CLIENT_CARDS: list[dict[str, Any]] = [
         "restore_cmd": lambda addr: "agy-bridge restore-opencode",
         "manual_snippet": lambda addr: f"BASE_URL=http://{addr}/v1\nAPI_KEY=local-bridge",
         "docs_url": "https://opencode.ai/docs",
+    },
+    {
+        "id": "openclaw",
+        "title": "OpenClaw",
+        "desc": "An always-on personal assistant that answers on WhatsApp, Telegram, Discord, and more from your own machine.",
+        "desc_en": "An always-on personal assistant that answers on WhatsApp, Telegram, Discord, and more from your own machine.",
+        "desc_es": "Un asistente personal siempre activo que responde en WhatsApp, Telegram, Discord y más desde tu propia máquina.",
+        "icon_svg": OPENCLAW_ICON_SVG,
+        "auto_cmd": lambda addr: (
+            f"agy-bridge setup-openclaw --port {addr.rsplit(':', 1)[1]}"
+            if ":" in addr and addr.rsplit(":", 1)[1].isdigit() and addr.rsplit(":", 1)[1] != "24980"
+            else "agy-bridge setup-openclaw"
+        ),
+        "restore_cmd": lambda addr: "agy-bridge restore-openclaw",
+        "manual_snippet": lambda addr: f"BASE_URL=http://{addr}/v1\nAPI_KEY=local-bridge",
+        "docs_url": "https://docs.openclaw.ai/gateway/config-tools/custom-providers",
     },
     {
         "id": "freellmapi",
@@ -673,6 +701,7 @@ def render_dashboard(
         desc_codex: "OpenAI Responses API CLI (wire_api = 'responses')",
         desc_hermes: "NousResearch Hermes Agent CLI & Desktop (Base URL with /v1)",
         desc_opencode: "A provider-agnostic terminal agent with a full-screen text interface.",
+        desc_openclaw: "An always-on personal assistant that answers on WhatsApp, Telegram, Discord, and more from your own machine.",
         desc_freellmapi: "Custom Provider & Aider integration (Base URL with /v1)",
         footer: "AGY Model Bridge &bull; Powered by Google Cloud Code Assist &bull; Local Gateway"
       }},
@@ -692,6 +721,7 @@ def render_dashboard(
         desc_codex: "CLI con OpenAI Responses API (wire_api = 'responses')",
         desc_hermes: "Hermes Agent CLI y Desktop de NousResearch (URL base con /v1)",
         desc_opencode: "Un agente de terminal independiente del proveedor, con interfaz de texto a pantalla completa.",
+        desc_openclaw: "Un asistente personal siempre activo que responde en WhatsApp, Telegram, Discord y más desde tu propia máquina.",
         desc_freellmapi: "Integraci\u00f3n para Custom Provider y Aider (URL base con /v1)",
         footer: "AGY Model Bridge &bull; Potenciado por Google Cloud Code Assist &bull; Gateway local"
       }}

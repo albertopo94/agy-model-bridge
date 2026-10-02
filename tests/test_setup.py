@@ -13,6 +13,7 @@ from bridge.setup import (
     ClientConfigurator,
     CodexConfigurator,
     HermesConfigurator,
+    OpenClawConfigurator,
     OpenCodeConfigurator,
     atomic_write_file,
     build_hermes_block,
@@ -26,10 +27,12 @@ from bridge.setup import (
     restore_claude,
     restore_codex,
     restore_hermes,
+    restore_openclaw,
     restore_opencode,
     setup_claude,
     setup_codex,
     setup_hermes,
+    setup_openclaw,
     setup_opencode,
     uninstall,
     update_installation,
@@ -237,6 +240,20 @@ class TestDescribeBackup(unittest.TestCase):
             "model": "anthropic/claude-3-5-sonnet",
         }), encoding="utf-8")
         self.assertEqual(describe_backup(b), "OpenCode Original")
+
+    def test_describe_openclaw_agy_bridge_backup(self):
+        b = self.dir_path / "openclaw.json.backup-2026-10-02T10-00-00"
+        b.write_text(json.dumps({
+            "models": {"providers": {"agy": {"baseUrl": "http://127.0.0.1:24980/v1"}}},
+        }), encoding="utf-8")
+        self.assertEqual(describe_backup(b), "AGY Bridge")
+
+    def test_describe_openclaw_original_backup(self):
+        b = self.dir_path / "openclaw.json.backup-2026-10-02T09-00-00"
+        b.write_text(json.dumps({
+            "agents": {"defaults": {"model": {"primary": "openai/gpt-4o"}}},
+        }), encoding="utf-8")
+        self.assertEqual(describe_backup(b), "OpenClaw Original")
 
     def test_describe_missing_or_invalid_file(self):
         missing = self.dir_path / "does_not_exist"
@@ -1287,7 +1304,7 @@ class TestUpdateInstallation(unittest.TestCase):
 
         self.assertEqual(result["status"], "updated")
         self.assertTrue(result["restarted_daemon"])
-        self.assertEqual(result["version"], "0.7.0")
+        self.assertEqual(result["version"], "0.8.0")
         mock_run.assert_called_once_with(
             ["git", "-C", str(self.repo_dir), "pull", "--ff-only"],
             capture_output=True,
@@ -1479,7 +1496,7 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main([flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.7.0")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.8.0")
 
     def test_cli_subcommand_version_flags(self):
         from bridge.__main__ import main
@@ -1491,19 +1508,19 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main(["update", flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.7.0")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.8.0")
 
     def test_version_unification(self):
         import bridge
         from pathlib import Path
         import re
 
-        self.assertEqual(bridge.__version__, "0.7.0")
+        self.assertEqual(bridge.__version__, "0.8.0")
         pyproject_path = Path(__file__).resolve().parent.parent / "pyproject.toml"
         pyproject_text = pyproject_path.read_text(encoding="utf-8")
         match = re.search(r'version\s*=\s*"([^"]+)"', pyproject_text)
         self.assertIsNotNone(match)
-        self.assertEqual(match.group(1), "0.7.0")
+        self.assertEqual(match.group(1), "0.8.0")
 
 
 class TestClientConfiguratorRegistry(unittest.TestCase):
@@ -1528,6 +1545,11 @@ class TestClientConfiguratorRegistry(unittest.TestCase):
         self.assertEqual(opencode_cfg.name, "opencode")
         self.assertEqual(opencode_cfg.display_name, "OpenCode")
 
+        openclaw_cfg = get_configurator("openclaw")
+        self.assertIsInstance(openclaw_cfg, OpenClawConfigurator)
+        self.assertEqual(openclaw_cfg.name, "openclaw")
+        self.assertEqual(openclaw_cfg.display_name, "OpenClaw")
+
     def test_get_configurator_unknown_raises_key_error(self):
         with self.assertRaises(KeyError):
             get_configurator("unknown_client")
@@ -1539,6 +1561,7 @@ class TestClientConfiguratorRegistry(unittest.TestCase):
         self.assertIn("codex", names)
         self.assertIn("hermes", names)
         self.assertIn("opencode", names)
+        self.assertIn("openclaw", names)
 
     def test_register_custom_configurator(self):
         class DummyConfigurator(ClientConfigurator):
@@ -2048,6 +2071,12 @@ class TestStandaloneWrappers(unittest.TestCase):
         self.assertTrue(get_configurator("opencode").is_configured(opencode_path))
         self.assertTrue(restore_opencode(config_path=opencode_path))
 
+        openclaw_path = self.dir_path / "openclaw.json"
+        p5 = setup_openclaw(config_path=openclaw_path)
+        self.assertEqual(p5, openclaw_path)
+        self.assertTrue(get_configurator("openclaw").is_configured(openclaw_path))
+        self.assertTrue(restore_openclaw(config_path=openclaw_path))
+
 
 class TestOpenCodeConfigurator(unittest.TestCase):
     def setUp(self):
@@ -2402,6 +2431,390 @@ class TestUninstallOpenCode(unittest.TestCase):
         cleaned = json.loads(opencode_config.read_text(encoding="utf-8"))
         self.assertNotIn("agy", cleaned.get("provider", {}))
         self.assertNotIn("model", cleaned)
+
+
+class TestOpenClawConfigurator(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.dir_path = Path(self.temp_dir.name)
+        self.configurator = OpenClawConfigurator()
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_default_config_path_precedence(self):
+        # 1. OPENCLAW_CONFIG_PATH override
+        custom_path = self.dir_path / "custom" / "custom_openclaw.json"
+        with unittest.mock.patch.dict(os.environ, {"OPENCLAW_CONFIG_PATH": str(custom_path)}):
+            self.assertEqual(self.configurator.default_config_path, custom_path)
+
+        # 2. OPENCLAW_STATE_DIR override
+        state_dir = self.dir_path / "state"
+        with unittest.mock.patch.dict(os.environ, {"OPENCLAW_CONFIG_PATH": "", "OPENCLAW_STATE_DIR": str(state_dir)}):
+            self.assertEqual(self.configurator.default_config_path, state_dir / "openclaw.json")
+
+        # 3. OPENCLAW_HOME override
+        home_dir = self.dir_path / "openclaw_home"
+        with unittest.mock.patch.dict(os.environ, {"OPENCLAW_CONFIG_PATH": "", "OPENCLAW_STATE_DIR": "", "OPENCLAW_HOME": str(home_dir)}):
+            self.assertEqual(self.configurator.default_config_path, home_dir / ".openclaw" / "openclaw.json")
+
+        # 4. Fallback default: Path.home() / ".openclaw" / "openclaw.json"
+        with unittest.mock.patch.dict(os.environ, {"OPENCLAW_CONFIG_PATH": "", "OPENCLAW_STATE_DIR": "", "OPENCLAW_HOME": ""}):
+            with unittest.mock.patch("pathlib.Path.home", return_value=self.dir_path):
+                self.assertEqual(self.configurator.default_config_path, self.dir_path / ".openclaw" / "openclaw.json")
+
+    def test_is_configured_false_when_missing_or_clean(self):
+        target = self.dir_path / "openclaw.json"
+        self.assertFalse(self.configurator.is_configured(target))
+
+        target.write_text(json.dumps({"agents": {"defaults": {"model": {"primary": "openai/gpt-4o"}}}}), encoding="utf-8")
+        self.assertFalse(self.configurator.is_configured(target))
+
+    def test_is_configured_true_variations(self):
+        target = self.dir_path / "openclaw.json"
+        for sample in (
+            json.dumps({"models": {"providers": {"agy": {"baseUrl": "http://127.0.0.1:24980/v1"}}}}),
+            json.dumps({"agents": {"defaults": {"model": {"primary": "agy/gemini-3.8-flash-high"}}}}),
+            json.dumps({"models": {"providers": {"custom": {"baseUrl": "http://127.0.0.1:24980/v1"}}}}),
+            '{"models": {"providers": {"agy": {}}}}',
+            '{"agents": {"defaults": {"model": {"primary": "agy/gemini-2.5-pro"}}}}',
+            '{"models": {"endpoint": "http://localhost:24980/v1"}}',
+        ):
+            with self.subTest(sample=sample):
+                target.write_text(sample, encoding="utf-8")
+                self.assertTrue(self.configurator.is_configured(target))
+
+    def test_setup_fresh_file(self):
+        target = self.dir_path / "openclaw.json"
+        res = self.configurator.setup(config_path=target)
+        self.assertEqual(res, target)
+        self.assertTrue(target.exists())
+        self.assertTrue(self.configurator.is_configured(target))
+
+        # Permissions 0o600
+        mode = stat.S_IMODE(target.stat().st_mode)
+        self.assertEqual(mode, 0o600)
+
+        data = json.loads(target.read_text(encoding="utf-8"))
+        self.assertEqual(data["agents"]["defaults"]["model"]["primary"], "agy/gemini-3.8-flash-high")
+        self.assertIn("models", data)
+        self.assertIn("providers", data["models"])
+        self.assertIn("agy", data["models"]["providers"])
+
+        agy_provider = data["models"]["providers"]["agy"]
+        self.assertEqual(agy_provider["baseUrl"], "http://127.0.0.1:24980/v1")
+        self.assertEqual(agy_provider["apiKey"], "local-bridge")
+        self.assertEqual(agy_provider["api"], "openai-completions")
+        self.assertEqual(agy_provider["headers"], {"User-Agent": "openclaw"})
+        self.assertEqual(len(agy_provider["models"]), 3)
+
+        expected_models = [
+            {
+                "id": "gemini-3.8-flash-high",
+                "name": "Gemini 3.8 Flash (High)",
+                "reasoning": False,
+                "input": ["text"],
+                "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+                "contextWindow": 1048576,
+                "maxTokens": 65536,
+            },
+            {
+                "id": "gemini-2.5-pro",
+                "name": "Gemini 2.5 Pro",
+                "reasoning": False,
+                "input": ["text"],
+                "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+                "contextWindow": 1048576,
+                "maxTokens": 65536,
+            },
+            {
+                "id": "gemini-2.5-flash",
+                "name": "Gemini 2.5 Flash",
+                "reasoning": False,
+                "input": ["text"],
+                "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+                "contextWindow": 1048576,
+                "maxTokens": 65536,
+            },
+        ]
+        self.assertEqual(agy_provider["models"], expected_models)
+
+    def test_setup_preserves_existing_keys_and_deep_merges(self):
+        target = self.dir_path / "openclaw.json"
+        initial = {
+            "version": "1.0.0",
+            "agents": {
+                "defaults": {
+                    "timeout": 60,
+                    "model": {
+                        "fallback": "openai/gpt-4o",
+                    },
+                },
+                "custom_agent": {"tools": ["web_search"]},
+            },
+            "models": {
+                "providers": {
+                    "anthropic": {
+                        "baseUrl": "https://api.anthropic.com",
+                        "apiKey": "sk-ant-123",
+                    },
+                },
+            },
+            "channels": {"telegram": {"enabled": True}},
+        }
+        target.write_text(json.dumps(initial, indent=2), encoding="utf-8")
+
+        res = self.configurator.setup(config_path=target)
+        self.assertIsNotNone(res.backup_path)
+        self.assertTrue(res.backup_path.exists())
+
+        data = json.loads(target.read_text(encoding="utf-8"))
+        self.assertEqual(data["version"], "1.0.0")
+        self.assertEqual(data["channels"], {"telegram": {"enabled": True}})
+        self.assertEqual(data["agents"]["custom_agent"], {"tools": ["web_search"]})
+        self.assertEqual(data["agents"]["defaults"]["timeout"], 60)
+        self.assertEqual(data["agents"]["defaults"]["model"]["fallback"], "openai/gpt-4o")
+        self.assertEqual(data["agents"]["defaults"]["model"]["primary"], "agy/gemini-3.8-flash-high")
+        self.assertIn("anthropic", data["models"]["providers"])
+        self.assertIn("agy", data["models"]["providers"])
+
+    def test_setup_json_with_comments_stripping(self):
+        target = self.dir_path / "openclaw.json"
+        jsonc_content = (
+            "{\n"
+            "  // OpenClaw configuration comment\n"
+            '  "agents": {\n'
+            '    /* Multiline comment */\n'
+            '    "defaults": {}\n'
+            "  }\n"
+            "}\n"
+        )
+        target.write_text(jsonc_content, encoding="utf-8")
+
+        res = self.configurator.setup(config_path=target)
+        self.assertTrue(target.exists())
+        data = json.loads(target.read_text(encoding="utf-8"))
+        self.assertEqual(data["agents"]["defaults"]["model"]["primary"], "agy/gemini-3.8-flash-high")
+        self.assertIn("agy", data["models"]["providers"])
+
+    def test_setup_custom_port_and_url_and_model_and_token(self):
+        target = self.dir_path / "openclaw.json"
+        self.configurator.setup(
+            config_path=target,
+            port=9090,
+            model="gemini-2.5-pro",
+            auth_token="custom-secret-key",
+        )
+        data = json.loads(target.read_text(encoding="utf-8"))
+        self.assertEqual(data["agents"]["defaults"]["model"]["primary"], "agy/gemini-2.5-pro")
+        self.assertEqual(data["models"]["providers"]["agy"]["baseUrl"], "http://127.0.0.1:9090/v1")
+        self.assertEqual(data["models"]["providers"]["agy"]["apiKey"], "custom-secret-key")
+
+        # Custom URL without /v1 gets /v1 appended
+        target2 = self.dir_path / "openclaw2.json"
+        self.configurator.setup(
+            config_path=target2,
+            base_url="http://custom.host:1234",
+        )
+        data2 = json.loads(target2.read_text(encoding="utf-8"))
+        self.assertEqual(data2["models"]["providers"]["agy"]["baseUrl"], "http://custom.host:1234/v1")
+
+    def test_restore_from_backup(self):
+        target = self.dir_path / "openclaw.json"
+        target.write_text(json.dumps({"version": "original-openclaw"}), encoding="utf-8")
+
+        self.configurator.setup(config_path=target)
+        self.assertTrue(self.configurator.is_configured(target))
+
+        restored = self.configurator.restore(config_path=target)
+        self.assertTrue(restored)
+        data = json.loads(target.read_text(encoding="utf-8"))
+        self.assertEqual(data.get("version"), "original-openclaw")
+
+    def test_restore_surgical_clean_without_backups(self):
+        target = self.dir_path / "openclaw.json"
+        data = {
+            "agents": {
+                "defaults": {
+                    "timeout": 30,
+                    "model": {
+                        "primary": "agy/gemini-3.8-flash-high",
+                        "fallback": "openai/gpt-4o",
+                    },
+                },
+            },
+            "models": {
+                "providers": {
+                    "agy": {"baseUrl": "http://127.0.0.1:24980/v1"},
+                    "other": {"baseUrl": "http://other/v1"},
+                },
+            },
+        }
+        target.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        self.assertTrue(self.configurator.is_configured(target))
+
+        restored = self.configurator.restore(config_path=target)
+        self.assertTrue(restored)
+
+        cleaned = json.loads(target.read_text(encoding="utf-8"))
+        self.assertNotIn("agy", cleaned.get("models", {}).get("providers", {}))
+        self.assertIn("other", cleaned.get("models", {}).get("providers", {}))
+        self.assertNotIn("primary", cleaned.get("agents", {}).get("defaults", {}).get("model", {}))
+        self.assertEqual(cleaned["agents"]["defaults"]["model"]["fallback"], "openai/gpt-4o")
+        self.assertEqual(cleaned["agents"]["defaults"]["timeout"], 30)
+
+    def test_purge_backups(self):
+        target = self.dir_path / "openclaw.json"
+        target.write_text("{}", encoding="utf-8")
+        b1 = self.dir_path / "openclaw.json.backup-2026-10-02T10-00-00"
+        b1.write_text("{}", encoding="utf-8")
+
+        purged_count = self.configurator.purge_backups(target)
+        self.assertEqual(purged_count, 1)
+        self.assertEqual(len(self.configurator.list_backups(target)), 0)
+
+
+class TestCLIOpenClaw(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.dir_path = Path(self.temp_dir.name)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_cli_setup_openclaw_dispatches_with_flags(self):
+        from bridge.__main__ import main
+        target = self.dir_path / "openclaw_config.json"
+        exit_code = main(["setup-openclaw", "--port", "9090", "--model", "gemini-2.5-pro", "--path", str(target)])
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(target.exists())
+        data = json.loads(target.read_text(encoding="utf-8"))
+        self.assertEqual(data["agents"]["defaults"]["model"]["primary"], "agy/gemini-2.5-pro")
+        self.assertEqual(data["models"]["providers"]["agy"]["baseUrl"], "http://127.0.0.1:9090/v1")
+
+    def test_cli_setup_openclaw_outputs_backup_and_guidance(self):
+        import io
+        from bridge.__main__ import main
+        target = self.dir_path / "openclaw_config.json"
+        target.write_text(json.dumps({"version": "old"}), encoding="utf-8")
+        out = io.StringIO()
+        with unittest.mock.patch("sys.stdout", out):
+            exit_code = main(["setup-openclaw", "--path", str(target)])
+        self.assertEqual(exit_code, 0)
+        output = out.getvalue()
+        self.assertIn("Backup: ", output)
+        self.assertIn(f"OpenClaw configured successfully at {target}", output)
+        self.assertIn("OpenClaw will read this configuration automatically.", output)
+        self.assertTrue(
+            "Run 'openclaw gateway' or 'openclaw agent'" in output
+            or "Ejecutá 'openclaw gateway' o 'openclaw agent'" in output
+        )
+
+    def test_cli_restore_openclaw_no_backups_returns_1(self):
+        import io
+        from bridge.__main__ import main
+        target = self.dir_path / "openclaw.json"
+        out = io.StringIO()
+        with unittest.mock.patch("sys.stdout", out):
+            exit_code = main(["restore-openclaw", "--path", str(target)])
+        self.assertEqual(exit_code, 1)
+
+    def test_cli_restore_openclaw_with_latest_flag(self):
+        import io
+        from bridge.__main__ import main
+        target = self.dir_path / "openclaw.json"
+        target.write_text(json.dumps({"version": "bridge"}), encoding="utf-8")
+
+        b1 = self.dir_path / "openclaw.json.backup-1"
+        b1.write_text(json.dumps({"version": "older"}), encoding="utf-8")
+        os.utime(b1, (1000.0, 1000.0))
+
+        b2 = self.dir_path / "openclaw.json.backup-2"
+        b2.write_text(json.dumps({"version": "immediate_previous"}), encoding="utf-8")
+        os.utime(b2, (2000.0, 2000.0))
+
+        out = io.StringIO()
+        with unittest.mock.patch("sys.stdout", out):
+            exit_code = main(["restore-openclaw", "--path", str(target), "--latest"])
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(json.loads(target.read_text(encoding="utf-8")), {"version": "immediate_previous"})
+        self.assertIn("OpenClaw", out.getvalue())
+
+    def test_cli_restore_openclaw_with_backup_flag(self):
+        from bridge.__main__ import main
+        target = self.dir_path / "openclaw.json"
+        target.write_text(json.dumps({"version": "bridge"}), encoding="utf-8")
+
+        b1 = self.dir_path / "openclaw.json.backup-1"
+        b1.write_text(json.dumps({"version": "specific"}), encoding="utf-8")
+
+        exit_code = main(["restore-openclaw", "--path", str(target), "--backup", str(b1)])
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(json.loads(target.read_text(encoding="utf-8")), {"version": "specific"})
+
+
+class TestUninstallOpenClaw(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp_dir.name)
+        self.daemon_dir = self.root / ".agy-bridge"
+        self.daemon_dir.mkdir(parents=True, exist_ok=True)
+        self.bin_dir = self.root / ".local" / "bin"
+        self.bin_dir.mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_uninstall_discovers_and_cleans_openclaw(self):
+        openclaw_config = self.root / ".openclaw" / "openclaw.json"
+        openclaw_config.parent.mkdir(parents=True, exist_ok=True)
+        openclaw_config.write_text(
+            json.dumps({
+                "agents": {"defaults": {"model": {"primary": "agy/gemini-3.8-flash-high"}}},
+                "models": {"providers": {"agy": {"baseUrl": "http://127.0.0.1:24980/v1"}}},
+            }),
+            encoding="utf-8",
+        )
+
+        res = uninstall(
+            daemon_dir=self.daemon_dir,
+            bin_dir=self.bin_dir,
+            custom_config_paths={"openclaw": openclaw_config},
+            restore_configs=True,
+            purge_backups=False,
+        )
+
+        self.assertIn("openclaw", res["restored_clients"])
+        self.assertTrue(res["restored_clients"]["openclaw"])
+        self.assertTrue(res.get("openclaw_restored", False))
+        cleaned = json.loads(openclaw_config.read_text(encoding="utf-8"))
+        self.assertNotIn("agy", cleaned.get("models", {}).get("providers", {}))
+        self.assertNotIn("primary", cleaned.get("agents", {}).get("defaults", {}).get("model", {}))
+
+    def test_uninstall_kwarg_openclaw_config_path(self):
+        openclaw_config = self.root / ".openclaw" / "openclaw.json"
+        openclaw_config.parent.mkdir(parents=True, exist_ok=True)
+        openclaw_config.write_text(
+            json.dumps({
+                "agents": {"defaults": {"model": {"primary": "agy/gemini-3.8-flash-high"}}},
+                "models": {"providers": {"agy": {"baseUrl": "http://127.0.0.1:24980/v1"}}},
+            }),
+            encoding="utf-8",
+        )
+
+        res = uninstall(
+            daemon_dir=self.daemon_dir,
+            bin_dir=self.bin_dir,
+            openclaw_config_path=openclaw_config,
+            restore_configs=True,
+            purge_backups=False,
+        )
+
+        self.assertIn("openclaw", res["restored_clients"])
+        self.assertTrue(res["restored_clients"]["openclaw"])
+        self.assertTrue(res.get("openclaw_restored", False))
+        cleaned = json.loads(openclaw_config.read_text(encoding="utf-8"))
+        self.assertNotIn("agy", cleaned.get("models", {}).get("providers", {}))
 
 
 if __name__ == "__main__":

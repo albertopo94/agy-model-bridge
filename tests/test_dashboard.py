@@ -62,6 +62,7 @@ class TestDashboardRendering(unittest.TestCase):
         self.assertIn("agy-bridge restore-codex", html)
         self.assertIn("agy-bridge restore-hermes", html)
         self.assertIn("agy-bridge restore-opencode", html)
+        self.assertIn("agy-bridge restore-openclaw", html)
 
         # Copy buttons and pre IDs for restore
         self.assertIn('id="claude-restore"', html)
@@ -72,6 +73,8 @@ class TestDashboardRendering(unittest.TestCase):
         self.assertIn("copySnippet(this, 'hermes-restore')", html)
         self.assertIn('id="opencode-restore"', html)
         self.assertIn("copySnippet(this, 'opencode-restore')", html)
+        self.assertIn('id="openclaw-restore"', html)
+        self.assertIn("copySnippet(this, 'openclaw-restore')", html)
 
     def test_render_dashboard_vercel_styling_and_responsive_grid(self):
         auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
@@ -125,11 +128,12 @@ class TestDashboardRendering(unittest.TestCase):
         auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
         html = render_dashboard("127.0.0.1", 24980, auth_status, models_count=20)
 
-        # All 5 client cards
+        # All 6 client cards
         self.assertIn("Claude Code", html)
         self.assertIn("Codex CLI", html)
         self.assertIn("Hermes Agent", html)
         self.assertIn("OpenCode", html)
+        self.assertIn("OpenClaw", html)
         self.assertIn("FreeLLMAPI", html)
 
         # Two-tier headings
@@ -145,6 +149,7 @@ class TestDashboardRendering(unittest.TestCase):
         self.assertIn("agy-bridge setup-codex", html)
         self.assertIn("agy-bridge setup-hermes", html)
         self.assertIn("agy-bridge setup-opencode", html)
+        self.assertIn("agy-bridge setup-openclaw", html)
         self.assertNotIn("ANTHROPIC_CUSTOM_MODEL_OPTION", html)
         self.assertNotIn("mkdir -p ~/.codex", html)
 
@@ -192,12 +197,13 @@ class TestDashboardRendering(unittest.TestCase):
         auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
         html = render_dashboard("127.0.0.1", 24980, auth_status, models_count=20)
 
-        # 13 independent snippet IDs and corresponding copy button calls
+        # 16 independent snippet IDs and corresponding copy button calls
         expected_ids = [
             "claude-auto", "claude-manual", "claude-restore",
             "codex-auto", "codex-manual", "codex-restore",
             "hermes-auto", "hermes-manual", "hermes-restore",
             "opencode-auto", "opencode-manual", "opencode-restore",
+            "openclaw-auto", "openclaw-manual", "openclaw-restore",
             "freellmapi-manual",
         ]
         for snippet_id in expected_ids:
@@ -216,6 +222,7 @@ class TestDashboardRendering(unittest.TestCase):
         self.assertIn("https://github.com/openai/codex", html)
         self.assertIn("https://hermes-agent.nousresearch.com", html)
         self.assertIn("https://opencode.ai/docs", html)
+        self.assertIn("https://docs.openclaw.ai/gateway/config-tools/custom-providers", html)
         self.assertIn("https://github.com/tashfeenahmed/freellmapi", html)
 
         # Robust clipboard JavaScript
@@ -228,12 +235,13 @@ class TestDashboardRendering(unittest.TestCase):
 
     def test_client_cards_schema(self):
         from bridge.dashboard import CLIENT_CARDS
-        self.assertEqual(len(CLIENT_CARDS), 5)
+        self.assertEqual(len(CLIENT_CARDS), 6)
         card_titles = [c["title"] for c in CLIENT_CARDS]
         self.assertIn("Claude Code", card_titles)
         self.assertIn("Codex CLI", card_titles)
         self.assertIn("Hermes Agent", card_titles)
         self.assertIn("OpenCode", card_titles)
+        self.assertIn("OpenClaw", card_titles)
         self.assertIn("FreeLLMAPI", card_titles)
 
         by_id = {c["id"]: c for c in CLIENT_CARDS}
@@ -326,6 +334,25 @@ class TestDashboardRendering(unittest.TestCase):
             "BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY=local-bridge",
         )
         self.assertEqual(by_id["opencode"]["docs_url"], "https://opencode.ai/docs")
+
+        self.assertIn('viewBox="0 0 24 24"', by_id["openclaw"].get("icon_svg", ""))
+        self.assertEqual(
+            by_id["openclaw"]["auto_cmd"]("127.0.0.1:24980"),
+            "agy-bridge setup-openclaw",
+        )
+        self.assertEqual(
+            by_id["openclaw"]["auto_cmd"]("127.0.0.1:9090"),
+            "agy-bridge setup-openclaw --port 9090",
+        )
+        self.assertEqual(
+            by_id["openclaw"]["restore_cmd"]("127.0.0.1:24980"),
+            "agy-bridge restore-openclaw",
+        )
+        self.assertEqual(
+            by_id["openclaw"]["manual_snippet"]("127.0.0.1:24980"),
+            "BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY=local-bridge",
+        )
+        self.assertEqual(by_id["openclaw"]["docs_url"], "https://docs.openclaw.ai/gateway/config-tools/custom-providers")
 
         self.assertNotIn("auto_cmd", by_id["freellmapi"])
         self.assertIn("icon_svg", by_id["freellmapi"])

@@ -202,6 +202,9 @@ class TestTranslationsParity(unittest.TestCase):
             "setup_opencode_success",
             "setup_opencode_auto_read",
             "setup_opencode_run_hint",
+            "setup_openclaw_success",
+            "setup_openclaw_auto_read",
+            "setup_openclaw_run_hint",
             # Restore
             "restore_restored_from",
             "restore_client_ready",
@@ -222,6 +225,7 @@ class TestTranslationsParity(unittest.TestCase):
             "uninstall_codex_restored",
             "uninstall_hermes_restored",
             "uninstall_opencode_restored",
+            "uninstall_openclaw_restored",
             "uninstall_backups_purged",
             # Update
             "update_success",
