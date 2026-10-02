@@ -18,6 +18,7 @@ from bridge.setup import (
     get_configurator,
     list_backups,
     restore_backup,
+    restore_gentle_shell,
     restore_hermes,
     restore_openclaw,
     restore_opencode,
@@ -25,6 +26,7 @@ from bridge.setup import (
     setup_claude,
     setup_codex,
     setup_cursor,
+    setup_gentle_shell,
     setup_hermes,
     setup_openclaw,
     setup_opencode,
@@ -74,6 +76,8 @@ def _handle_restore_cli(
     if args.backup is not None:
         try:
             restored = restore_backup(target, backup_path=args.backup)
+            if client_name == "Gentle Shell":
+                restore_gentle_shell(config_path=target, backup_path=args.backup)
             print(t("restore_restored_from", name=restored.name))
             print(t("restore_client_ready", client_name=client_name, target=target))
             return 0
@@ -88,6 +92,8 @@ def _handle_restore_cli(
 
     if args.latest:
         restored = restore_backup(target, backup_path=backups[0])
+        if client_name == "Gentle Shell":
+            restore_gentle_shell(config_path=target, backup_path=backups[0])
         print(t("restore_restored_from", name=restored.name))
         print(t("restore_client_ready", client_name=client_name, target=target))
         return 0
@@ -124,6 +130,8 @@ def _handle_restore_cli(
         return 1
 
     restored = restore_backup(target, backup_path=backups[selected_index])
+    if client_name == "Gentle Shell":
+        restore_gentle_shell(config_path=target, backup_path=backups[selected_index])
     print("\n" + t("restore_restored_from", name=restored.name))
     print(t("restore_client_ready", client_name=client_name, target=target))
     return 0
@@ -699,6 +707,71 @@ def main(argv: list[str] | None = None) -> int:
             print(t("setup_pi_set_default_done"))
         return 0
 
+    if argv and argv[0] in ("setup-gentle-shell", "setup-gentle"):
+        parser = argparse.ArgumentParser(
+            prog=f"{prog_base} {argv[0]}",
+            description="Configure Gentle Shell for agy-model-bridge gateway.",
+        )
+        parser.add_argument(
+            "--port",
+            type=int,
+            default=None,
+            help="Gateway port (default: 24980)",
+        )
+        parser.add_argument(
+            "--model",
+            type=str,
+            default="gemini-3.8-flash-high",
+            help="Default model identifier (default: gemini-3.8-flash-high)",
+        )
+        parser.add_argument(
+            "--url",
+            "--base-url",
+            dest="base_url",
+            type=str,
+            default=None,
+            help="Gateway base URL override (with /v1)",
+        )
+        parser.add_argument(
+            "--token",
+            "--auth-token",
+            dest="auth_token",
+            type=str,
+            default=None,
+            help="Gateway auth token (default: persistent key)",
+        )
+        parser.add_argument(
+            "--set-default",
+            action="store_true",
+            help="Set agy as defaultProvider and model as defaultModel in settings.json",
+        )
+        parser.add_argument(
+            "--path",
+            type=Path,
+            default=None,
+            help=f"Path to Gentle Shell models.json (default: {get_configurator('gentle-shell').default_config_path})",
+        )
+        parser.add_argument("--lang", type=str, default=None, help=t("cli_help_lang"))
+        args = parser.parse_args(argv[1:])
+        target = setup_gentle_shell(
+            config_path=args.path,
+            base_url=args.base_url,
+            port=args.port,
+            model=args.model,
+            auth_token=args.auth_token,
+            set_default=args.set_default,
+        )
+        if getattr(target, "backup_path", None):
+            print(t("setup_backup_label", path=target.backup_path))
+        print(t("setup_gentle_shell_success", target=target))
+        print(t("setup_gentle_shell_auto_read"))
+        print(t("setup_gentle_shell_run_hint"))
+        if not args.set_default:
+            print(t("setup_gentle_shell_set_default_tip"))
+        else:
+            print(t("setup_gentle_shell_set_default_done"))
+        return 0
+
     if argv and argv[0] == "restore-claude":
         return _handle_restore_cli(
             client_name="Claude Code",
@@ -745,6 +818,14 @@ def main(argv: list[str] | None = None) -> int:
             default_target=get_configurator("pi").get_config_path(),
             argv=argv[1:],
             prog_name=f"{prog_base} restore-pi",
+        )
+
+    if argv and argv[0] in ("restore-gentle-shell", "restore-gentle"):
+        return _handle_restore_cli(
+            client_name="Gentle Shell",
+            default_target=get_configurator("gentle-shell").get_config_path(),
+            argv=argv[1:],
+            prog_name=f"{prog_base} {argv[0]}",
         )
 
     if argv and argv[0] == "uninstall":
@@ -808,6 +889,8 @@ def main(argv: list[str] | None = None) -> int:
             print(t("uninstall_openclaw_restored"))
         if res.get("pi_restored"):
             print(t("uninstall_pi_restored"))
+        if res.get("gentle_shell_restored"):
+            print(t("uninstall_gentle_shell_restored"))
         if res.get("backups_purged"):
             print(t("uninstall_backups_purged"))
         return 0

@@ -158,6 +158,12 @@ def describe_backup(backup_path: Path) -> str:
             return "AGY Bridge"
         return "OpenClaw Original"
 
+    # Gentle Shell models.json config inspection
+    if ".gentle-shell" in str(path):
+        if '"agy"' in content or ":24980" in content or "agy/" in content:
+            return "AGY Bridge"
+        return "Gentle Shell Original"
+
     # Pi models.json config inspection
     if "models.json" in path.name:
         if '"agy"' in content or ":24980" in content or "agy/" in content:
@@ -1516,6 +1522,234 @@ class PiConfigurator(ClientConfigurator):
 CLIENT_CONFIGURATORS["pi"] = PiConfigurator()
 
 
+class GentleShellConfigurator(ClientConfigurator):
+    """Configurator strategy for Gentle Shell companion."""
+
+    name = "gentle-shell"
+    display_name = "Gentle Shell"
+
+    @property
+    def default_config_path(self) -> Path:
+        gs_home = os.environ.get("GENTLE_SHELL_HOME")
+        if gs_home and gs_home.strip():
+            return Path(gs_home.strip()) / "models.json"
+        return Path.home() / ".gentle-shell" / "agent" / "models.json"
+
+    def is_configured(self, config_path: Path | None = None) -> bool:
+        target = self.get_config_path(config_path)
+        if not target.exists() or not target.is_file():
+            return False
+        try:
+            content = target.read_text(encoding="utf-8")
+            if not content.strip():
+                return False
+            data = None
+            try:
+                data = json.loads(content)
+            except json.JSONDecodeError:
+                cleaned = _strip_json_comments(content)
+                try:
+                    data = json.loads(cleaned)
+                except json.JSONDecodeError:
+                    pass
+            if isinstance(data, dict):
+                providers = data.get("providers")
+                if isinstance(providers, dict) and "agy" in providers:
+                    return True
+            if ":24980" in content:
+                return True
+            if '"providers"' in content and '"agy"' in content:
+                return True
+            return False
+        except OSError:
+            return False
+
+    def setup(
+        self,
+        base_url: str | None = None,
+        model: str = "gemini-3.8-flash-high",
+        config_path: Path | None = None,
+        **kwargs: Any,
+    ) -> Path:
+        target = self.get_config_path(config_path)
+        port = kwargs.get("port")
+        auth_token = kwargs.get("auth_token") or get_active_api_key()
+
+        if base_url:
+            resolved_url = base_url.rstrip("/")
+            if not resolved_url.endswith("/v1"):
+                resolved_url = f"{resolved_url}/v1"
+        elif port is not None:
+            resolved_url = f"http://127.0.0.1:{port}/v1"
+        else:
+            resolved_url = "http://127.0.0.1:24980/v1"
+
+        backup_path = None
+        config: dict[str, Any] = {}
+        if target.exists() and target.is_file():
+            backup_path = create_backup(target)
+            try:
+                raw_text = target.read_text(encoding="utf-8").strip()
+                if raw_text:
+                    try:
+                        loaded = json.loads(raw_text)
+                    except json.JSONDecodeError:
+                        cleaned = _strip_json_comments(raw_text)
+                        loaded = json.loads(cleaned)
+                    if isinstance(loaded, dict):
+                        config = loaded
+            except (json.JSONDecodeError, OSError):
+                config = {}
+
+        providers = config.setdefault("providers", {})
+        providers["agy"] = {
+            "name": "AGY Bridge",
+            "baseUrl": resolved_url,
+            "api": "openai-completions",
+            "apiKey": auth_token,
+            "headers": {"User-Agent": "gentle-shell"},
+            "models": [
+                {
+                    "id": "gemini-3.8-flash-high",
+                    "name": "Gemini 3.8 Flash (High)",
+                    "reasoning": False,
+                    "input": ["text"],
+                    "contextWindow": 1048576,
+                    "maxTokens": 65536,
+                },
+                {
+                    "id": "gemini-3.8",
+                    "name": "Gemini 3.8",
+                    "reasoning": False,
+                    "input": ["text"],
+                    "contextWindow": 1048576,
+                    "maxTokens": 65536,
+                },
+                {
+                    "id": "gemini-2.5-pro",
+                    "name": "Gemini 2.5 Pro",
+                    "reasoning": False,
+                    "input": ["text"],
+                    "contextWindow": 1048576,
+                    "maxTokens": 65536,
+                },
+                {
+                    "id": "gemini-2.5-flash",
+                    "name": "Gemini 2.5 Flash",
+                    "reasoning": False,
+                    "input": ["text"],
+                    "contextWindow": 1048576,
+                    "maxTokens": 65536,
+                },
+            ],
+        }
+
+        if kwargs.get("set_default"):
+            settings_path = target.parent / "settings.json"
+            settings_config: dict[str, Any] = {}
+            if settings_path.exists() and settings_path.is_file():
+                create_backup(settings_path)
+                try:
+                    raw_s = settings_path.read_text(encoding="utf-8").strip()
+                    if raw_s:
+                        try:
+                            s_loaded = json.loads(raw_s)
+                        except json.JSONDecodeError:
+                            s_cleaned = _strip_json_comments(raw_s)
+                            s_loaded = json.loads(s_cleaned)
+                        if isinstance(s_loaded, dict):
+                            settings_config = s_loaded
+                except (json.JSONDecodeError, OSError):
+                    settings_config = {}
+            settings_config["defaultProvider"] = "agy"
+            settings_config["defaultModel"] = model
+            if "enabledModels" in settings_config and isinstance(settings_config["enabledModels"], list):
+                scoped_name = f"agy/{model}"
+                if scoped_name not in settings_config["enabledModels"]:
+                    settings_config["enabledModels"].append(scoped_name)
+            atomic_write_file(settings_path, json.dumps(settings_config, indent=2) + "\n", mode=0o600)
+
+        formatted_json = json.dumps(config, indent=2) + "\n"
+        atomic_write_file(target, formatted_json, mode=0o600)
+        res = ConfigPath(target)
+        res.backup_path = backup_path
+        return res
+
+    def restore(
+        self,
+        config_path: Path | None = None,
+        backup_path: Path | None = None,
+        **kwargs: Any,
+    ) -> bool:
+        target = self.get_config_path(config_path)
+        restored = False
+        if backup_path is not None:
+            try:
+                restore_backup(target, backup_path=backup_path)
+                restored = True
+            except (OSError, FileNotFoundError):
+                return False
+        else:
+            backups = self.list_backups(target)
+            if backups:
+                try:
+                    restore_backup(target, backup_path=backups[0])
+                    restored = True
+                except OSError:
+                    return False
+            elif target.exists() and target.is_file():
+                try:
+                    raw_text = target.read_text(encoding="utf-8").strip()
+                    if raw_text:
+                        try:
+                            config = json.loads(raw_text)
+                        except json.JSONDecodeError:
+                            cleaned = _strip_json_comments(raw_text)
+                            config = json.loads(cleaned)
+
+                        if isinstance(config, dict):
+                            prov = config.get("providers")
+                            if isinstance(prov, dict):
+                                prov.pop("agy", None)
+
+                            formatted_json = json.dumps(config, indent=2) + "\n"
+                            atomic_write_file(target, formatted_json, mode=0o600)
+                            restored = True
+                except (json.JSONDecodeError, OSError):
+                    return False
+
+        if restored:
+            settings_path = target.parent / "settings.json"
+            if settings_path.exists() and settings_path.is_file():
+                try:
+                    raw_s = settings_path.read_text(encoding="utf-8").strip()
+                    if raw_s:
+                        try:
+                            s_data = json.loads(raw_s)
+                        except json.JSONDecodeError:
+                            s_cleaned = _strip_json_comments(raw_s)
+                            s_data = json.loads(s_cleaned)
+                        if isinstance(s_data, dict) and s_data.get("defaultProvider") == "agy":
+                            s_backups = list_backups(settings_path)
+                            if s_backups:
+                                try:
+                                    restore_backup(settings_path, backup_path=s_backups[0])
+                                except OSError:
+                                    pass
+                            else:
+                                s_data.pop("defaultProvider", None)
+                                s_data.pop("defaultModel", None)
+                                atomic_write_file(settings_path, json.dumps(s_data, indent=2) + "\n", mode=0o600)
+                except (json.JSONDecodeError, OSError):
+                    pass
+
+        return restored
+
+
+CLIENT_CONFIGURATORS["gentle-shell"] = GentleShellConfigurator()
+CLIENT_CONFIGURATORS["gentle"] = CLIENT_CONFIGURATORS["gentle-shell"]
+
+
 def register_configurator(configurator: ClientConfigurator) -> None:
     """Registers a client configurator into the global registry."""
     CLIENT_CONFIGURATORS[configurator.name] = configurator
@@ -1720,6 +1954,36 @@ def restore_pi(
     )
 
 
+def setup_gentle_shell(
+    config_path: Path | None = None,
+    base_url: str | None = None,
+    port: int | None = None,
+    model: str = "gemini-3.8-flash-high",
+    auth_token: str | None = None,
+    set_default: bool = False,
+) -> Path:
+    """Configures Gentle Shell models.json for agy-model-bridge gateway."""
+    return get_configurator("gentle-shell").setup(
+        base_url=base_url,
+        model=model,
+        config_path=config_path,
+        port=port,
+        auth_token=auth_token,
+        set_default=set_default,
+    )
+
+
+def restore_gentle_shell(
+    config_path: Path | None = None,
+    backup_path: Path | None = None,
+) -> bool:
+    """Restores Gentle Shell models.json from backup or surgically removes agy provider."""
+    return get_configurator("gentle-shell").restore(
+        config_path=config_path,
+        backup_path=backup_path,
+    )
+
+
 def uninstall(
     daemon_dir: Path | None = None,
     bin_dir: Path | None = None,
@@ -1733,6 +1997,7 @@ def uninstall(
     opencode_config_path: Path | None = None,
     openclaw_config_path: Path | None = None,
     pi_config_path: Path | None = None,
+    gentle_shell_config_path: Path | None = None,
 ) -> dict[str, Any]:
     """Uninstalls Antigravity Model Bridge and optionally restores client configurations.
 
@@ -1791,6 +2056,8 @@ def uninstall(
         paths_map["openclaw"] = Path(openclaw_config_path)
     if pi_config_path is not None:
         paths_map["pi"] = Path(pi_config_path)
+    if gentle_shell_config_path is not None:
+        paths_map["gentle-shell"] = Path(gentle_shell_config_path)
 
     # 3. Restore or surgically clean client configurations & purge backups if requested
     restored_clients: dict[str, bool] = {}
@@ -1838,6 +2105,7 @@ def uninstall(
         "opencode_restored": restored_clients.get("opencode", False),
         "openclaw_restored": restored_clients.get("openclaw", False),
         "pi_restored": restored_clients.get("pi", False),
+        "gentle_shell_restored": restored_clients.get("gentle-shell", False),
         "restored_clients": restored_clients,
         "binaries_removed": binaries_removed,
         "daemon_dir_removed": daemon_dir_removed,

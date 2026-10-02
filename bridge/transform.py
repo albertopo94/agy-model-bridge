@@ -406,7 +406,7 @@ def resolve_model_and_thinking(
     raw_model = (model or "").strip()
     m = raw_model.lower()
 
-    if not m or m == "auto" or m in ("gemini-3.8-flash", "gemini-3.8-flash-high"):
+    if not m or m == "auto" or m in ("gemini-3.8", "gemini-3.8-flash", "gemini-3.8-flash-high"):
         resolved_model = "gemini-3.8-flash-tiered"
         default_thinking: dict[str, Any] | None = {"thinkingLevel": "HIGH"}
     elif m == "gemini-3.8-flash-medium":

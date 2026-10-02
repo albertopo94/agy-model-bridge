@@ -1387,6 +1387,11 @@ class TestResolveModelAndThinking(unittest.TestCase):
         self.assertEqual(model, "gemini-3.8-flash-tiered")
         self.assertEqual(thinking, {"thinkingLevel": "HIGH"})
 
+    def test_gemini_3_8_model_resolves_to_tiered_high(self):
+        model, thinking = resolve_model_and_thinking("gemini-3.8", {})
+        self.assertEqual(model, "gemini-3.8-flash-tiered")
+        self.assertEqual(thinking, {"thinkingLevel": "HIGH"})
+
     def test_flash_medium_model_resolves_to_tiered_medium(self):
         model, thinking = resolve_model_and_thinking("gemini-3.8-flash-medium", {})
         self.assertEqual(model, "gemini-3.8-flash-tiered")

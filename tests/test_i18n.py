@@ -413,6 +413,24 @@ class TestPiTranslations(unittest.TestCase):
             self.assertIn("settings.json", done)
 
 
+class TestGentleShellTranslations(unittest.TestCase):
+    def test_gentle_shell_keys_present_in_both_locales(self):
+        for lang in ("en", "es"):
+            success = t("setup_gentle_shell_success", lang=lang, target="/path/models.json")
+            auto_read = t("setup_gentle_shell_auto_read", lang=lang)
+            run_hint = t("setup_gentle_shell_run_hint", lang=lang)
+            tip = t("setup_gentle_shell_set_default_tip", lang=lang)
+            done = t("setup_gentle_shell_set_default_done", lang=lang)
+            uninst = t("uninstall_gentle_shell_restored", lang=lang)
+
+            self.assertIn("/path/models.json", success)
+            self.assertIn("Gentle Shell", auto_read)
+            self.assertIn("gentle-shell", run_hint)
+            self.assertIn("--set-default", tip)
+            self.assertIn("settings.json", done)
+            self.assertIn("Gentle Shell", uninst)
+
+
 if __name__ == "__main__":
     unittest.main()
 

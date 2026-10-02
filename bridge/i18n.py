@@ -139,6 +139,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "setup_pi_run_hint": "Run 'pi' and switch models with /model (or run 'pi --model agy/gemini-3.8-flash-high').",
         "setup_pi_set_default_tip": "Tip: Run 'agy-bridge setup-pi --set-default' to set AGY as Pi's default provider.",
         "setup_pi_set_default_done": "✔ AGY configured as default provider in settings.json.",
+        # Gentle Shell
+        "setup_gentle_shell_success": "Gentle Shell configured successfully at {target}\n",
+        "setup_gentle_shell_auto_read": "Gentle Shell will read this configuration automatically.",
+        "setup_gentle_shell_run_hint": "Run 'gentle-shell' and switch models with /model (or run 'gentle-shell --model agy/gemini-3.8-flash-high').",
+        "setup_gentle_shell_set_default_tip": "Tip: Run 'agy-bridge setup-gentle-shell --set-default' to set AGY as Gentle Shell's default provider.",
+        "setup_gentle_shell_set_default_done": "✔ AGY configured as default provider in settings.json.",
         # Cursor
         "setup_cursor_title": "=== Cursor Configuration Guide ===",
         "setup_cursor_notice": "Notice: Cursor routes AI requests through its cloud servers. A public HTTPS URL (via Cloudflare Tunnel, ngrok, or Tailscale) is required if Cursor cannot reach localhost directly.",
@@ -168,6 +174,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "uninstall_opencode_restored": "  - OpenCode configuration restored.",
         "uninstall_openclaw_restored": "  - OpenClaw configuration restored.",
         "uninstall_pi_restored": "  - Pi configuration restored.",
+        "uninstall_gentle_shell_restored": "  - Gentle Shell configuration restored.",
         "uninstall_backups_purged": "  - Backups history purged.",
         # Update
         "update_success": "✔ Repository updated to version v{ver}.",
@@ -229,6 +236,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "setup_pi_run_hint": "Ejecutá 'pi' y cambiá de modelo con /model (o ejecutá 'pi --model agy/gemini-3.8-flash-high').",
         "setup_pi_set_default_tip": "Tip: Ejecutá 'agy-bridge setup-pi --set-default' para dejar AGY como proveedor por defecto.",
         "setup_pi_set_default_done": "✔ AGY configurado como proveedor por defecto en settings.json.",
+        # Gentle Shell
+        "setup_gentle_shell_success": "Gentle Shell configurado correctamente en {target}\n",
+        "setup_gentle_shell_auto_read": "Gentle Shell leerá esta configuración automáticamente.",
+        "setup_gentle_shell_run_hint": "Ejecutá 'gentle-shell' y cambiá de modelo con /model (o ejecutá 'gentle-shell --model agy/gemini-3.8-flash-high').",
+        "setup_gentle_shell_set_default_tip": "Tip: Ejecutá 'agy-bridge setup-gentle-shell --set-default' para dejar AGY como proveedor por defecto.",
+        "setup_gentle_shell_set_default_done": "✔ AGY configurado como proveedor por defecto en settings.json.",
         # Cursor
         "setup_cursor_title": "=== Guía de Configuración para Cursor ===",
         "setup_cursor_notice": "Aviso: Cursor enruta las peticiones de IA a través de sus servidores en la nube. Se requiere una URL pública HTTPS (vía Cloudflare Tunnel, ngrok o Tailscale) si Cursor no puede acceder directamente a localhost.",
@@ -258,6 +271,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "uninstall_opencode_restored": "  - Configuración de OpenCode restaurada.",
         "uninstall_openclaw_restored": "  - Configuración de OpenClaw restaurada.",
         "uninstall_pi_restored": "  - Configuración de Pi restaurada.",
+        "uninstall_gentle_shell_restored": "  - Configuración de Gentle Shell restaurada.",
         "uninstall_backups_purged": "  - Historial de backups purgado.",
         # Update
         "update_success": "✔ Repositorio actualizado a la versión v{ver}.",

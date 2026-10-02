@@ -65,6 +65,7 @@ class TestDashboardRendering(unittest.TestCase):
         self.assertIn("agy-bridge restore-opencode", html)
         self.assertIn("agy-bridge restore-openclaw", html)
         self.assertIn("agy-bridge restore-pi", html)
+        self.assertIn("agy-bridge restore-gentle-shell", html)
 
         # Copy buttons and pre IDs for restore
         self.assertIn('id="claude-restore"', html)
@@ -79,6 +80,8 @@ class TestDashboardRendering(unittest.TestCase):
         self.assertIn("copySnippet(this, 'openclaw-restore')", html)
         self.assertIn('id="pi-restore"', html)
         self.assertIn("copySnippet(this, 'pi-restore')", html)
+        self.assertIn('id="gentle-shell-restore"', html)
+        self.assertIn("copySnippet(this, 'gentle-shell-restore')", html)
 
     def test_render_dashboard_vercel_styling_and_responsive_grid(self):
         auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
@@ -207,7 +210,7 @@ class TestDashboardRendering(unittest.TestCase):
         auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
         html = render_dashboard("127.0.0.1", 24980, auth_status, models_count=20)
 
-        # 21 independent snippet IDs and corresponding copy button calls
+        # 24 independent snippet IDs and corresponding copy button calls
         expected_ids = [
             "claude-auto", "claude-manual", "claude-restore",
             "codex-auto", "codex-manual", "codex-restore",
@@ -216,6 +219,7 @@ class TestDashboardRendering(unittest.TestCase):
             "openclaw-auto", "openclaw-manual", "openclaw-restore",
             "cursor-auto", "cursor-manual",
             "pi-auto", "pi-manual", "pi-restore",
+            "gentle-shell-auto", "gentle-shell-manual", "gentle-shell-restore",
             "freellmapi-manual",
         ]
         for snippet_id in expected_ids:
@@ -238,6 +242,7 @@ class TestDashboardRendering(unittest.TestCase):
         self.assertIn("https://opencode.ai/docs", html)
         self.assertIn("https://docs.openclaw.ai/gateway/config-tools/custom-providers", html)
         self.assertIn("https://pi.dev/docs/latest", html)
+        self.assertIn("https://github.com/Gentleman-Programming/gentle-shell", html)
         self.assertIn("https://github.com/tashfeenahmed/freellmapi", html)
 
         # Robust clipboard JavaScript
@@ -250,7 +255,7 @@ class TestDashboardRendering(unittest.TestCase):
 
     def test_client_cards_schema(self):
         from bridge.dashboard import CLIENT_CARDS
-        self.assertEqual(len(CLIENT_CARDS), 8)
+        self.assertEqual(len(CLIENT_CARDS), 9)
         card_titles = [c["title"] for c in CLIENT_CARDS]
         self.assertIn("Claude Code", card_titles)
         self.assertIn("Codex CLI", card_titles)
@@ -259,10 +264,11 @@ class TestDashboardRendering(unittest.TestCase):
         self.assertIn("OpenClaw", card_titles)
         self.assertIn("Cursor", card_titles)
         self.assertIn("Pi", card_titles)
+        self.assertIn("Gentle Shell", card_titles)
         self.assertIn("FreeLLMAPI", card_titles)
 
         card_ids = [c["id"] for c in CLIENT_CARDS]
-        self.assertEqual(card_ids, ["claude", "codex", "hermes", "pi", "opencode", "openclaw", "cursor", "freellmapi"])
+        self.assertEqual(card_ids, ["claude", "codex", "hermes", "pi", "gentle-shell", "opencode", "openclaw", "cursor", "freellmapi"])
 
         by_id = {c["id"]: c for c in CLIENT_CARDS}
         self.assertEqual(
@@ -414,6 +420,29 @@ class TestDashboardRendering(unittest.TestCase):
         self.assertIn("tip_es", by_id["pi"])
         self.assertIn("--set-default", by_id["pi"]["tip_en"])
         self.assertIn("--set-default", by_id["pi"]["tip_es"])
+
+        self.assertIn("gentle-shell", by_id)
+        self.assertIn('viewBox="0 0 5000 5000"', by_id["gentle-shell"].get("icon_svg", ""))
+        self.assertEqual(
+            by_id["gentle-shell"]["auto_cmd"]("127.0.0.1:24980"),
+            "agy-bridge setup-gentle-shell",
+        )
+        self.assertEqual(
+            by_id["gentle-shell"]["auto_cmd"]("127.0.0.1:9090"),
+            "agy-bridge setup-gentle-shell --port 9090",
+        )
+        self.assertEqual(
+            by_id["gentle-shell"]["restore_cmd"]("127.0.0.1:24980"),
+            "agy-bridge restore-gentle-shell",
+        )
+        self.assertEqual(
+            by_id["gentle-shell"]["manual_snippet"]("127.0.0.1:24980"),
+            "BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY=local-bridge",
+        )
+        self.assertEqual(
+            by_id["gentle-shell"]["docs_url"],
+            "https://github.com/Gentleman-Programming/gentle-shell",
+        )
 
         self.assertNotIn("auto_cmd", by_id["freellmapi"])
         self.assertIn("icon_svg", by_id["freellmapi"])

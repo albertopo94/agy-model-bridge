@@ -1,6 +1,6 @@
 # AGY Model Bridge
 
-Zero-dependency, pure Python 3 local AI gateway that bridges the Google Cloud Code Assist backend (`daily-cloudcode-pa.googleapis.com`) to standard client protocols, providing native model access for **Claude Code**, **Codex CLI**, **Hermes Agent**, **OpenCode**, **OpenClaw**, **Cursor**, **Pi**, and **FreeLLMAPI**.
+Zero-dependency, pure Python 3 local AI gateway that bridges the Google Cloud Code Assist backend (`daily-cloudcode-pa.googleapis.com`) to standard client protocols, providing native model access for **Claude Code**, **Codex CLI**, **Hermes Agent**, **OpenCode**, **OpenClaw**, **Cursor**, **Pi**, **Gentle Shell**, and **FreeLLMAPI**.
 
 ---
 
@@ -10,10 +10,10 @@ Zero-dependency, pure Python 3 local AI gateway that bridges the Google Cloud Co
 - **Multi-Protocol Gateway**:
   - `GET /` — Self-contained dark-mode dashboard (Geist/Vercel styling) with live Keychain auth badges, model count, and one-click copyable setup cards.
   - `GET /v1/models` — Dynamic model catalog discovered directly from upstream Cloud Code Assist with Codex serde compatibility (`data`, `models`, `slug`, `display_name`).
-  - `POST /v1/chat/completions` — OpenAI Chat Completions API with full streaming (SSE `text/event-stream`) and non-streaming support (for FreeLLMAPI, Hermes Agent, OpenCode, OpenClaw, Cursor, Pi, Aider).
+  - `POST /v1/chat/completions` — OpenAI Chat Completions API with full streaming (SSE `text/event-stream`) and non-streaming support (for FreeLLMAPI, Hermes Agent, OpenCode, OpenClaw, Cursor, Pi, Gentle Shell, Aider).
   - `POST /v1/responses` — OpenAI Responses API shim for Codex CLI (`wire_api = "responses"`).
   - `POST /v1/messages` — Anthropic Messages API shim with dynamic SSE stream mapping (`thinking_delta`, `text_delta`, `tool_use`, `input_json_delta`), recursive OpenAPI 3.0 schema sanitization, and full tool calling for Claude Code CLI.
-- **Built-in Setup CLI**: Native subcommands (`setup-claude`, `setup-codex`, `setup-hermes`, `setup-opencode`, `setup-openclaw`, `setup-cursor`, `setup-pi`) that surgically configure client environments with atomic writes, file permissions `0o600`, and automatic timestamped backups.
+- **Built-in Setup CLI**: Native subcommands (`setup-claude`, `setup-codex`, `setup-hermes`, `setup-opencode`, `setup-openclaw`, `setup-cursor`, `setup-pi`, `setup-gentle-shell`) that surgically configure client environments with atomic writes, file permissions `0o600`, and automatic timestamped backups.
 - **macOS Keychain OAuth Integration**: Seamlessly extracts Google OAuth credentials stored by Antigravity in Keychain (`service="gemini"`, `account="antigravity"`) with thread-safe TTL caching and automatic 401 re-read.
 - **Adaptive Thinking & Model Aliasing**: Intelligently resolves `gemini-3.8-flash-high` / `auto` to upstream `gemini-3.8-flash-tiered`, automatically configuring reasoning levels (`HIGH`, `MEDIUM`, `LOW`) and token budgets.
 
@@ -227,6 +227,27 @@ pi --model agy/gemini-3.8-flash-high
 ```
 Or switch models inside Pi using `/model agy/gemini-3.8-flash-high`.
 
+### 🎴 Gentle Shell
+
+Run the automated setup:
+```bash
+agy-bridge setup-gentle-shell
+```
+This surgically configures `~/.gentle-shell/agent/models.json` with:
+- Provider: `agy` configured with OpenAI completions API
+- Models: `gemini-3.8-flash-high`, `gemini-3.8`, `gemini-2.5-pro`, `gemini-2.5-flash`
+- Base URL: `http://127.0.0.1:24980/v1`
+
+Options:
+- `--set-default`: Also sets `agy` and the default model as defaults in `~/.gentle-shell/agent/settings.json`.
+- `--model <name>`: Specify a default model (default: `gemini-3.8-flash-high`).
+
+Once configured, launch Gentle Shell or select an AGY model:
+```bash
+gentle-shell --model agy/gemini-3.8-flash-high
+```
+Or switch models inside Gentle Shell using `/model agy/gemini-3.8-flash-high`.
+
 ### 🎴 FreeLLMAPI
 Register this bridge as an OpenAI-compatible Custom Provider in FreeLLMAPI:
 - **Base URL**: `http://127.0.0.1:24980/v1`
@@ -253,6 +274,9 @@ agy-bridge restore-openclaw
 
 # Restore Pi Coding Agent configuration
 agy-bridge restore-pi
+
+# Restore Gentle Shell configuration
+agy-bridge restore-gentle-shell
 ```
 
 The interactive selector classifies each backup so you know exactly what you are restoring:
@@ -271,7 +295,7 @@ Ingrese un número (1-3), presione Enter para [1], o 'q' para cancelar:
 
 ## Uninstallation
 
-To completely uninstall AGY Model Bridge, stop the running background daemon, remove the CLI binaries and daemon directory (`~/.agy-bridge`), and restore Claude Code, Codex CLI, OpenCode, OpenClaw, and Pi configurations to their original state:
+To completely uninstall AGY Model Bridge, stop the running background daemon, remove the CLI binaries and daemon directory (`~/.agy-bridge`), and restore Claude Code, Codex CLI, OpenCode, OpenClaw, Pi, and Gentle Shell configurations to their original state:
 
 ### Option A: Via the installed CLI
 
@@ -313,6 +337,8 @@ curl -fsSL https://raw.githubusercontent.com/albertopo94/agy-model-bridge/main/u
 | `agy-bridge setup-cursor` | Setup guide for Cursor AI editor |
 | `agy-bridge setup-pi` | Surgically configures Pi Coding Agent (`~/.pi/agent/models.json`) |
 | `agy-bridge restore-pi` | Interactively restores a Pi configuration backup |
+| `agy-bridge setup-gentle-shell` | Surgically configures Gentle Shell (`~/.gentle-shell/agent/models.json`) |
+| `agy-bridge restore-gentle-shell` | Interactively restores a Gentle Shell configuration backup |
 | `agy-bridge setup-hermes` | Surgically configures Hermes Agent (`~/.hermes/config.yaml`) |
 | `agy-bridge restore-hermes` | Interactively restores a Hermes Agent configuration backup |
 | `agy-bridge uninstall` | Uninstalls bridge, terminates daemon, and restores client configs |
@@ -329,7 +355,7 @@ Execute the complete test suite:
 python3 -m unittest discover -s tests -v
 ```
 
-All 577 tests run in ~1 second with zero external dependencies and zero network access.
+All 613 tests run in ~1 second with zero external dependencies and zero network access.
 
 ### End-to-End Smoke Test
 

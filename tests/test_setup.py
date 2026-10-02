@@ -17,6 +17,7 @@ from bridge.setup import (
     OpenClawConfigurator,
     OpenCodeConfigurator,
     CursorConfigurator,
+    GentleShellConfigurator,
     PiConfigurator,
     atomic_write_file,
     build_hermes_block,
@@ -30,6 +31,7 @@ from bridge.setup import (
     restore_backup,
     restore_claude,
     restore_codex,
+    restore_gentle_shell,
     restore_hermes,
     restore_openclaw,
     restore_opencode,
@@ -37,6 +39,7 @@ from bridge.setup import (
     setup_claude,
     setup_codex,
     setup_cursor,
+    setup_gentle_shell,
     setup_hermes,
     setup_openclaw,
     setup_opencode,
@@ -1345,7 +1348,7 @@ class TestUpdateInstallation(unittest.TestCase):
 
         self.assertEqual(result["status"], "updated")
         self.assertTrue(result["restarted_daemon"])
-        self.assertEqual(result["version"], "0.12.0")
+        self.assertEqual(result["version"], "0.13.0")
         mock_run.assert_called_once_with(
             ["git", "-C", str(self.repo_dir), "pull", "--ff-only"],
             capture_output=True,
@@ -1537,7 +1540,7 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main([flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.12.0")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.13.0")
 
     def test_cli_subcommand_version_flags(self):
         from bridge.__main__ import main
@@ -1549,19 +1552,19 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main(["update", flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.12.0")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.13.0")
 
     def test_version_unification(self):
         import bridge
         from pathlib import Path
         import re
 
-        self.assertEqual(bridge.__version__, "0.12.0")
+        self.assertEqual(bridge.__version__, "0.13.0")
         pyproject_path = Path(__file__).resolve().parent.parent / "pyproject.toml"
         pyproject_text = pyproject_path.read_text(encoding="utf-8")
         match = re.search(r'version\s*=\s*"([^"]+)"', pyproject_text)
         self.assertIsNotNone(match)
-        self.assertEqual(match.group(1), "0.12.0")
+        self.assertEqual(match.group(1), "0.13.0")
 
 
 class TestClientConfiguratorRegistry(unittest.TestCase):
@@ -1601,6 +1604,14 @@ class TestClientConfiguratorRegistry(unittest.TestCase):
         self.assertEqual(pi_cfg.name, "pi")
         self.assertEqual(pi_cfg.display_name, "Pi")
 
+        gs_cfg = get_configurator("gentle-shell")
+        self.assertIsInstance(gs_cfg, GentleShellConfigurator)
+        self.assertEqual(gs_cfg.name, "gentle-shell")
+        self.assertEqual(gs_cfg.display_name, "Gentle Shell")
+
+        gentle_cfg = get_configurator("gentle")
+        self.assertIs(gentle_cfg, gs_cfg)
+
     def test_get_configurator_unknown_raises_key_error(self):
         with self.assertRaises(KeyError):
             get_configurator("unknown_client")
@@ -1615,6 +1626,7 @@ class TestClientConfiguratorRegistry(unittest.TestCase):
         self.assertIn("openclaw", names)
         self.assertIn("cursor", names)
         self.assertIn("pi", names)
+        self.assertIn("gentle-shell", names)
 
     def test_register_custom_configurator(self):
         class DummyConfigurator(ClientConfigurator):
@@ -3476,6 +3488,489 @@ class TestUninstallPi(unittest.TestCase):
         self.assertTrue(res["restored_clients"]["pi"])
         self.assertTrue(res.get("pi_restored", False))
         cleaned = json.loads(pi_config.read_text(encoding="utf-8"))
+        self.assertNotIn("agy", cleaned.get("providers", {}))
+
+
+class TestGentleShellConfigurator(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.dir_path = Path(self.temp_dir.name)
+        self.configurator = GentleShellConfigurator()
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_properties(self):
+        self.assertEqual(self.configurator.name, "gentle-shell")
+        self.assertEqual(self.configurator.display_name, "Gentle Shell")
+        self.assertIsInstance(self.configurator.default_config_path, Path)
+        self.assertEqual(
+            self.configurator.default_config_path,
+            Path.home() / ".gentle-shell" / "agent" / "models.json",
+        )
+
+    def test_default_config_path_with_env_var(self):
+        custom_dir = str(self.dir_path / "custom_gentle_shell")
+        with unittest.mock.patch.dict(os.environ, {"GENTLE_SHELL_HOME": custom_dir}):
+            self.assertEqual(
+                self.configurator.default_config_path,
+                Path(custom_dir) / "models.json",
+            )
+
+    def test_is_configured_non_existent(self):
+        target = self.dir_path / "models.json"
+        self.assertFalse(self.configurator.is_configured(target))
+
+    def test_is_configured_directory(self):
+        target = self.dir_path / "models.json"
+        target.mkdir()
+        self.assertFalse(self.configurator.is_configured(target))
+
+    def test_is_configured_empty_file(self):
+        target = self.dir_path / "models.json"
+        target.write_text("", encoding="utf-8")
+        self.assertFalse(self.configurator.is_configured(target))
+
+    def test_is_configured_no_agy(self):
+        target = self.dir_path / "models.json"
+        target.write_text(json.dumps({"providers": {"openai": {}}}), encoding="utf-8")
+        self.assertFalse(self.configurator.is_configured(target))
+
+    def test_is_configured_with_providers_agy(self):
+        target = self.dir_path / "models.json"
+        target.write_text(json.dumps({"providers": {"agy": {"baseUrl": "http://127.0.0.1:24980/v1"}}}), encoding="utf-8")
+        self.assertTrue(self.configurator.is_configured(target))
+
+    def test_is_configured_with_24980_in_content(self):
+        target = self.dir_path / "models.json"
+        target.write_text('{"customUrl": "http://127.0.0.1:24980/v1"}', encoding="utf-8")
+        self.assertTrue(self.configurator.is_configured(target))
+
+    def test_is_configured_handles_json_comments(self):
+        target = self.dir_path / "models.json"
+        content = """// Comment header
+        {
+            // Providers list
+            "providers": {
+                "agy": {
+                    "name": "AGY Bridge"
+                }
+            }
+        }"""
+        target.write_text(content, encoding="utf-8")
+        self.assertTrue(self.configurator.is_configured(target))
+
+    def test_setup_default_models_json(self):
+        target = self.dir_path / "agent" / "models.json"
+        res = self.configurator.setup(config_path=target)
+
+        self.assertTrue(target.exists())
+        file_stat = target.stat()
+        self.assertEqual(stat.S_IMODE(file_stat.st_mode), 0o600)
+        self.assertEqual(res, target)
+        self.assertIsNone(res.backup_path)
+
+        data = json.loads(target.read_text(encoding="utf-8"))
+        self.assertIn("providers", data)
+        self.assertIn("agy", data["providers"])
+
+        agy = data["providers"]["agy"]
+        self.assertEqual(agy["name"], "AGY Bridge")
+        self.assertEqual(agy["baseUrl"], "http://127.0.0.1:24980/v1")
+        self.assertEqual(agy["api"], "openai-completions")
+        self.assertEqual(agy["apiKey"], get_active_api_key())
+        self.assertEqual(agy["headers"], {"User-Agent": "gentle-shell"})
+
+        models = agy["models"]
+        self.assertEqual(len(models), 4)
+        expected_ids = ["gemini-3.8-flash-high", "gemini-3.8", "gemini-2.5-pro", "gemini-2.5-flash"]
+        self.assertEqual([m["id"] for m in models], expected_ids)
+        self.assertEqual(models[0]["name"], "Gemini 3.8 Flash (High)")
+        self.assertEqual(models[1]["name"], "Gemini 3.8")
+        self.assertEqual(models[2]["name"], "Gemini 2.5 Pro")
+        self.assertEqual(models[3]["name"], "Gemini 2.5 Flash")
+        for m in models:
+            self.assertFalse(m["reasoning"])
+            self.assertEqual(m["input"], ["text"])
+            self.assertEqual(m["contextWindow"], 1048576)
+            self.assertEqual(m["maxTokens"], 65536)
+
+    def test_setup_with_port(self):
+        target = self.dir_path / "models.json"
+        self.configurator.setup(config_path=target, port=9090)
+        data = json.loads(target.read_text(encoding="utf-8"))
+        self.assertEqual(data["providers"]["agy"]["baseUrl"], "http://127.0.0.1:9090/v1")
+
+    def test_setup_with_base_url(self):
+        target = self.dir_path / "models.json"
+        self.configurator.setup(config_path=target, base_url="http://custom.gateway:8080")
+        data = json.loads(target.read_text(encoding="utf-8"))
+        self.assertEqual(data["providers"]["agy"]["baseUrl"], "http://custom.gateway:8080/v1")
+
+        self.configurator.setup(config_path=target, base_url="http://custom.gateway:8080/v1/")
+        data = json.loads(target.read_text(encoding="utf-8"))
+        self.assertEqual(data["providers"]["agy"]["baseUrl"], "http://custom.gateway:8080/v1")
+
+    def test_setup_with_auth_token(self):
+        target = self.dir_path / "models.json"
+        self.configurator.setup(config_path=target, auth_token="my-gentle-token")
+        data = json.loads(target.read_text(encoding="utf-8"))
+        self.assertEqual(data["providers"]["agy"]["apiKey"], "my-gentle-token")
+
+    def test_setup_preserves_existing_providers(self):
+        target = self.dir_path / "models.json"
+        existing = {
+            "providers": {
+                "custom": {"name": "Custom", "baseUrl": "https://custom.api"}
+            },
+            "customSetting": "active",
+        }
+        target.write_text(json.dumps(existing), encoding="utf-8")
+
+        res = self.configurator.setup(config_path=target)
+        self.assertIsNotNone(res.backup_path)
+        self.assertTrue(res.backup_path.exists())
+
+        data = json.loads(target.read_text(encoding="utf-8"))
+        self.assertIn("custom", data["providers"])
+        self.assertEqual(data["providers"]["custom"]["name"], "Custom")
+        self.assertEqual(data["customSetting"], "active")
+        self.assertIn("agy", data["providers"])
+
+    def test_setup_handles_json_with_comments(self):
+        target = self.dir_path / "models.json"
+        raw_jsonc = """// Gentle Shell models configuration
+        {
+            /* Other provider */
+            "providers": {
+                "ollama": {
+                    "baseUrl": "http://localhost:11434"
+                }
+            }
+        }"""
+        target.write_text(raw_jsonc, encoding="utf-8")
+
+        self.configurator.setup(config_path=target)
+        data = json.loads(target.read_text(encoding="utf-8"))
+        self.assertIn("ollama", data["providers"])
+        self.assertIn("agy", data["providers"])
+
+    def test_setup_handles_corrupt_existing_json(self):
+        target = self.dir_path / "models.json"
+        target.write_text("NOT_VALID_JSON{{{", encoding="utf-8")
+
+        res = self.configurator.setup(config_path=target)
+        self.assertIsNotNone(res.backup_path)
+        data = json.loads(target.read_text(encoding="utf-8"))
+        self.assertIn("agy", data["providers"])
+
+    def test_setup_with_set_default(self):
+        target = self.dir_path / "agent" / "models.json"
+        settings_target = self.dir_path / "agent" / "settings.json"
+        existing_settings = {"theme": "rose", "enabledModels": ["anthropic/claude-3-7-sonnet"]}
+        settings_target.parent.mkdir(parents=True, exist_ok=True)
+        settings_target.write_text(json.dumps(existing_settings), encoding="utf-8")
+
+        self.configurator.setup(
+            config_path=target,
+            model="gemini-3.8-flash-high",
+            set_default=True,
+        )
+
+        self.assertTrue(settings_target.exists())
+        self.assertEqual(stat.S_IMODE(settings_target.stat().st_mode), 0o600)
+        settings_data = json.loads(settings_target.read_text(encoding="utf-8"))
+        self.assertEqual(settings_data["defaultProvider"], "agy")
+        self.assertEqual(settings_data["defaultModel"], "gemini-3.8-flash-high")
+        self.assertIn("agy/gemini-3.8-flash-high", settings_data["enabledModels"])
+        self.assertEqual(settings_data["theme"], "rose")
+
+    def test_restore_with_backup_path(self):
+        target = self.dir_path / "models.json"
+        target.write_text(json.dumps({"providers": {"agy": {}}}), encoding="utf-8")
+
+        backup = self.dir_path / "models.json.backup-specific"
+        backup.write_text(json.dumps({"providers": {"original": {}}}), encoding="utf-8")
+
+        success = self.configurator.restore(config_path=target, backup_path=backup)
+        self.assertTrue(success)
+        restored = json.loads(target.read_text(encoding="utf-8"))
+        self.assertIn("original", restored["providers"])
+        self.assertNotIn("agy", restored["providers"])
+
+    def test_restore_from_backups_list(self):
+        target = self.dir_path / "models.json"
+        target.write_text(json.dumps({"providers": {"agy": {}}}), encoding="utf-8")
+
+        backup = self.dir_path / "models.json.backup-2026-02-01T10-00-00-000000"
+        backup.write_text(json.dumps({"providers": {"saved": {}}}), encoding="utf-8")
+
+        success = self.configurator.restore(config_path=target)
+        self.assertTrue(success)
+        restored = json.loads(target.read_text(encoding="utf-8"))
+        self.assertIn("saved", restored["providers"])
+
+    def test_restore_surgical_removal(self):
+        target = self.dir_path / "models.json"
+        content = {
+            "providers": {
+                "agy": {"baseUrl": "http://127.0.0.1:24980/v1"},
+                "other": {"baseUrl": "http://other.service"},
+            },
+            "custom": 123,
+        }
+        target.write_text(json.dumps(content), encoding="utf-8")
+
+        success = self.configurator.restore(config_path=target)
+        self.assertTrue(success)
+        data = json.loads(target.read_text(encoding="utf-8"))
+        self.assertNotIn("agy", data["providers"])
+        self.assertIn("other", data["providers"])
+        self.assertEqual(data["custom"], 123)
+
+    def test_restore_cleans_settings_default_provider(self):
+        target = self.dir_path / "agent" / "models.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps({"providers": {"agy": {}}}), encoding="utf-8")
+
+        settings_target = self.dir_path / "agent" / "settings.json"
+        settings_target.write_text(
+            json.dumps({"defaultProvider": "agy", "defaultModel": "gemini-3.8-flash-high", "theme": "rose"}),
+            encoding="utf-8",
+        )
+
+        success = self.configurator.restore(config_path=target)
+        self.assertTrue(success)
+        settings_data = json.loads(settings_target.read_text(encoding="utf-8"))
+        self.assertNotIn("defaultProvider", settings_data)
+        self.assertNotIn("defaultModel", settings_data)
+        self.assertEqual(settings_data["theme"], "rose")
+
+    def test_restore_non_existent_returns_false(self):
+        target = self.dir_path / "non_existent.json"
+        success = self.configurator.restore(config_path=target)
+        self.assertFalse(success)
+
+    def test_purge_backups(self):
+        target = self.dir_path / "models.json"
+        target.write_text("{}", encoding="utf-8")
+        b1 = self.dir_path / "models.json.backup-2026-01-01T00-00-00-000000"
+        b1.write_text("{}", encoding="utf-8")
+        b2 = self.dir_path / "models.json.backup-2026-01-02T00-00-00-000000"
+        b2.write_text("{}", encoding="utf-8")
+
+        purged = self.configurator.purge_backups(config_path=target)
+        self.assertEqual(purged, 2)
+        self.assertFalse(b1.exists())
+        self.assertFalse(b2.exists())
+
+    def test_describe_backup_gentle_shell(self):
+        # Path with .gentle-shell
+        p_dir = self.dir_path / ".gentle-shell" / "agent"
+        p_dir.mkdir(parents=True, exist_ok=True)
+
+        p_agy = p_dir / "models.json.backup-2026-01-01"
+        p_agy.write_text(json.dumps({"providers": {"agy": {}}}), encoding="utf-8")
+        self.assertEqual(describe_backup(p_agy), "AGY Bridge")
+
+        p_orig = p_dir / "models.json.backup-2026-01-02"
+        p_orig.write_text(json.dumps({"providers": {"ollama": {}}}), encoding="utf-8")
+        self.assertEqual(describe_backup(p_orig), "Gentle Shell Original")
+
+    def test_setup_and_restore_gentle_shell_standalone(self):
+        target = self.dir_path / "models.json"
+        res = setup_gentle_shell(config_path=target, port=9090)
+        self.assertEqual(res, target)
+        data = json.loads(target.read_text(encoding="utf-8"))
+        self.assertIn("agy", data["providers"])
+
+        restored = restore_gentle_shell(config_path=target)
+        self.assertTrue(restored)
+
+
+class TestCLIGentleShell(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.dir_path = Path(self.temp_dir.name)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_cli_setup_gentle_shell_outputs_backup_and_guidance(self):
+        import io
+        from bridge.__main__ import main
+        target = self.dir_path / "models.json"
+        target.write_text(json.dumps({"providers": {}}), encoding="utf-8")
+
+        out = io.StringIO()
+        with unittest.mock.patch("sys.stdout", out):
+            exit_code = main(["setup-gentle-shell", "--path", str(target)])
+        self.assertEqual(exit_code, 0)
+        output = out.getvalue()
+        self.assertIn("Backup: ", output)
+        self.assertIn(f"Gentle Shell configured successfully at {target}", output)
+        self.assertIn("Gentle Shell will read this configuration automatically.", output)
+        self.assertTrue(
+            "Run 'gentle-shell' and switch models with /model" in output
+            or "Ejecutá 'gentle-shell' y cambiá de modelo con /model" in output
+        )
+        self.assertIn("gentle-shell --model agy/gemini-3.8-flash-high", output)
+        self.assertIn("--set-default", output)
+
+    def test_cli_setup_gentle_alias(self):
+        import io
+        from bridge.__main__ import main
+        target = self.dir_path / "models.json"
+        target.write_text(json.dumps({"providers": {}}), encoding="utf-8")
+
+        out = io.StringIO()
+        with unittest.mock.patch("sys.stdout", out):
+            exit_code = main(["setup-gentle", "--path", str(target)])
+        self.assertEqual(exit_code, 0)
+        self.assertIn(f"Gentle Shell configured successfully at {target}", out.getvalue())
+
+    def test_cli_setup_gentle_shell_flags(self):
+        import io
+        from bridge.__main__ import main
+        target = self.dir_path / "models.json"
+        settings_target = self.dir_path / "settings.json"
+
+        out = io.StringIO()
+        with unittest.mock.patch("sys.stdout", out):
+            exit_code = main([
+                "setup-gentle-shell",
+                "--path", str(target),
+                "--port", "9090",
+                "--model", "gemini-2.5-pro",
+                "--set-default",
+            ])
+        self.assertEqual(exit_code, 0)
+        output = out.getvalue()
+        self.assertIn("settings.json", output)
+        data = json.loads(target.read_text(encoding="utf-8"))
+        self.assertEqual(data["providers"]["agy"]["baseUrl"], "http://127.0.0.1:9090/v1")
+        self.assertTrue(settings_target.exists())
+        settings_data = json.loads(settings_target.read_text(encoding="utf-8"))
+        self.assertEqual(settings_data["defaultProvider"], "agy")
+        self.assertEqual(settings_data["defaultModel"], "gemini-2.5-pro")
+
+    def test_cli_restore_gentle_shell_latest(self):
+        import io
+        from bridge.__main__ import main
+        target = self.dir_path / "models.json"
+        target.write_text(json.dumps({"version": "bridge"}), encoding="utf-8")
+
+        b1 = self.dir_path / "models.json.backup-1"
+        b1.write_text(json.dumps({"version": "latest_backup"}), encoding="utf-8")
+
+        out = io.StringIO()
+        with unittest.mock.patch("sys.stdout", out):
+            exit_code = main(["restore-gentle-shell", "--path", str(target), "--latest"])
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(json.loads(target.read_text(encoding="utf-8")), {"version": "latest_backup"})
+        self.assertIn("Gentle Shell", out.getvalue())
+
+    def test_cli_restore_gentle_alias(self):
+        import io
+        from bridge.__main__ import main
+        target = self.dir_path / "models.json"
+        target.write_text(json.dumps({"version": "bridge"}), encoding="utf-8")
+
+        b1 = self.dir_path / "models.json.backup-1"
+        b1.write_text(json.dumps({"version": "latest_backup"}), encoding="utf-8")
+
+        out = io.StringIO()
+        with unittest.mock.patch("sys.stdout", out):
+            exit_code = main(["restore-gentle", "--path", str(target), "--latest"])
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(json.loads(target.read_text(encoding="utf-8")), {"version": "latest_backup"})
+
+    def test_cli_restore_gentle_shell_backup_flag(self):
+        from bridge.__main__ import main
+        target = self.dir_path / "models.json"
+        target.write_text(json.dumps({"version": "bridge"}), encoding="utf-8")
+
+        b1 = self.dir_path / "models.json.backup-1"
+        b1.write_text(json.dumps({"version": "specific"}), encoding="utf-8")
+
+        exit_code = main(["restore-gentle-shell", "--path", str(target), "--backup", str(b1)])
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(json.loads(target.read_text(encoding="utf-8")), {"version": "specific"})
+
+    def test_cli_restore_gentle_shell_no_backups_returns_1(self):
+        import io
+        from bridge.__main__ import main
+        target = self.dir_path / "models.json"
+        out = io.StringIO()
+        with unittest.mock.patch("sys.stdout", out):
+            exit_code = main(["restore-gentle-shell", "--path", str(target)])
+        self.assertEqual(exit_code, 1)
+
+
+class TestUninstallGentleShell(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp_dir.name)
+        self.daemon_dir = self.root / ".agy-bridge"
+        self.daemon_dir.mkdir(parents=True, exist_ok=True)
+        self.bin_dir = self.root / ".local" / "bin"
+        self.bin_dir.mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_uninstall_discovers_and_cleans_gentle_shell(self):
+        gs_config = self.root / ".gentle-shell" / "agent" / "models.json"
+        gs_config.parent.mkdir(parents=True, exist_ok=True)
+        gs_config.write_text(
+            json.dumps({
+                "providers": {
+                    "agy": {"baseUrl": "http://127.0.0.1:24980/v1"},
+                    "other": {"baseUrl": "http://other"},
+                }
+            }),
+            encoding="utf-8",
+        )
+
+        res = uninstall(
+            daemon_dir=self.daemon_dir,
+            bin_dir=self.bin_dir,
+            custom_config_paths={"gentle-shell": gs_config},
+            restore_configs=True,
+            purge_backups=False,
+        )
+
+        self.assertIn("gentle-shell", res["restored_clients"])
+        self.assertTrue(res["restored_clients"]["gentle-shell"])
+        self.assertTrue(res.get("gentle_shell_restored", False))
+        cleaned = json.loads(gs_config.read_text(encoding="utf-8"))
+        self.assertNotIn("agy", cleaned.get("providers", {}))
+        self.assertIn("other", cleaned.get("providers", {}))
+
+    def test_uninstall_kwarg_gentle_shell_config_path(self):
+        gs_config = self.root / ".gentle-shell" / "agent" / "models.json"
+        gs_config.parent.mkdir(parents=True, exist_ok=True)
+        gs_config.write_text(
+            json.dumps({
+                "providers": {
+                    "agy": {"baseUrl": "http://127.0.0.1:24980/v1"},
+                }
+            }),
+            encoding="utf-8",
+        )
+
+        res = uninstall(
+            daemon_dir=self.daemon_dir,
+            bin_dir=self.bin_dir,
+            gentle_shell_config_path=gs_config,
+            restore_configs=True,
+            purge_backups=False,
+        )
+
+        self.assertIn("gentle-shell", res["restored_clients"])
+        self.assertTrue(res["restored_clients"]["gentle-shell"])
+        self.assertTrue(res.get("gentle_shell_restored", False))
+        cleaned = json.loads(gs_config.read_text(encoding="utf-8"))
         self.assertNotIn("agy", cleaned.get("providers", {}))
 
 
