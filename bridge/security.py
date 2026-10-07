@@ -10,6 +10,7 @@ import hmac
 import os
 from pathlib import Path
 import secrets
+import stat
 from typing import Any
 import uuid
 
@@ -34,6 +35,8 @@ def get_or_create_api_key(daemon_dir: Path | None = None) -> str:
 
     if target_file.exists() and target_file.is_file():
         try:
+            if stat.S_IMODE(target_file.stat().st_mode) != 0o600:
+                os.chmod(target_file, 0o600)
             content = target_file.read_text(encoding="utf-8").strip()
             if content:
                 return content
@@ -90,9 +93,9 @@ def validate_api_key(expected_key: str | None, headers: Any) -> bool:
             return str(val).strip()
         return ""
 
-    # Check Authorization: Bearer <token>
+    # Check Authorization: Bearer <token> (case-insensitive)
     auth = get_header("Authorization")
-    if auth.startswith("Bearer "):
+    if auth.lower().startswith("bearer "):
         token = auth[7:].strip()
         if token and hmac.compare_digest(token, expected):
             return True

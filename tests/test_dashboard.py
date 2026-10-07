@@ -592,6 +592,13 @@ class TestDashboardBilingual(unittest.TestCase):
         self.assertIn("setLanguage", html)
         self.assertIn("I18N", html)
 
+    def test_render_dashboard_never_leaks_api_key(self):
+        auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
+        secret = "super-secret-test-key-12345-never-leak"
+        html = render_dashboard("127.0.0.1", 24980, auth_status, models_count=10, api_key=secret)
+        self.assertNotIn(secret, html)
+        self.assertTrue("Configured" in html or "Configurada" in html)
+
 
 if __name__ == "__main__":
     unittest.main()

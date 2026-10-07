@@ -373,13 +373,14 @@ class TestServerEndpoints(unittest.TestCase):
         )
         conn.close()
 
-        # 2. Inference endpoints explicitly block CORS preflight (403 without wildcard)
-        conn = http.client.HTTPConnection("127.0.0.1", self.port)
-        conn.request("OPTIONS", "/v1/chat/completions")
-        resp = conn.getresponse()
-        self.assertEqual(resp.status, 403)
-        self.assertIsNone(resp.headers.get("Access-Control-Allow-Origin"))
-        conn.close()
+        # 2. Inference and admin endpoints explicitly block CORS preflight (403 without wildcard)
+        for blocked_path in ("/v1/chat/completions", "/", "/api/status"):
+            conn = http.client.HTTPConnection("127.0.0.1", self.port)
+            conn.request("OPTIONS", blocked_path)
+            resp = conn.getresponse()
+            self.assertEqual(resp.status, 403)
+            self.assertIsNone(resp.headers.get("Access-Control-Allow-Origin"))
+            conn.close()
 
     def test_cors_header_on_get_and_streaming(self):
         status, headers, _ = self._http_get("/healthz")
@@ -395,6 +396,15 @@ class TestServerEndpoints(unittest.TestCase):
         # /v1/ streaming responses must NOT leak Access-Control-Allow-Origin
         self.assertNotIn("Access-Control-Allow-Origin", resp.headers)
         resp.close()
+
+    def test_dashboard_and_api_status_do_not_have_cors_wildcard(self):
+        status, headers, _ = self._http_get_raw("/")
+        self.assertEqual(status, 200)
+        self.assertNotIn("Access-Control-Allow-Origin", headers)
+
+        status, headers, _ = self._http_get("/api/status")
+        self.assertEqual(status, 200)
+        self.assertNotIn("Access-Control-Allow-Origin", headers)
 
     def test_content_length_invalid_returns_400(self):
         import http.client

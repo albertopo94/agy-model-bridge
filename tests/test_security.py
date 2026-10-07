@@ -64,6 +64,20 @@ class TestSecurityModule(unittest.TestCase):
         self.assertFalse(validate_api_key("expected-key", {"Authorization": "Basic dXNlcjpwYXNz"}))
         self.assertFalse(validate_api_key("expected-key", {"Authorization": "Bearer "}))
 
+    def test_validate_api_key_bearer_case_insensitive(self):
+        self.assertTrue(validate_api_key("secret-123", {"Authorization": "bearer secret-123"}))
+        self.assertTrue(validate_api_key("secret-123", {"Authorization": "BEARER secret-123"}))
+        self.assertTrue(validate_api_key("secret-123", {"Authorization": "Bearer secret-123"}))
+
+    def test_get_or_create_api_key_repairs_permissions(self):
+        key_file = self.daemon_dir / "api_key"
+        self.daemon_dir.mkdir(parents=True, exist_ok=True)
+        key_file.write_text("existing-key\n", encoding="utf-8")
+        os.chmod(key_file, 0o644)  # Accidental open permissions
+        key = get_or_create_api_key(daemon_dir=self.daemon_dir)
+        self.assertEqual(key, "existing-key")
+        self.assertEqual(stat.S_IMODE(key_file.stat().st_mode), 0o600)
+
 
 if __name__ == "__main__":
     unittest.main()

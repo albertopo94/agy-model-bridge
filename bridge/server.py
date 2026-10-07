@@ -73,8 +73,8 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
     def do_OPTIONS(self) -> None:
         """Handles CORS preflight requests."""
         parsed_path = urllib.parse.urlparse(self.path).path
-        if parsed_path.startswith("/v1/"):
-            # Inference endpoints forbid browser cross-origin preflight requests
+        if parsed_path.startswith("/v1/") or parsed_path in ("/", "/api/status"):
+            # Inference and admin endpoints forbid browser cross-origin preflight requests
             self.send_response(403)
             self.send_header("Content-Length", "0")
             self.end_headers()
@@ -99,8 +99,8 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
         encoded = json.dumps(data).encode("utf-8")
         self.send_response(status_code)
         self.send_header("Content-Type", "application/json")
-        req_path = getattr(self, "path", "")
-        if not req_path.startswith("/v1/"):
+        req_path = urllib.parse.urlparse(getattr(self, "path", "")).path
+        if not req_path.startswith("/v1/") and req_path not in ("/", "/api/status"):
             self.send_header("Access-Control-Allow-Origin", "*")
         sent_connection = False
         if headers:
@@ -170,12 +170,11 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                 auth_status=status_data["auth"],
                 models_count=status_data["models_count"],
                 lang=client_lang,
-                api_key=getattr(self.server, "api_key", None),
+                api_key="configured" if getattr(self.server, "api_key", None) else None,
             )
             encoded = html_content.encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Access-Control-Allow-Origin", "*")
             self.send_header("Content-Length", str(len(encoded)))
             self.end_headers()
             self.wfile.write(encoded)

@@ -343,7 +343,11 @@ def render_dashboard(
     html_lang = "es" if is_es else "en"
     active_en = " active" if not is_es else ""
     active_es = " active" if is_es else ""
-    active_key = api_key or "local-bridge"
+    active_key = "local-bridge"
+    has_api_key = bool(api_key and str(api_key).strip())
+    api_key_badge_class = "badge-success" if has_api_key else "badge-warning"
+    api_key_word = ("Configurada" if is_es else "Configured") if has_api_key else ("No requerida" if is_es else "Not required")
+    api_key_label = f"API Key: {api_key_word}"
 
     safe_host = html.escape(str(host))
     safe_port = html.escape(str(port))
@@ -762,6 +766,7 @@ def render_dashboard(
       <div class="badges">
         <span class="badge">🌐 {address}</span>
         <span class="badge {auth_badge_class}" data-i18n="auth" data-status="{html.escape(status_name)}" data-email="{html.escape(email or '')}">🛡️ {html.escape(auth_label)}</span>
+        <span class="badge {api_key_badge_class}" data-i18n="api_key_badge" data-configured="{str(has_api_key).lower()}">🔑 {html.escape(api_key_label)}</span>
         <span class="badge badge-models" data-i18n="models" data-count="{models_count}">⚡ {models_label}</span>
       </div>
     </header>
@@ -785,6 +790,8 @@ def render_dashboard(
         auth_valid: "Valid",
         auth_expired: "Expired — Open Antigravity to refresh",
         auth_missing: "Missing — Open Antigravity to refresh",
+        api_key_configured: "API Key: Configured",
+        api_key_not_required: "API Key: Not required",
         setup_auto: "Automatic configuration",
         setup_manual: "Manual connection",
         setup_restore: "Restore configuration",
@@ -800,6 +807,32 @@ def render_dashboard(
         desc_pi: "A minimal, highly extensible terminal coding agent with tree-structured history.",
         tip_pi: "💡 Tip: Run agy-bridge setup-pi --set-default to make AGY the default provider in settings.json.",
         desc_gentle_shell: "An isolated terminal companion for Pi with focused subagents, review mode, and ODD harness.",
+        desc_freellmapi: "Custom Provider & Aider integration (Base URL with /v1)",
+        footer: "AGY Model Bridge &bull; v{__version__} &bull; Local Gateway"
+      }},
+      es: {{
+        subtitle: "Gateway multiprotocolo sin dependencias para Google Cloud Code Assist",
+        models: "{{count}} Modelos Descubiertos",
+        auth_valid: "V\u00e1lido",
+        auth_expired: "Expirado \u2014 Abr\u00ed Antigravity para renovar",
+        auth_missing: "Faltante \u2014 Abr\u00ed Antigravity para renovar",
+        api_key_configured: "API Key: Configurada",
+        api_key_not_required: "API Key: No requerida",
+        setup_auto: "Configuraci\u00f3n autom\u00e1tica",
+        setup_manual: "Conexi\u00f3n manual",
+        setup_restore: "Restaurar configuraci\u00f3n",
+        docs_link: "Documentaci\u00f3n \u2197",
+        btn_copy: "Copiar",
+        btn_copied: "\u00a1Copiado!",
+        desc_claude: "CLI con Anthropic Messages API (URL base sin /v1)",
+        desc_codex: "CLI con OpenAI Responses API (wire_api = 'responses')",
+        desc_hermes: "Hermes Agent CLI y Desktop de NousResearch (URL base con /v1)",
+        desc_opencode: "Un agente de terminal independiente del proveedor, con interfaz de texto a pantalla completa.",
+        desc_openclaw: "Un asistente personal siempre activo que responde en WhatsApp, Telegram, Discord y más desde tu propia máquina.",
+        desc_cursor: "El editor centrado en la IA; pasa por la nube de Cursor, así que necesita una URL pública.",
+        desc_pi: "Un agente de código minimalista y extensible para terminal con historial en árbol.",
+        tip_pi: "💡 Tip: Ejecut\u00e1 agy-bridge setup-pi --set-default para fijar AGY como proveedor por defecto en settings.json.",
+        desc_gentle_shell: "Un entorno de terminal aislado para Pi con subagentes enfocados, modo review y arn\u00e9s ODD.",
         desc_freellmapi: "Custom Provider & Aider integration (Base URL with /v1)",
         footer: "AGY Model Bridge &bull; v{__version__} &bull; Local Gateway"
       }},
@@ -872,6 +905,10 @@ def render_dashboard(
             label = dict.auth_missing || "Missing — Open Antigravity to refresh";
           }}
           el.innerHTML = "🛡️ " + label;
+        }} else if (key === "api_key_badge") {{
+          var isConfigured = el.getAttribute("data-configured") === "true";
+          var badgeText = isConfigured ? (dict.api_key_configured || "API Key: Configured") : (dict.api_key_not_required || "API Key: Not required");
+          el.innerHTML = "🔑 " + badgeText;
         }} else if (key === "btn_copy") {{
           if (!el.classList.contains("copied")) {{
             el.innerText = dict.btn_copy || "Copy";
