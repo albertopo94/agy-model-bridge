@@ -78,6 +78,8 @@ def _handle_restore_cli(
             restored = restore_backup(target, backup_path=args.backup)
             if client_name == "Gentle Shell":
                 restore_gentle_shell(config_path=target, backup_path=args.backup)
+            elif client_name == "Pi":
+                restore_pi(config_path=target, backup_path=args.backup)
             print(t("restore_restored_from", name=restored.name))
             print(t("restore_client_ready", client_name=client_name, target=target))
             return 0
@@ -94,6 +96,8 @@ def _handle_restore_cli(
         restored = restore_backup(target, backup_path=backups[0])
         if client_name == "Gentle Shell":
             restore_gentle_shell(config_path=target, backup_path=backups[0])
+        elif client_name == "Pi":
+            restore_pi(config_path=target, backup_path=backups[0])
         print(t("restore_restored_from", name=restored.name))
         print(t("restore_client_ready", client_name=client_name, target=target))
         return 0
@@ -132,6 +136,8 @@ def _handle_restore_cli(
     restored = restore_backup(target, backup_path=backups[selected_index])
     if client_name == "Gentle Shell":
         restore_gentle_shell(config_path=target, backup_path=backups[selected_index])
+    elif client_name == "Pi":
+        restore_pi(config_path=target, backup_path=backups[selected_index])
     print("\n" + t("restore_restored_from", name=restored.name))
     print(t("restore_client_ready", client_name=client_name, target=target))
     return 0

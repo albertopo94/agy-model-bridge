@@ -22,6 +22,7 @@ from bridge.setup import (
     atomic_write_file,
     build_hermes_block,
     create_backup,
+    create_zero_state_backup,
     describe_backup,
     get_active_api_key,
     get_configurator,
@@ -170,6 +171,22 @@ class TestCreateBackup(unittest.TestCase):
         self.assertEqual(m_micro.group(1), "2026-09-30T12-15-44-123456")
 
         self.assertIsNone(BACKUP_TIMESTAMP_REGEX.search(non_matching))
+ 
+    def test_create_zero_state_backup(self):
+        target = self.dir_path / "subdir" / "models.json"
+        self.assertFalse(target.exists())
+        backup_path = create_zero_state_backup(target)
+
+        self.assertTrue(backup_path.exists())
+        self.assertTrue(backup_path.name.endswith("-original"))
+        self.assertTrue(backup_path.name.startswith("models.json.backup-"))
+        file_stat = backup_path.stat()
+        self.assertEqual(stat.S_IMODE(file_stat.st_mode), 0o600)
+        parent_stat = target.parent.stat()
+        self.assertEqual(stat.S_IMODE(parent_stat.st_mode), 0o700)
+        data = json.loads(backup_path.read_text(encoding="utf-8"))
+        self.assertEqual(data, {"_zero_state": True})
+        self.assertFalse(target.exists())
 
 
 class TestListBackups(unittest.TestCase):
@@ -300,6 +317,22 @@ class TestDescribeBackup(unittest.TestCase):
         missing = self.dir_path / "does_not_exist"
         self.assertEqual(describe_backup(missing), "Desconocido")
 
+    def test_describe_zero_state_backups(self):
+        b_gs = self.dir_path / ".gentle-shell" / "agent" / "models.json.backup-2026-10-07T12-00-00-original"
+        b_gs.parent.mkdir(parents=True, exist_ok=True)
+        b_gs.write_text(json.dumps({"_zero_state": True}), encoding="utf-8")
+        self.assertEqual(describe_backup(b_gs), "Gentle Shell Original")
+
+        b_pi = self.dir_path / ".pi" / "agent" / "models.json.backup-2026-10-07T12-00-00-original"
+        b_pi.parent.mkdir(parents=True, exist_ok=True)
+        b_pi.write_text(json.dumps({"_zero_state": True}), encoding="utf-8")
+        self.assertEqual(describe_backup(b_pi), "Pi Original")
+
+        b_other = self.dir_path / "custom" / "config.json.backup-2026-10-07T12-00-00-original"
+        b_other.parent.mkdir(parents=True, exist_ok=True)
+        b_other.write_text(json.dumps({"_zero_state": True}), encoding="utf-8")
+        self.assertEqual(describe_backup(b_other), "Original Clean State")
+
 
 class TestRestoreBackup(unittest.TestCase):
     def setUp(self):
@@ -358,6 +391,15 @@ class TestRestoreBackup(unittest.TestCase):
         self.assertEqual(restored, b1)
         self.assertEqual(target.read_text(encoding="utf-8"), 'setting = "choice1"\n')
         self.assertTrue(b1.exists())
+
+    def test_restore_zero_state_backup_deletes_target(self):
+        target = self.dir_path / "models.json"
+        target.write_text(json.dumps({"providers": {"agy": {}}}), encoding="utf-8")
+        backup = create_zero_state_backup(target)
+
+        restored = restore_backup(target, backup_path=backup)
+        self.assertEqual(restored, target)
+        self.assertFalse(target.exists())
 
 
 class TestSetupClaude(unittest.TestCase):
@@ -1348,7 +1390,7 @@ class TestUpdateInstallation(unittest.TestCase):
 
         self.assertEqual(result["status"], "updated")
         self.assertTrue(result["restarted_daemon"])
-        self.assertEqual(result["version"], "0.13.0")
+        self.assertEqual(result["version"], "0.14.0")
         mock_run.assert_called_once_with(
             ["git", "-C", str(self.repo_dir), "pull", "--ff-only"],
             capture_output=True,
@@ -1540,7 +1582,7 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main([flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.13.0")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.14.0")
 
     def test_cli_subcommand_version_flags(self):
         from bridge.__main__ import main
@@ -1552,19 +1594,19 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main(["update", flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.13.0")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.14.0")
 
     def test_version_unification(self):
         import bridge
         from pathlib import Path
         import re
 
-        self.assertEqual(bridge.__version__, "0.13.0")
+        self.assertEqual(bridge.__version__, "0.14.0")
         pyproject_path = Path(__file__).resolve().parent.parent / "pyproject.toml"
         pyproject_text = pyproject_path.read_text(encoding="utf-8")
         match = re.search(r'version\s*=\s*"([^"]+)"', pyproject_text)
         self.assertIsNotNone(match)
-        self.assertEqual(match.group(1), "0.13.0")
+        self.assertEqual(match.group(1), "0.14.0")
 
 
 class TestClientConfiguratorRegistry(unittest.TestCase):
@@ -3107,7 +3149,10 @@ class TestPiConfigurator(unittest.TestCase):
         file_stat = target.stat()
         self.assertEqual(stat.S_IMODE(file_stat.st_mode), 0o600)
         self.assertEqual(res, target)
-        self.assertIsNone(res.backup_path)
+        self.assertIsNotNone(res.backup_path)
+        self.assertTrue(res.backup_path.name.endswith("-original"))
+        self.assertTrue(res.backup_path.exists())
+        self.assertEqual(json.loads(res.backup_path.read_text(encoding="utf-8")), {"_zero_state": True})
 
         data = json.loads(target.read_text(encoding="utf-8"))
         self.assertIn("providers", data)
@@ -3327,6 +3372,60 @@ class TestPiConfigurator(unittest.TestCase):
         restored = restore_pi(config_path=target)
         self.assertTrue(restored)
 
+    def test_restore_zero_state_backup_deletes_models_and_restores_original_settings(self):
+        target = self.dir_path / "agent" / "models.json"
+        settings_target = self.dir_path / "agent" / "settings.json"
+        settings_target.parent.mkdir(parents=True, exist_ok=True)
+        settings_target.write_text(json.dumps({"theme": "dark"}), encoding="utf-8")
+
+        res = self.configurator.setup(
+            config_path=target,
+            model="gemini-3.8-flash-high",
+            set_default=True,
+        )
+        self.assertTrue(target.exists())
+        self.assertIsNotNone(res.backup_path)
+        self.assertTrue(res.backup_path.exists())
+        s_data = json.loads(settings_target.read_text(encoding="utf-8"))
+        self.assertEqual(s_data["defaultProvider"], "agy")
+
+        success = self.configurator.restore(config_path=target)
+        self.assertTrue(success)
+        self.assertFalse(target.exists())
+        self.assertFalse(res.backup_path.exists())
+        restored_settings = json.loads(settings_target.read_text(encoding="utf-8"))
+        self.assertEqual(restored_settings, {"theme": "dark"})
+        settings_backups = list(settings_target.parent.glob("settings.json.backup-*"))
+        self.assertEqual(len(settings_backups), 0)
+
+    def test_restore_zero_state_surgical_settings_when_no_settings_backup(self):
+        target = self.dir_path / "agent" / "models.json"
+        settings_target = self.dir_path / "agent" / "settings.json"
+        settings_target.parent.mkdir(parents=True, exist_ok=True)
+
+        res = self.configurator.setup(
+            config_path=target,
+            model="gemini-3.8-flash-high",
+            set_default=True,
+        )
+        for b in settings_target.parent.glob("settings.json.backup-*"):
+            b.unlink()
+
+        success = self.configurator.restore(config_path=target)
+        self.assertTrue(success)
+        self.assertFalse(target.exists())
+        self.assertFalse(res.backup_path.exists())
+        s_data = json.loads(settings_target.read_text(encoding="utf-8"))
+        self.assertNotIn("defaultProvider", s_data)
+        self.assertNotIn("defaultModel", s_data)
+
+    def test_restore_without_backups_purges_file_when_providers_empty(self):
+        target = self.dir_path / "models.json"
+        target.write_text(json.dumps({"providers": {"agy": {"name": "AGY Bridge"}}}), encoding="utf-8")
+        success = self.configurator.restore(config_path=target)
+        self.assertTrue(success)
+        self.assertFalse(target.exists())
+
 
 class TestCLIPi(unittest.TestCase):
     def setUp(self):
@@ -3423,6 +3522,18 @@ class TestCLIPi(unittest.TestCase):
             exit_code = main(["restore-pi", "--path", str(target)])
         self.assertEqual(exit_code, 1)
 
+    def test_cli_restore_pi_zero_state_removes_models_completely(self):
+        from bridge.__main__ import main
+        target = self.dir_path / "agent" / "models.json"
+        res = setup_pi(config_path=target)
+        self.assertTrue(target.exists())
+        self.assertTrue(res.backup_path.exists())
+
+        exit_code = main(["restore-pi", "--path", str(target), "--latest"])
+        self.assertEqual(exit_code, 0)
+        self.assertFalse(target.exists())
+        self.assertFalse(res.backup_path.exists())
+
 
 class TestUninstallPi(unittest.TestCase):
     def setUp(self):
@@ -3486,9 +3597,11 @@ class TestUninstallPi(unittest.TestCase):
 
         self.assertIn("pi", res["restored_clients"])
         self.assertTrue(res["restored_clients"]["pi"])
-        self.assertTrue(res.get("pi_restored", False))
-        cleaned = json.loads(pi_config.read_text(encoding="utf-8"))
-        self.assertNotIn("agy", cleaned.get("providers", {}))
+        if pi_config.exists():
+            cleaned = json.loads(pi_config.read_text(encoding="utf-8"))
+            self.assertNotIn("agy", cleaned.get("providers", {}))
+        else:
+            self.assertFalse(pi_config.exists())
 
 
 class TestGentleShellConfigurator(unittest.TestCase):
@@ -3568,7 +3681,10 @@ class TestGentleShellConfigurator(unittest.TestCase):
         file_stat = target.stat()
         self.assertEqual(stat.S_IMODE(file_stat.st_mode), 0o600)
         self.assertEqual(res, target)
-        self.assertIsNone(res.backup_path)
+        self.assertIsNotNone(res.backup_path)
+        self.assertTrue(res.backup_path.name.endswith("-original"))
+        self.assertTrue(res.backup_path.exists())
+        self.assertEqual(json.loads(res.backup_path.read_text(encoding="utf-8")), {"_zero_state": True})
 
         data = json.loads(target.read_text(encoding="utf-8"))
         self.assertIn("providers", data)
@@ -3787,6 +3903,60 @@ class TestGentleShellConfigurator(unittest.TestCase):
         restored = restore_gentle_shell(config_path=target)
         self.assertTrue(restored)
 
+    def test_restore_zero_state_backup_deletes_models_and_restores_original_settings(self):
+        target = self.dir_path / "agent" / "models.json"
+        settings_target = self.dir_path / "agent" / "settings.json"
+        settings_target.parent.mkdir(parents=True, exist_ok=True)
+        settings_target.write_text(json.dumps({"theme": "light"}), encoding="utf-8")
+
+        res = self.configurator.setup(
+            config_path=target,
+            model="gemini-3.8-flash-high",
+            set_default=True,
+        )
+        self.assertTrue(target.exists())
+        self.assertIsNotNone(res.backup_path)
+        self.assertTrue(res.backup_path.exists())
+        s_data = json.loads(settings_target.read_text(encoding="utf-8"))
+        self.assertEqual(s_data["defaultProvider"], "agy")
+
+        success = self.configurator.restore(config_path=target)
+        self.assertTrue(success)
+        self.assertFalse(target.exists())
+        self.assertFalse(res.backup_path.exists())
+        restored_settings = json.loads(settings_target.read_text(encoding="utf-8"))
+        self.assertEqual(restored_settings, {"theme": "light"})
+        settings_backups = list(settings_target.parent.glob("settings.json.backup-*"))
+        self.assertEqual(len(settings_backups), 0)
+
+    def test_restore_zero_state_surgical_settings_when_no_settings_backup(self):
+        target = self.dir_path / "agent" / "models.json"
+        settings_target = self.dir_path / "agent" / "settings.json"
+        settings_target.parent.mkdir(parents=True, exist_ok=True)
+
+        res = self.configurator.setup(
+            config_path=target,
+            model="gemini-3.8-flash-high",
+            set_default=True,
+        )
+        for b in settings_target.parent.glob("settings.json.backup-*"):
+            b.unlink()
+
+        success = self.configurator.restore(config_path=target)
+        self.assertTrue(success)
+        self.assertFalse(target.exists())
+        self.assertFalse(res.backup_path.exists())
+        s_data = json.loads(settings_target.read_text(encoding="utf-8"))
+        self.assertNotIn("defaultProvider", s_data)
+        self.assertNotIn("defaultModel", s_data)
+
+    def test_restore_without_backups_purges_file_when_providers_empty(self):
+        target = self.dir_path / "models.json"
+        target.write_text(json.dumps({"providers": {"agy": {"name": "AGY Bridge"}}}), encoding="utf-8")
+        success = self.configurator.restore(config_path=target)
+        self.assertTrue(success)
+        self.assertFalse(target.exists())
+
 
 class TestCLIGentleShell(unittest.TestCase):
     def setUp(self):
@@ -3906,6 +4076,18 @@ class TestCLIGentleShell(unittest.TestCase):
             exit_code = main(["restore-gentle-shell", "--path", str(target)])
         self.assertEqual(exit_code, 1)
 
+    def test_cli_restore_gentle_shell_zero_state_removes_models_completely(self):
+        from bridge.__main__ import main
+        target = self.dir_path / "agent" / "models.json"
+        res = setup_gentle_shell(config_path=target)
+        self.assertTrue(target.exists())
+        self.assertTrue(res.backup_path.exists())
+
+        exit_code = main(["restore-gentle-shell", "--path", str(target), "--latest"])
+        self.assertEqual(exit_code, 0)
+        self.assertFalse(target.exists())
+        self.assertFalse(res.backup_path.exists())
+
 
 class TestUninstallGentleShell(unittest.TestCase):
     def setUp(self):
@@ -3970,8 +4152,11 @@ class TestUninstallGentleShell(unittest.TestCase):
         self.assertIn("gentle-shell", res["restored_clients"])
         self.assertTrue(res["restored_clients"]["gentle-shell"])
         self.assertTrue(res.get("gentle_shell_restored", False))
-        cleaned = json.loads(gs_config.read_text(encoding="utf-8"))
-        self.assertNotIn("agy", cleaned.get("providers", {}))
+        if gs_config.exists():
+            cleaned = json.loads(gs_config.read_text(encoding="utf-8"))
+            self.assertNotIn("agy", cleaned.get("providers", {}))
+        else:
+            self.assertFalse(gs_config.exists())
 
 
 if __name__ == "__main__":

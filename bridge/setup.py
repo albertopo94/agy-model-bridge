@@ -93,6 +93,25 @@ def create_backup(path: Path) -> Path | None:
     return backup_path
 
 
+def create_zero_state_backup(target_path: Path) -> Path:
+    """Creates a zero-state marker backup file when target configuration did not exist previously."""
+    target_path = Path(target_path)
+    parent = target_path.parent
+    if not parent.exists():
+        parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    else:
+        try:
+            os.chmod(parent, 0o700)
+        except OSError:
+            pass
+
+    timestamp = datetime.now().strftime("%Y-%m-%dT%H-%M-%S-%f")
+    backup_path = target_path.with_name(f"{target_path.name}.backup-{timestamp}-original")
+    content = json.dumps({"_zero_state": True}, indent=2) + "\n"
+    atomic_write_file(backup_path, content, mode=0o600)
+    return backup_path
+
+
 def list_backups(config_path: Path) -> list[Path]:
     """Lists all historical backup files for config_path sorted by mtime descending.
 
@@ -145,6 +164,13 @@ def describe_backup(backup_path: Path) -> str:
 
     if not content.strip():
         return "Desconocido"
+
+    if "_zero_state" in content or path.name.endswith("-original"):
+        if ".gentle-shell" in str(path):
+            return "Gentle Shell Original"
+        if "models.json" in path.name:
+            return "Pi Original"
+        return "Original Clean State"
 
     # OpenCode JSON config inspection
     if "opencode.json" in path.name or "opencode.jsonc" in path.name:
@@ -230,7 +256,16 @@ def restore_backup(config_path: Path, backup_path: Path | None = None) -> Path:
         if not chosen_backup.exists() or not chosen_backup.is_file():
             raise FileNotFoundError(f"Backup file not found: {chosen_backup}")
 
-    content = chosen_backup.read_text(encoding="utf-8")
+    try:
+        content = chosen_backup.read_text(encoding="utf-8")
+    except OSError:
+        content = ""
+
+    if "_zero_state" in content or chosen_backup.name.endswith("-original"):
+        if target.exists() and target.is_file():
+            target.unlink(missing_ok=True)
+        return target
+
     atomic_write_file(target, content, mode=0o600)
     return chosen_backup
 
@@ -1330,6 +1365,50 @@ class CursorConfigurator(ClientConfigurator):
 CLIENT_CONFIGURATORS["cursor"] = CursorConfigurator()
 
 
+def _cleanup_pi_or_gentle_settings(settings_path: Path) -> None:
+    """Restores settings.json from backup or surgically cleans agy provider and models."""
+    settings_backups = list_backups(settings_path)
+    if settings_backups:
+        try:
+            restore_backup(settings_path, backup_path=settings_backups[0])
+            settings_backups[0].unlink(missing_ok=True)
+        except OSError:
+            pass
+    elif settings_path.exists() and settings_path.is_file():
+        try:
+            raw_s = settings_path.read_text(encoding="utf-8").strip()
+            if raw_s:
+                try:
+                    s_data = json.loads(raw_s)
+                except json.JSONDecodeError:
+                    s_cleaned = _strip_json_comments(raw_s)
+                    s_data = json.loads(s_cleaned)
+                if isinstance(s_data, dict):
+                    modified = False
+                    if s_data.get("defaultProvider") == "agy":
+                        s_data.pop("defaultProvider", None)
+                        modified = True
+                    def_model = s_data.get("defaultModel")
+                    if isinstance(def_model, str) and (
+                        def_model.startswith("agy/")
+                        or "gemini" in def_model.lower()
+                    ):
+                        s_data.pop("defaultModel", None)
+                        modified = True
+                    if "enabledModels" in s_data and isinstance(s_data["enabledModels"], list):
+                        new_models = [
+                            m for m in s_data["enabledModels"]
+                            if not (isinstance(m, str) and (m.startswith("agy/") or "gemini" in m.lower()))
+                        ]
+                        if len(new_models) != len(s_data["enabledModels"]):
+                            s_data["enabledModels"] = new_models
+                            modified = True
+                    if modified:
+                        atomic_write_file(settings_path, json.dumps(s_data, indent=2) + "\n", mode=0o600)
+        except (json.JSONDecodeError, OSError):
+            pass
+
+
 class PiConfigurator(ClientConfigurator):
     """Configurator strategy for Pi Coding Agent."""
 
@@ -1408,6 +1487,8 @@ class PiConfigurator(ClientConfigurator):
                         config = loaded
             except (json.JSONDecodeError, OSError):
                 config = {}
+        else:
+            backup_path = create_zero_state_backup(target)
 
         providers = config.setdefault("providers", {})
         providers["agy"] = {
@@ -1482,20 +1563,42 @@ class PiConfigurator(ClientConfigurator):
         **kwargs: Any,
     ) -> bool:
         target = self.get_config_path(config_path)
-        if backup_path is not None:
-            try:
-                restore_backup(target, backup_path=backup_path)
-                return True
-            except (OSError, FileNotFoundError):
-                return False
+        restored = False
 
-        backups = self.list_backups(target)
-        if backups:
-            try:
-                restore_backup(target, backup_path=backups[0])
-                return True
-            except OSError:
+        chosen_backup = None
+        if backup_path is not None:
+            chosen_backup = Path(backup_path)
+            if not chosen_backup.exists() or not chosen_backup.is_file():
                 return False
+        else:
+            backups = self.list_backups(target)
+            if backups:
+                chosen_backup = backups[0]
+
+        if chosen_backup is not None:
+            is_zero_state = False
+            if chosen_backup.name.endswith("-original"):
+                is_zero_state = True
+            else:
+                try:
+                    b_content = chosen_backup.read_text(encoding="utf-8")
+                    if "_zero_state" in b_content:
+                        is_zero_state = True
+                except OSError:
+                    pass
+
+            if is_zero_state:
+                if target.exists() and target.is_file():
+                    target.unlink(missing_ok=True)
+                chosen_backup.unlink(missing_ok=True)
+                _cleanup_pi_or_gentle_settings(target.parent / "settings.json")
+                return True
+            else:
+                try:
+                    restore_backup(target, backup_path=chosen_backup)
+                    restored = True
+                except OSError:
+                    return False
         elif target.exists() and target.is_file():
             try:
                 raw_text = target.read_text(encoding="utf-8").strip()
@@ -1511,12 +1614,20 @@ class PiConfigurator(ClientConfigurator):
                         if isinstance(prov, dict):
                             prov.pop("agy", None)
 
-                        formatted_json = json.dumps(config, indent=2) + "\n"
-                        atomic_write_file(target, formatted_json, mode=0o600)
-                        return True
+                        providers_empty = not prov
+                        if providers_empty and set(config.keys()) <= {"providers"}:
+                            target.unlink(missing_ok=True)
+                        else:
+                            formatted_json = json.dumps(config, indent=2) + "\n"
+                            atomic_write_file(target, formatted_json, mode=0o600)
+                        restored = True
             except (json.JSONDecodeError, OSError):
                 return False
-        return False
+
+        if restored:
+            _cleanup_pi_or_gentle_settings(target.parent / "settings.json")
+
+        return restored
 
 
 CLIENT_CONFIGURATORS["pi"] = PiConfigurator()
@@ -1600,6 +1711,8 @@ class GentleShellConfigurator(ClientConfigurator):
                         config = loaded
             except (json.JSONDecodeError, OSError):
                 config = {}
+        else:
+            backup_path = create_zero_state_backup(target)
 
         providers = config.setdefault("providers", {})
         providers["agy"] = {
@@ -1683,65 +1796,68 @@ class GentleShellConfigurator(ClientConfigurator):
     ) -> bool:
         target = self.get_config_path(config_path)
         restored = False
+
+        chosen_backup = None
         if backup_path is not None:
-            try:
-                restore_backup(target, backup_path=backup_path)
-                restored = True
-            except (OSError, FileNotFoundError):
+            chosen_backup = Path(backup_path)
+            if not chosen_backup.exists() or not chosen_backup.is_file():
                 return False
         else:
             backups = self.list_backups(target)
             if backups:
+                chosen_backup = backups[0]
+
+        if chosen_backup is not None:
+            is_zero_state = False
+            if chosen_backup.name.endswith("-original"):
+                is_zero_state = True
+            else:
                 try:
-                    restore_backup(target, backup_path=backups[0])
+                    b_content = chosen_backup.read_text(encoding="utf-8")
+                    if "_zero_state" in b_content:
+                        is_zero_state = True
+                except OSError:
+                    pass
+
+            if is_zero_state:
+                if target.exists() and target.is_file():
+                    target.unlink(missing_ok=True)
+                chosen_backup.unlink(missing_ok=True)
+                _cleanup_pi_or_gentle_settings(target.parent / "settings.json")
+                return True
+            else:
+                try:
+                    restore_backup(target, backup_path=chosen_backup)
                     restored = True
                 except OSError:
                     return False
-            elif target.exists() and target.is_file():
-                try:
-                    raw_text = target.read_text(encoding="utf-8").strip()
-                    if raw_text:
-                        try:
-                            config = json.loads(raw_text)
-                        except json.JSONDecodeError:
-                            cleaned = _strip_json_comments(raw_text)
-                            config = json.loads(cleaned)
+        elif target.exists() and target.is_file():
+            try:
+                raw_text = target.read_text(encoding="utf-8").strip()
+                if raw_text:
+                    try:
+                        config = json.loads(raw_text)
+                    except json.JSONDecodeError:
+                        cleaned = _strip_json_comments(raw_text)
+                        config = json.loads(cleaned)
 
-                        if isinstance(config, dict):
-                            prov = config.get("providers")
-                            if isinstance(prov, dict):
-                                prov.pop("agy", None)
+                    if isinstance(config, dict):
+                        prov = config.get("providers")
+                        if isinstance(prov, dict):
+                            prov.pop("agy", None)
 
+                        providers_empty = not prov
+                        if providers_empty and set(config.keys()) <= {"providers"}:
+                            target.unlink(missing_ok=True)
+                        else:
                             formatted_json = json.dumps(config, indent=2) + "\n"
                             atomic_write_file(target, formatted_json, mode=0o600)
-                            restored = True
-                except (json.JSONDecodeError, OSError):
-                    return False
+                        restored = True
+            except (json.JSONDecodeError, OSError):
+                return False
 
         if restored:
-            settings_path = target.parent / "settings.json"
-            if settings_path.exists() and settings_path.is_file():
-                try:
-                    raw_s = settings_path.read_text(encoding="utf-8").strip()
-                    if raw_s:
-                        try:
-                            s_data = json.loads(raw_s)
-                        except json.JSONDecodeError:
-                            s_cleaned = _strip_json_comments(raw_s)
-                            s_data = json.loads(s_cleaned)
-                        if isinstance(s_data, dict) and s_data.get("defaultProvider") == "agy":
-                            s_backups = list_backups(settings_path)
-                            if s_backups:
-                                try:
-                                    restore_backup(settings_path, backup_path=s_backups[0])
-                                except OSError:
-                                    pass
-                            else:
-                                s_data.pop("defaultProvider", None)
-                                s_data.pop("defaultModel", None)
-                                atomic_write_file(settings_path, json.dumps(s_data, indent=2) + "\n", mode=0o600)
-                except (json.JSONDecodeError, OSError):
-                    pass
+            _cleanup_pi_or_gentle_settings(target.parent / "settings.json")
 
         return restored
 
@@ -1764,7 +1880,13 @@ def get_configurator(name: str) -> ClientConfigurator:
 
 def list_configurators() -> list[ClientConfigurator]:
     """Returns a list of all registered client configurators."""
-    return list(CLIENT_CONFIGURATORS.values())
+    seen: set[str] = set()
+    result: list[ClientConfigurator] = []
+    for c in CLIENT_CONFIGURATORS.values():
+        if c.name not in seen:
+            seen.add(c.name)
+            result.append(c)
+    return result
 
 
 def setup_claude(
