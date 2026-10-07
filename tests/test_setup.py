@@ -1448,7 +1448,7 @@ class TestUpdateInstallation(unittest.TestCase):
 
         self.assertEqual(result["status"], "updated")
         self.assertTrue(result["restarted_daemon"])
-        self.assertEqual(result["version"], "0.15.3")
+        self.assertEqual(result["version"], "0.15.4")
         mock_run.assert_called_once_with(
             ["git", "-C", str(self.repo_dir), "pull", "--ff-only"],
             capture_output=True,
@@ -1661,7 +1661,7 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main([flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.15.3")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.15.4")
 
     def test_cli_subcommand_version_flags(self):
         from bridge.__main__ import main
@@ -1673,19 +1673,19 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main(["update", flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.15.3")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.15.4")
 
     def test_version_unification(self):
         import bridge
         from pathlib import Path
         import re
 
-        self.assertEqual(bridge.__version__, "0.15.3")
+        self.assertEqual(bridge.__version__, "0.15.4")
         pyproject_path = Path(__file__).resolve().parent.parent / "pyproject.toml"
         pyproject_text = pyproject_path.read_text(encoding="utf-8")
         match = re.search(r'version\s*=\s*"([^"]+)"', pyproject_text)
         self.assertIsNotNone(match)
-        self.assertEqual(match.group(1), "0.15.3")
+        self.assertEqual(match.group(1), "0.15.4")
 
 
 class TestClientConfiguratorRegistry(unittest.TestCase):
@@ -2012,6 +2012,23 @@ class TestHermesConfiguratorStrategy(unittest.TestCase):
         self.assertIn('# [agy-disabled]   default: "anthropic/claude-3-5-sonnet"', content)
         self.assertIn("# [agy-disabled]   temperature: 0.7", content)
         self.assertIn("terminal:\n  theme: dark", content)
+
+    def test_comment_out_hermes_model_block_leaves_nested_model_untouched(self):
+        from bridge.setup import comment_out_hermes_model_block
+        content = (
+            "auxiliary:\n"
+            "  vision:\n"
+            "    model: gpt-4o-mini\n"
+            "    provider: openai\n"
+            "model:\n"
+            "  default: custom-model\n"
+        )
+        res = comment_out_hermes_model_block(content)
+        self.assertIn("    model: gpt-4o-mini", res)
+        self.assertIn("    provider: openai", res)
+        self.assertNotIn("# [agy-disabled]     model:", res)
+        self.assertIn("# [agy-disabled] model:", res)
+        self.assertIn("# [agy-disabled]   default: custom-model", res)
 
     def test_setup_custom_port_and_url_and_model(self):
         target = self.dir_path / "config.yaml"
@@ -2719,7 +2736,7 @@ class TestOpenClawConfigurator(unittest.TestCase):
             {
                 "id": "gemini-3.8-flash-high",
                 "name": "Gemini 3.8 Flash (High)",
-                "reasoning": False,
+                "reasoning": True,
                 "input": ["text"],
                 "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
                 "contextWindow": 1048576,
@@ -2728,7 +2745,7 @@ class TestOpenClawConfigurator(unittest.TestCase):
             {
                 "id": "claude-sonnet-5-5-high",
                 "name": "Claude Sonnet 5.5 (High - AGY)",
-                "reasoning": False,
+                "reasoning": True,
                 "input": ["text"],
                 "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
                 "contextWindow": 1048576,
@@ -2737,7 +2754,7 @@ class TestOpenClawConfigurator(unittest.TestCase):
             {
                 "id": "claude-sonnet-5-5-medium",
                 "name": "Claude Sonnet 5.5 (Medium - AGY)",
-                "reasoning": False,
+                "reasoning": True,
                 "input": ["text"],
                 "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
                 "contextWindow": 1048576,
@@ -2746,7 +2763,7 @@ class TestOpenClawConfigurator(unittest.TestCase):
             {
                 "id": "claude-sonnet-5-5-low",
                 "name": "Claude Sonnet 5.5 (Low - AGY)",
-                "reasoning": False,
+                "reasoning": True,
                 "input": ["text"],
                 "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
                 "contextWindow": 1048576,
@@ -2755,7 +2772,7 @@ class TestOpenClawConfigurator(unittest.TestCase):
             {
                 "id": "claude-opus-5-5-high",
                 "name": "Claude Opus 5.5 (High - AGY)",
-                "reasoning": False,
+                "reasoning": True,
                 "input": ["text"],
                 "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
                 "contextWindow": 1048576,
@@ -2764,7 +2781,7 @@ class TestOpenClawConfigurator(unittest.TestCase):
             {
                 "id": "claude-opus-5-5-medium",
                 "name": "Claude Opus 5.5 (Medium - AGY)",
-                "reasoning": False,
+                "reasoning": True,
                 "input": ["text"],
                 "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
                 "contextWindow": 1048576,
@@ -2773,7 +2790,7 @@ class TestOpenClawConfigurator(unittest.TestCase):
             {
                 "id": "claude-opus-5-5-low",
                 "name": "Claude Opus 5.5 (Low - AGY)",
-                "reasoning": False,
+                "reasoning": True,
                 "input": ["text"],
                 "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
                 "contextWindow": 1048576,
@@ -3352,7 +3369,10 @@ class TestPiConfigurator(unittest.TestCase):
         self.assertEqual(models[8]["name"], "Gemini 2.5 Pro (AGY)")
         self.assertEqual(models[9]["name"], "Gemini 2.5 Flash (AGY)")
         for m in models:
-            self.assertFalse(m["reasoning"])
+            if m["id"] in ("gemini-2.5-pro", "gemini-2.5-flash"):
+                self.assertFalse(m["reasoning"])
+            else:
+                self.assertTrue(m["reasoning"])
             self.assertEqual(m["input"], ["text"])
             self.assertEqual(m["contextWindow"], 1048576)
             self.assertEqual(m["maxTokens"], 65536)
@@ -3905,7 +3925,10 @@ class TestGentleShellConfigurator(unittest.TestCase):
         self.assertEqual(models[8]["name"], "Gemini 2.5 Pro (AGY)")
         self.assertEqual(models[9]["name"], "Gemini 2.5 Flash (AGY)")
         for m in models:
-            self.assertFalse(m["reasoning"])
+            if m["id"] in ("gemini-2.5-pro", "gemini-2.5-flash"):
+                self.assertFalse(m["reasoning"])
+            else:
+                self.assertTrue(m["reasoning"])
             self.assertEqual(m["input"], ["text"])
             self.assertEqual(m["contextWindow"], 1048576)
             self.assertEqual(m["maxTokens"], 65536)

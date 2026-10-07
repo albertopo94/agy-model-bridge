@@ -14,6 +14,7 @@ Zero-dependency, pure Python 3 local AI gateway that bridges the Google Cloud Co
   - `POST /v1/responses` — OpenAI Responses API shim for Codex CLI (`wire_api = "responses"`).
   - `POST /v1/messages` — Anthropic Messages API shim with dynamic SSE stream mapping (`thinking_delta`, `text_delta`, `tool_use`, `input_json_delta`), recursive OpenAPI 3.0 schema sanitization, and full tool calling for Claude Code CLI.
 - **Built-in Setup CLI**: Native subcommands (`setup-claude`, `setup-codex`, `setup-hermes`, `setup-opencode`, `setup-openclaw`, `setup-cursor`, `setup-pi`, `setup-gentle-shell`) that surgically configure client environments with atomic writes, file permissions `0o600`, and automatic timestamped backups.
+- **Automatic Local API Key Security**: Automatically generates a persistent random API key stored at `~/.agy-bridge/api_key` (`0600` permissions) to protect `/v1/*` gateway endpoints against cross-origin access.
 - **macOS Keychain OAuth Integration**: Seamlessly extracts Google OAuth credentials stored by Antigravity in Keychain (`service="gemini"`, `account="antigravity"`) with thread-safe TTL caching and automatic 401 re-read.
 - **Adaptive Thinking & Model Aliasing**: Intelligently resolves `gemini-3.8-flash-high` / `auto` to upstream `gemini-3.8-flash-tiered`, automatically configuring reasoning levels (`HIGH`, `MEDIUM`, `LOW`) and token budgets.
 
@@ -40,6 +41,11 @@ The bridge reads the active OAuth token managed by Antigravity. If you have not 
 > `⚠️ Expired — Open Antigravity to refresh`
 
 Simply launch the Antigravity application so it can renew its credentials in Keychain; the bridge will automatically pick up the refreshed token on the next request.
+
+### 3. Local API Key Authentication
+The bridge protects all `/v1/*` endpoints with a persistent random token stored in `~/.agy-bridge/api_key` (permissions `0600`).
+- **Automated client setups** (`agy-bridge setup-*`) read and inject this persistent key automatically.
+- **Manual sessions or environment variables**: read the key directly with `cat ~/.agy-bridge/api_key`.
 
 ---
 
@@ -142,7 +148,7 @@ Typing `/model` inside Claude Code displays curated models ready to use:
 
 *(Alternative: set environment variables manually for a single session:)*
 ```bash
-export ANTHROPIC_BASE_URL="http://127.0.0.1:24980" ANTHROPIC_AUTH_TOKEN="antigravity" ANTHROPIC_MODEL="gemini-3.8-flash-high" CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1 && claude
+export ANTHROPIC_BASE_URL="http://127.0.0.1:24980" ANTHROPIC_AUTH_TOKEN="$(cat ~/.agy-bridge/api_key)" ANTHROPIC_MODEL="gemini-3.8-flash-high" CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1 && claude
 ```
 
 ### 🎴 Codex CLI
@@ -159,10 +165,16 @@ codex
 ```
 
 ### 🎴 Hermes Agent
-Hermes Agent connects using standard OpenAI environment variables:
 
+Run the automated setup:
 ```bash
-export OPENAI_BASE_URL="http://127.0.0.1:24980/v1" OPENAI_API_KEY="local-bridge" && hermes
+agy-bridge setup-hermes
+```
+This surgically configures `~/.hermes/config.yaml` with the local gateway endpoint and active API key.
+
+*(Alternative: set environment variables manually for a single session:)*
+```bash
+export OPENAI_BASE_URL="http://127.0.0.1:24980/v1" OPENAI_API_KEY="$(cat ~/.agy-bridge/api_key)" && hermes
 ```
 
 ### 🎴 OpenCode
@@ -208,7 +220,7 @@ agy-bridge setup-cursor
 Follow the on-screen guide to:
 1. Open Cursor **Settings** -> **Models** -> enable **Override OpenAI Base URL**.
 2. Enter your bridge endpoint (e.g., `http://127.0.0.1:24980/v1` or public HTTPS tunnel URL).
-3. Set API Key to `local-bridge`.
+3. Set API Key to your local key (read from `cat ~/.agy-bridge/api_key`).
 4. Add models: `gemini-3.8-flash-high`, `claude-sonnet-5-5-high`, `claude-opus-5-5-high`, `gemini-2.5-pro`, `gemini-2.5-flash`.
 
 ### 🎴 Pi Coding Agent
@@ -256,7 +268,7 @@ Or switch models inside Gentle Shell using `/model agy/gemini-3.8-flash-high`.
 ### 🎴 FreeLLMAPI
 Register this bridge as an OpenAI-compatible Custom Provider in FreeLLMAPI:
 - **Base URL**: `http://127.0.0.1:24980/v1`
-- **API Key**: `local-bridge` (or any string)
+- **API Key**: Your local key (from `cat ~/.agy-bridge/api_key`)
 
 ---
 
@@ -360,7 +372,7 @@ Execute the complete test suite:
 python3 -m unittest discover -s tests -v
 ```
 
-All 647 tests run in ~3 seconds with zero external dependencies and zero network access.
+All 648 tests run in ~3 seconds with zero external dependencies and zero network access.
 
 ### End-to-End Smoke Test
 

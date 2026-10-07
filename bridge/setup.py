@@ -790,7 +790,7 @@ def comment_out_hermes_model_block(text: str) -> str:
     in_model_section = False
     for line in lines:
         stripped = line.strip()
-        if re.match(r"^[ \t]*model\s*:", line) and not line.lstrip().startswith("#"):
+        if re.match(r"^model\s*:", line) and not line.startswith("#"):
             in_model_section = True
             out.append(f"# [agy-disabled] {line}")
             continue
@@ -1281,7 +1281,7 @@ class OpenClawConfigurator(ClientConfigurator):
                 {
                     "id": "gemini-3.8-flash-high",
                     "name": "Gemini 3.8 Flash (High)",
-                    "reasoning": False,
+                    "reasoning": True,
                     "input": ["text"],
                     "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
                     "contextWindow": 1048576,
@@ -1290,7 +1290,7 @@ class OpenClawConfigurator(ClientConfigurator):
                 {
                     "id": "claude-sonnet-5-5-high",
                     "name": "Claude Sonnet 5.5 (High - AGY)",
-                    "reasoning": False,
+                    "reasoning": True,
                     "input": ["text"],
                     "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
                     "contextWindow": 1048576,
@@ -1299,7 +1299,7 @@ class OpenClawConfigurator(ClientConfigurator):
                 {
                     "id": "claude-sonnet-5-5-medium",
                     "name": "Claude Sonnet 5.5 (Medium - AGY)",
-                    "reasoning": False,
+                    "reasoning": True,
                     "input": ["text"],
                     "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
                     "contextWindow": 1048576,
@@ -1308,7 +1308,7 @@ class OpenClawConfigurator(ClientConfigurator):
                 {
                     "id": "claude-sonnet-5-5-low",
                     "name": "Claude Sonnet 5.5 (Low - AGY)",
-                    "reasoning": False,
+                    "reasoning": True,
                     "input": ["text"],
                     "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
                     "contextWindow": 1048576,
@@ -1317,7 +1317,7 @@ class OpenClawConfigurator(ClientConfigurator):
                 {
                     "id": "claude-opus-5-5-high",
                     "name": "Claude Opus 5.5 (High - AGY)",
-                    "reasoning": False,
+                    "reasoning": True,
                     "input": ["text"],
                     "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
                     "contextWindow": 1048576,
@@ -1326,7 +1326,7 @@ class OpenClawConfigurator(ClientConfigurator):
                 {
                     "id": "claude-opus-5-5-medium",
                     "name": "Claude Opus 5.5 (Medium - AGY)",
-                    "reasoning": False,
+                    "reasoning": True,
                     "input": ["text"],
                     "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
                     "contextWindow": 1048576,
@@ -1335,7 +1335,7 @@ class OpenClawConfigurator(ClientConfigurator):
                 {
                     "id": "claude-opus-5-5-low",
                     "name": "Claude Opus 5.5 (Low - AGY)",
-                    "reasoning": False,
+                    "reasoning": True,
                     "input": ["text"],
                     "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
                     "contextWindow": 1048576,
@@ -1508,7 +1508,7 @@ DEFAULT_PI_AND_GENTLE_MODELS: list[dict[str, Any]] = [
     {
         "id": "gemini-3.8-flash-high",
         "name": "Gemini 3.8 Flash (High - AGY)",
-        "reasoning": False,
+        "reasoning": True,
         "input": ["text"],
         "contextWindow": 1048576,
         "maxTokens": 65536,
@@ -1516,7 +1516,7 @@ DEFAULT_PI_AND_GENTLE_MODELS: list[dict[str, Any]] = [
     {
         "id": "gemini-3.8",
         "name": "Gemini 3.8 (AGY)",
-        "reasoning": False,
+        "reasoning": True,
         "input": ["text"],
         "contextWindow": 1048576,
         "maxTokens": 65536,
@@ -1524,7 +1524,7 @@ DEFAULT_PI_AND_GENTLE_MODELS: list[dict[str, Any]] = [
     {
         "id": "claude-sonnet-5-5-high",
         "name": "Claude Sonnet 5.5 (High - AGY)",
-        "reasoning": False,
+        "reasoning": True,
         "input": ["text"],
         "contextWindow": 1048576,
         "maxTokens": 65536,
@@ -1532,7 +1532,7 @@ DEFAULT_PI_AND_GENTLE_MODELS: list[dict[str, Any]] = [
     {
         "id": "claude-sonnet-5-5-medium",
         "name": "Claude Sonnet 5.5 (Medium - AGY)",
-        "reasoning": False,
+        "reasoning": True,
         "input": ["text"],
         "contextWindow": 1048576,
         "maxTokens": 65536,
@@ -1540,7 +1540,7 @@ DEFAULT_PI_AND_GENTLE_MODELS: list[dict[str, Any]] = [
     {
         "id": "claude-sonnet-5-5-low",
         "name": "Claude Sonnet 5.5 (Low - AGY)",
-        "reasoning": False,
+        "reasoning": True,
         "input": ["text"],
         "contextWindow": 1048576,
         "maxTokens": 65536,
@@ -1548,7 +1548,7 @@ DEFAULT_PI_AND_GENTLE_MODELS: list[dict[str, Any]] = [
     {
         "id": "claude-opus-5-5-high",
         "name": "Claude Opus 5.5 (High - AGY)",
-        "reasoning": False,
+        "reasoning": True,
         "input": ["text"],
         "contextWindow": 1048576,
         "maxTokens": 65536,
@@ -1556,7 +1556,7 @@ DEFAULT_PI_AND_GENTLE_MODELS: list[dict[str, Any]] = [
     {
         "id": "claude-opus-5-5-medium",
         "name": "Claude Opus 5.5 (Medium - AGY)",
-        "reasoning": False,
+        "reasoning": True,
         "input": ["text"],
         "contextWindow": 1048576,
         "maxTokens": 65536,
@@ -1564,7 +1564,7 @@ DEFAULT_PI_AND_GENTLE_MODELS: list[dict[str, Any]] = [
     {
         "id": "claude-opus-5-5-low",
         "name": "Claude Opus 5.5 (Low - AGY)",
-        "reasoning": False,
+        "reasoning": True,
         "input": ["text"],
         "contextWindow": 1048576,
         "maxTokens": 65536,
