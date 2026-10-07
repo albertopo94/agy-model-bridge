@@ -129,11 +129,16 @@ claude
 
 #### Changing Models in Claude Code (`/model`)
 Typing `/model` inside Claude Code displays curated models ready to use:
-1. **Gemini 3.8 Flash · high (1M)** (`gemini-3.8-flash-high`) — *Default*
-2. **Gemini 3.7 Flash** (`gemini-3.7-flash-tiered`)
-3. **Gemini 3.6 Flash** (`gemini-3.6-flash-tiered`)
-4. **Claude Sonnet 4.6 (Cloud Code)** (`claude-sonnet-4-6`)
-5. **Claude Opus 4.6 Thinking (Cloud Code)** (`claude-opus-4-6-thinking`)
+1. **Gemini 3.8 Flash · High (AGY)** (`gemini-3.8-flash-high`) — *Default*
+2. **Gemini 3.7 Flash · High (AGY)** (`gemini-3.7-flash-tiered`)
+3. **Claude Sonnet 5.5 · High (AGY)** (`claude-sonnet-5-5-high`)
+4. **Claude Sonnet 5.5 · Medium (AGY)** (`claude-sonnet-5-5-medium`)
+5. **Claude Sonnet 5.5 · Low (AGY)** (`claude-sonnet-5-5-low`)
+6. **Claude Opus 5.5 · High (AGY)** (`claude-opus-5-5-high`)
+7. **Claude Opus 5.5 · Medium (AGY)** (`claude-opus-5-5-medium`)
+8. **Claude Opus 5.5 · Low (AGY)** (`claude-opus-5-5-low`)
+9. **Gemini 2.5 Pro (AGY)** (`gemini-2.5-pro`)
+10. **Gemini 2.5 Flash (AGY)** (`gemini-2.5-flash`)
 
 *(Alternative: set environment variables manually for a single session:)*
 ```bash
@@ -204,7 +209,7 @@ Follow the on-screen guide to:
 1. Open Cursor **Settings** -> **Models** -> enable **Override OpenAI Base URL**.
 2. Enter your bridge endpoint (e.g., `http://127.0.0.1:24980/v1` or public HTTPS tunnel URL).
 3. Set API Key to `local-bridge`.
-4. Add models: `gemini-3.8-flash-high`, `gemini-2.5-pro`, `gemini-2.5-flash`.
+4. Add models: `gemini-3.8-flash-high`, `claude-sonnet-5-5-high`, `claude-opus-5-5-high`, `gemini-2.5-pro`, `gemini-2.5-flash`.
 
 ### 🎴 Pi Coding Agent
 
@@ -214,7 +219,7 @@ agy-bridge setup-pi
 ```
 This surgically configures `~/.pi/agent/models.json` with:
 - Provider: `agy` configured with OpenAI completions API
-- Models: `gemini-3.8-flash-high`, `gemini-2.5-pro`, `gemini-2.5-flash`
+- Models: `gemini-3.8-flash-high`, `gemini-3.8`, `claude-sonnet-5-5-high/medium/low`, `claude-opus-5-5-high/medium/low`, `gemini-2.5-pro`, `gemini-2.5-flash`
 - Base URL: `http://127.0.0.1:24980/v1`
 
 Options:
@@ -235,7 +240,7 @@ agy-bridge setup-gentle-shell
 ```
 This surgically configures `~/.gentle-shell/agent/models.json` with:
 - Provider: `agy` configured with OpenAI completions API
-- Models: `gemini-3.8-flash-high`, `gemini-3.8`, `gemini-2.5-pro`, `gemini-2.5-flash`
+- Models: `gemini-3.8-flash-high`, `gemini-3.8`, `claude-sonnet-5-5-high/medium/low`, `claude-opus-5-5-high/medium/low`, `gemini-2.5-pro`, `gemini-2.5-flash`
 - Base URL: `http://127.0.0.1:24980/v1`
 
 Options:
@@ -355,7 +360,7 @@ Execute the complete test suite:
 python3 -m unittest discover -s tests -v
 ```
 
-All 624 tests run in ~1 second with zero external dependencies and zero network access.
+All 627 tests run in ~3 seconds with zero external dependencies and zero network access.
 
 ### End-to-End Smoke Test
 

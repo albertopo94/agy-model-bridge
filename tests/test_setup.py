@@ -441,9 +441,14 @@ class TestSetupClaude(unittest.TestCase):
             [
                 "gemini-3.8-flash-high",
                 "gemini-3.7-flash-tiered",
-                "gemini-3.6-flash-tiered",
-                "claude-sonnet-4-6",
-                "claude-opus-4-6-thinking",
+                "claude-sonnet-5-5-high",
+                "claude-sonnet-5-5-medium",
+                "claude-sonnet-5-5-low",
+                "claude-opus-5-5-high",
+                "claude-opus-5-5-medium",
+                "claude-opus-5-5-low",
+                "gemini-2.5-pro",
+                "gemini-2.5-flash",
             ],
         )
         self.assertFalse(data["modelPicker"].get("replaceBuiltInOptions", True))
@@ -456,6 +461,43 @@ class TestSetupClaude(unittest.TestCase):
         # No backup should have been created for a fresh file
         backups = list(self.dir_path.glob("settings.json.backup-*"))
         self.assertEqual(len(backups), 0)
+
+    def test_claude_model_picker_options_contain_claude_5_5_and_gemini_3_8_with_agy_labels(self):
+        from bridge.setup import DEFAULT_CLAUDE_MODEL_PICKER_OPTIONS
+
+        models = [opt["model"] for opt in DEFAULT_CLAUDE_MODEL_PICKER_OPTIONS]
+        expected_models = [
+            "gemini-3.8-flash-high",
+            "gemini-3.7-flash-tiered",
+            "claude-sonnet-5-5-high",
+            "claude-sonnet-5-5-medium",
+            "claude-sonnet-5-5-low",
+            "claude-opus-5-5-high",
+            "claude-opus-5-5-medium",
+            "claude-opus-5-5-low",
+            "gemini-2.5-pro",
+            "gemini-2.5-flash",
+        ]
+        self.assertEqual(models, expected_models)
+
+        for opt in DEFAULT_CLAUDE_MODEL_PICKER_OPTIONS:
+            self.assertTrue(
+                opt["label"].endswith("(AGY)"),
+                f"Model label {opt['label']!r} does not end with (AGY)",
+            )
+            self.assertEqual(opt["behavesAs"], "claude-3-7-sonnet")
+
+        label_map = {opt["model"]: opt["label"] for opt in DEFAULT_CLAUDE_MODEL_PICKER_OPTIONS}
+        self.assertEqual(label_map["gemini-3.8-flash-high"], "Gemini 3.8 Flash · High (AGY)")
+        self.assertEqual(label_map["gemini-3.7-flash-tiered"], "Gemini 3.7 Flash · High (AGY)")
+        self.assertEqual(label_map["claude-sonnet-5-5-high"], "Claude Sonnet 5.5 · High (AGY)")
+        self.assertEqual(label_map["claude-sonnet-5-5-medium"], "Claude Sonnet 5.5 · Medium (AGY)")
+        self.assertEqual(label_map["claude-sonnet-5-5-low"], "Claude Sonnet 5.5 · Low (AGY)")
+        self.assertEqual(label_map["claude-opus-5-5-high"], "Claude Opus 5.5 · High (AGY)")
+        self.assertEqual(label_map["claude-opus-5-5-medium"], "Claude Opus 5.5 · Medium (AGY)")
+        self.assertEqual(label_map["claude-opus-5-5-low"], "Claude Opus 5.5 · Low (AGY)")
+        self.assertEqual(label_map["gemini-2.5-pro"], "Gemini 2.5 Pro (AGY)")
+        self.assertEqual(label_map["gemini-2.5-flash"], "Gemini 2.5 Flash (AGY)")
 
     def test_model_picker_with_custom_model_prepends_option(self):
         target = self.dir_path / "settings.json"
@@ -1390,7 +1432,7 @@ class TestUpdateInstallation(unittest.TestCase):
 
         self.assertEqual(result["status"], "updated")
         self.assertTrue(result["restarted_daemon"])
-        self.assertEqual(result["version"], "0.14.0")
+        self.assertEqual(result["version"], "0.15.0")
         mock_run.assert_called_once_with(
             ["git", "-C", str(self.repo_dir), "pull", "--ff-only"],
             capture_output=True,
@@ -1582,7 +1624,7 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main([flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.14.0")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.15.0")
 
     def test_cli_subcommand_version_flags(self):
         from bridge.__main__ import main
@@ -1594,19 +1636,19 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main(["update", flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.14.0")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.15.0")
 
     def test_version_unification(self):
         import bridge
         from pathlib import Path
         import re
 
-        self.assertEqual(bridge.__version__, "0.14.0")
+        self.assertEqual(bridge.__version__, "0.15.0")
         pyproject_path = Path(__file__).resolve().parent.parent / "pyproject.toml"
         pyproject_text = pyproject_path.read_text(encoding="utf-8")
         match = re.search(r'version\s*=\s*"([^"]+)"', pyproject_text)
         self.assertIsNotNone(match)
-        self.assertEqual(match.group(1), "0.14.0")
+        self.assertEqual(match.group(1), "0.15.0")
 
 
 class TestClientConfiguratorRegistry(unittest.TestCase):
@@ -2306,6 +2348,27 @@ class TestOpenCodeConfigurator(unittest.TestCase):
             },
         )
 
+        claude_5_5_models = [
+            ("claude-sonnet-5-5-high", "Claude Sonnet 5.5 (High - AGY)"),
+            ("claude-sonnet-5-5-medium", "Claude Sonnet 5.5 (Medium - AGY)"),
+            ("claude-sonnet-5-5-low", "Claude Sonnet 5.5 (Low - AGY)"),
+            ("claude-opus-5-5-high", "Claude Opus 5.5 (High - AGY)"),
+            ("claude-opus-5-5-medium", "Claude Opus 5.5 (Medium - AGY)"),
+            ("claude-opus-5-5-low", "Claude Opus 5.5 (Low - AGY)"),
+        ]
+        for m_id, m_name in claude_5_5_models:
+            self.assertIn(m_id, agy_conf["models"])
+            self.assertEqual(
+                agy_conf["models"][m_id],
+                {
+                    "name": m_name,
+                    "limit": {
+                        "context": 1048576,
+                        "output": 65536,
+                    },
+                },
+            )
+
     def test_setup_preserves_existing_keys_and_other_providers(self):
         target = self.dir_path / "opencode.json"
         initial = {
@@ -2613,12 +2676,66 @@ class TestOpenClawConfigurator(unittest.TestCase):
         self.assertEqual(agy_provider["apiKey"], get_active_api_key())
         self.assertEqual(agy_provider["api"], "openai-completions")
         self.assertEqual(agy_provider["headers"], {"User-Agent": "openclaw"})
-        self.assertEqual(len(agy_provider["models"]), 3)
+        self.assertEqual(len(agy_provider["models"]), 9)
 
         expected_models = [
             {
                 "id": "gemini-3.8-flash-high",
                 "name": "Gemini 3.8 Flash (High)",
+                "reasoning": False,
+                "input": ["text"],
+                "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+                "contextWindow": 1048576,
+                "maxTokens": 65536,
+            },
+            {
+                "id": "claude-sonnet-5-5-high",
+                "name": "Claude Sonnet 5.5 (High - AGY)",
+                "reasoning": False,
+                "input": ["text"],
+                "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+                "contextWindow": 1048576,
+                "maxTokens": 65536,
+            },
+            {
+                "id": "claude-sonnet-5-5-medium",
+                "name": "Claude Sonnet 5.5 (Medium - AGY)",
+                "reasoning": False,
+                "input": ["text"],
+                "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+                "contextWindow": 1048576,
+                "maxTokens": 65536,
+            },
+            {
+                "id": "claude-sonnet-5-5-low",
+                "name": "Claude Sonnet 5.5 (Low - AGY)",
+                "reasoning": False,
+                "input": ["text"],
+                "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+                "contextWindow": 1048576,
+                "maxTokens": 65536,
+            },
+            {
+                "id": "claude-opus-5-5-high",
+                "name": "Claude Opus 5.5 (High - AGY)",
+                "reasoning": False,
+                "input": ["text"],
+                "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+                "contextWindow": 1048576,
+                "maxTokens": 65536,
+            },
+            {
+                "id": "claude-opus-5-5-medium",
+                "name": "Claude Opus 5.5 (Medium - AGY)",
+                "reasoning": False,
+                "input": ["text"],
+                "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+                "contextWindow": 1048576,
+                "maxTokens": 65536,
+            },
+            {
+                "id": "claude-opus-5-5-low",
+                "name": "Claude Opus 5.5 (Low - AGY)",
                 "reasoning": False,
                 "input": ["text"],
                 "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
@@ -2948,6 +3065,9 @@ class TestCursorConfigurator(unittest.TestCase):
         joined_notes = " ".join(res["notes"])
         self.assertIn("cloud", joined_notes.lower())
         self.assertTrue("tunnel" in joined_notes.lower() or "override" in joined_notes.lower())
+        self.assertIn("gemini-3.8-flash-high", joined_notes)
+        self.assertIn("claude-sonnet-5-5-high", joined_notes)
+        self.assertIn("claude-opus-5-5-high", joined_notes)
 
     def test_setup_with_port(self):
         res = self.configurator.setup(port=9090)
@@ -2957,9 +3077,11 @@ class TestCursorConfigurator(unittest.TestCase):
         res1 = self.configurator.setup(base_url="https://tunnel.example.com")
         self.assertEqual(res1["url"], "https://tunnel.example.com/v1")
 
+    def test_setup_with_base_url_v1(self):
         res2 = self.configurator.setup(base_url="https://tunnel.example.com/v1")
         self.assertEqual(res2["url"], "https://tunnel.example.com/v1")
 
+    def test_setup_with_base_url_trailing_slash(self):
         res3 = self.configurator.setup(base_url="https://tunnel.example.com/v1/")
         self.assertEqual(res3["url"], "https://tunnel.example.com/v1")
 
@@ -3008,6 +3130,8 @@ class TestCLICursor(unittest.TestCase):
         self.assertIn("http://127.0.0.1:24980/v1", output)
         self.assertIn(get_active_api_key(), output)
         self.assertIn("gemini-3.8-flash-high", output)
+        self.assertIn("claude-sonnet-5-5-high", output)
+        self.assertIn("claude-opus-5-5-high", output)
 
     def test_cli_setup_cursor_dispatches_with_flags(self):
         import io
@@ -3166,9 +3290,30 @@ class TestPiConfigurator(unittest.TestCase):
         self.assertEqual(agy["headers"], {"User-Agent": "pi-coding-agent"})
 
         models = agy["models"]
-        self.assertEqual(len(models), 3)
-        expected_ids = ["gemini-3.8-flash-high", "gemini-2.5-pro", "gemini-2.5-flash"]
+        self.assertEqual(len(models), 10)
+        expected_ids = [
+            "gemini-3.8-flash-high",
+            "gemini-3.8",
+            "claude-sonnet-5-5-high",
+            "claude-sonnet-5-5-medium",
+            "claude-sonnet-5-5-low",
+            "claude-opus-5-5-high",
+            "claude-opus-5-5-medium",
+            "claude-opus-5-5-low",
+            "gemini-2.5-pro",
+            "gemini-2.5-flash",
+        ]
         self.assertEqual([m["id"] for m in models], expected_ids)
+        self.assertEqual(models[0]["name"], "Gemini 3.8 Flash (High - AGY)")
+        self.assertEqual(models[1]["name"], "Gemini 3.8 (AGY)")
+        self.assertEqual(models[2]["name"], "Claude Sonnet 5.5 (High - AGY)")
+        self.assertEqual(models[3]["name"], "Claude Sonnet 5.5 (Medium - AGY)")
+        self.assertEqual(models[4]["name"], "Claude Sonnet 5.5 (Low - AGY)")
+        self.assertEqual(models[5]["name"], "Claude Opus 5.5 (High - AGY)")
+        self.assertEqual(models[6]["name"], "Claude Opus 5.5 (Medium - AGY)")
+        self.assertEqual(models[7]["name"], "Claude Opus 5.5 (Low - AGY)")
+        self.assertEqual(models[8]["name"], "Gemini 2.5 Pro (AGY)")
+        self.assertEqual(models[9]["name"], "Gemini 2.5 Flash (AGY)")
         for m in models:
             self.assertFalse(m["reasoning"])
             self.assertEqual(m["input"], ["text"])
@@ -3698,13 +3843,30 @@ class TestGentleShellConfigurator(unittest.TestCase):
         self.assertEqual(agy["headers"], {"User-Agent": "gentle-shell"})
 
         models = agy["models"]
-        self.assertEqual(len(models), 4)
-        expected_ids = ["gemini-3.8-flash-high", "gemini-3.8", "gemini-2.5-pro", "gemini-2.5-flash"]
+        self.assertEqual(len(models), 10)
+        expected_ids = [
+            "gemini-3.8-flash-high",
+            "gemini-3.8",
+            "claude-sonnet-5-5-high",
+            "claude-sonnet-5-5-medium",
+            "claude-sonnet-5-5-low",
+            "claude-opus-5-5-high",
+            "claude-opus-5-5-medium",
+            "claude-opus-5-5-low",
+            "gemini-2.5-pro",
+            "gemini-2.5-flash",
+        ]
         self.assertEqual([m["id"] for m in models], expected_ids)
-        self.assertEqual(models[0]["name"], "Gemini 3.8 Flash (High)")
-        self.assertEqual(models[1]["name"], "Gemini 3.8")
-        self.assertEqual(models[2]["name"], "Gemini 2.5 Pro")
-        self.assertEqual(models[3]["name"], "Gemini 2.5 Flash")
+        self.assertEqual(models[0]["name"], "Gemini 3.8 Flash (High - AGY)")
+        self.assertEqual(models[1]["name"], "Gemini 3.8 (AGY)")
+        self.assertEqual(models[2]["name"], "Claude Sonnet 5.5 (High - AGY)")
+        self.assertEqual(models[3]["name"], "Claude Sonnet 5.5 (Medium - AGY)")
+        self.assertEqual(models[4]["name"], "Claude Sonnet 5.5 (Low - AGY)")
+        self.assertEqual(models[5]["name"], "Claude Opus 5.5 (High - AGY)")
+        self.assertEqual(models[6]["name"], "Claude Opus 5.5 (Medium - AGY)")
+        self.assertEqual(models[7]["name"], "Claude Opus 5.5 (Low - AGY)")
+        self.assertEqual(models[8]["name"], "Gemini 2.5 Pro (AGY)")
+        self.assertEqual(models[9]["name"], "Gemini 2.5 Flash (AGY)")
         for m in models:
             self.assertFalse(m["reasoning"])
             self.assertEqual(m["input"], ["text"])

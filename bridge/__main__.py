@@ -389,7 +389,7 @@ def main(argv: list[str] | None = None) -> int:
             "--model",
             type=str,
             default="gemini-3.8-flash-high",
-            help="Default model identifier (default: gemini-3.8-flash-high)",
+            help="Default model identifier (default: gemini-3.8-flash-high, also supports claude-sonnet-5-5-high, claude-opus-5-5-high, etc.)",
         )
         parser.add_argument(
             "--url",
@@ -643,7 +643,17 @@ def main(argv: list[str] | None = None) -> int:
         print(t("setup_cursor_step1", url=res["url"]))
         print(t("setup_cursor_step2", url=res["url"]))
         print(t("setup_cursor_step3", api_key=res["apiKey"]))
-        model_names = [res["model"]] + [m for m in ("gemini-3.8-flash-high", "gemini-2.5-pro", "gemini-2.5-flash") if m != res["model"]]
+        model_names = [res["model"]] + [
+            m
+            for m in (
+                "gemini-3.8-flash-high",
+                "claude-sonnet-5-5-high",
+                "claude-opus-5-5-high",
+                "gemini-2.5-pro",
+                "gemini-2.5-flash",
+            )
+            if m != res["model"]
+        ]
         models_str = ", ".join(model_names)
         print(t("setup_cursor_step4", models=models_str))
         return 0

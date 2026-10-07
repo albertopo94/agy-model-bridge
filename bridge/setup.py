@@ -278,27 +278,52 @@ class ConfigPath(type(Path())):
 DEFAULT_CLAUDE_MODEL_PICKER_OPTIONS: list[dict[str, str]] = [
     {
         "model": "gemini-3.8-flash-high",
-        "label": "Gemini 3.8 Flash · high (1M)",
+        "label": "Gemini 3.8 Flash · High (AGY)",
         "behavesAs": "claude-3-7-sonnet",
     },
     {
         "model": "gemini-3.7-flash-tiered",
-        "label": "Gemini 3.7 Flash",
+        "label": "Gemini 3.7 Flash · High (AGY)",
         "behavesAs": "claude-3-7-sonnet",
     },
     {
-        "model": "gemini-3.6-flash-tiered",
-        "label": "Gemini 3.6 Flash",
+        "model": "claude-sonnet-5-5-high",
+        "label": "Claude Sonnet 5.5 · High (AGY)",
         "behavesAs": "claude-3-7-sonnet",
     },
     {
-        "model": "claude-sonnet-4-6",
-        "label": "Claude Sonnet 4.6 (Cloud Code)",
+        "model": "claude-sonnet-5-5-medium",
+        "label": "Claude Sonnet 5.5 · Medium (AGY)",
         "behavesAs": "claude-3-7-sonnet",
     },
     {
-        "model": "claude-opus-4-6-thinking",
-        "label": "Claude Opus 4.6 Thinking (Cloud Code)",
+        "model": "claude-sonnet-5-5-low",
+        "label": "Claude Sonnet 5.5 · Low (AGY)",
+        "behavesAs": "claude-3-7-sonnet",
+    },
+    {
+        "model": "claude-opus-5-5-high",
+        "label": "Claude Opus 5.5 · High (AGY)",
+        "behavesAs": "claude-3-7-sonnet",
+    },
+    {
+        "model": "claude-opus-5-5-medium",
+        "label": "Claude Opus 5.5 · Medium (AGY)",
+        "behavesAs": "claude-3-7-sonnet",
+    },
+    {
+        "model": "claude-opus-5-5-low",
+        "label": "Claude Opus 5.5 · Low (AGY)",
+        "behavesAs": "claude-3-7-sonnet",
+    },
+    {
+        "model": "gemini-2.5-pro",
+        "label": "Gemini 2.5 Pro (AGY)",
+        "behavesAs": "claude-3-7-sonnet",
+    },
+    {
+        "model": "gemini-2.5-flash",
+        "label": "Gemini 2.5 Flash (AGY)",
         "behavesAs": "claude-3-7-sonnet",
     },
 ]
@@ -537,6 +562,14 @@ class ClaudeConfigurator(ClientConfigurator):
                                 "gemini-3.6-flash-tiered",
                                 "claude-sonnet-4-6",
                                 "claude-opus-4-6-thinking",
+                                "claude-sonnet-5-5-high",
+                                "claude-sonnet-5-5-medium",
+                                "claude-sonnet-5-5-low",
+                                "claude-opus-5-5-high",
+                                "claude-opus-5-5-medium",
+                                "claude-opus-5-5-low",
+                                "gemini-2.5-pro",
+                                "gemini-2.5-flash",
                             }
                             options = model_picker.get("options", [])
                             if isinstance(options, list):
@@ -1034,6 +1067,48 @@ class OpenCodeConfigurator(ClientConfigurator):
                         "output": 65536,
                     },
                 },
+                "claude-sonnet-5-5-high": {
+                    "name": "Claude Sonnet 5.5 (High - AGY)",
+                    "limit": {
+                        "context": 1048576,
+                        "output": 65536,
+                    },
+                },
+                "claude-sonnet-5-5-medium": {
+                    "name": "Claude Sonnet 5.5 (Medium - AGY)",
+                    "limit": {
+                        "context": 1048576,
+                        "output": 65536,
+                    },
+                },
+                "claude-sonnet-5-5-low": {
+                    "name": "Claude Sonnet 5.5 (Low - AGY)",
+                    "limit": {
+                        "context": 1048576,
+                        "output": 65536,
+                    },
+                },
+                "claude-opus-5-5-high": {
+                    "name": "Claude Opus 5.5 (High - AGY)",
+                    "limit": {
+                        "context": 1048576,
+                        "output": 65536,
+                    },
+                },
+                "claude-opus-5-5-medium": {
+                    "name": "Claude Opus 5.5 (Medium - AGY)",
+                    "limit": {
+                        "context": 1048576,
+                        "output": 65536,
+                    },
+                },
+                "claude-opus-5-5-low": {
+                    "name": "Claude Opus 5.5 (Low - AGY)",
+                    "limit": {
+                        "context": 1048576,
+                        "output": 65536,
+                    },
+                },
             },
         }
 
@@ -1213,6 +1288,60 @@ class OpenClawConfigurator(ClientConfigurator):
                     "maxTokens": 65536,
                 },
                 {
+                    "id": "claude-sonnet-5-5-high",
+                    "name": "Claude Sonnet 5.5 (High - AGY)",
+                    "reasoning": False,
+                    "input": ["text"],
+                    "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+                    "contextWindow": 1048576,
+                    "maxTokens": 65536,
+                },
+                {
+                    "id": "claude-sonnet-5-5-medium",
+                    "name": "Claude Sonnet 5.5 (Medium - AGY)",
+                    "reasoning": False,
+                    "input": ["text"],
+                    "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+                    "contextWindow": 1048576,
+                    "maxTokens": 65536,
+                },
+                {
+                    "id": "claude-sonnet-5-5-low",
+                    "name": "Claude Sonnet 5.5 (Low - AGY)",
+                    "reasoning": False,
+                    "input": ["text"],
+                    "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+                    "contextWindow": 1048576,
+                    "maxTokens": 65536,
+                },
+                {
+                    "id": "claude-opus-5-5-high",
+                    "name": "Claude Opus 5.5 (High - AGY)",
+                    "reasoning": False,
+                    "input": ["text"],
+                    "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+                    "contextWindow": 1048576,
+                    "maxTokens": 65536,
+                },
+                {
+                    "id": "claude-opus-5-5-medium",
+                    "name": "Claude Opus 5.5 (Medium - AGY)",
+                    "reasoning": False,
+                    "input": ["text"],
+                    "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+                    "contextWindow": 1048576,
+                    "maxTokens": 65536,
+                },
+                {
+                    "id": "claude-opus-5-5-low",
+                    "name": "Claude Opus 5.5 (Low - AGY)",
+                    "reasoning": False,
+                    "input": ["text"],
+                    "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+                    "contextWindow": 1048576,
+                    "maxTokens": 65536,
+                },
+                {
                     "id": "gemini-2.5-pro",
                     "name": "Gemini 2.5 Pro",
                     "reasoning": False,
@@ -1328,7 +1457,17 @@ class CursorConfigurator(ClientConfigurator):
         else:
             resolved_url = "http://127.0.0.1:24980/v1"
 
-        model_names = [model] + [m for m in ("gemini-3.8-flash-high", "gemini-2.5-pro", "gemini-2.5-flash") if m != model]
+        model_names = [model] + [
+            m
+            for m in (
+                "gemini-3.8-flash-high",
+                "claude-sonnet-5-5-high",
+                "claude-opus-5-5-high",
+                "gemini-2.5-pro",
+                "gemini-2.5-flash",
+            )
+            if m != model
+        ]
         models_str = ", ".join(model_names)
 
         notes = [
@@ -1365,6 +1504,90 @@ class CursorConfigurator(ClientConfigurator):
 CLIENT_CONFIGURATORS["cursor"] = CursorConfigurator()
 
 
+DEFAULT_PI_AND_GENTLE_MODELS: list[dict[str, Any]] = [
+    {
+        "id": "gemini-3.8-flash-high",
+        "name": "Gemini 3.8 Flash (High - AGY)",
+        "reasoning": False,
+        "input": ["text"],
+        "contextWindow": 1048576,
+        "maxTokens": 65536,
+    },
+    {
+        "id": "gemini-3.8",
+        "name": "Gemini 3.8 (AGY)",
+        "reasoning": False,
+        "input": ["text"],
+        "contextWindow": 1048576,
+        "maxTokens": 65536,
+    },
+    {
+        "id": "claude-sonnet-5-5-high",
+        "name": "Claude Sonnet 5.5 (High - AGY)",
+        "reasoning": False,
+        "input": ["text"],
+        "contextWindow": 1048576,
+        "maxTokens": 65536,
+    },
+    {
+        "id": "claude-sonnet-5-5-medium",
+        "name": "Claude Sonnet 5.5 (Medium - AGY)",
+        "reasoning": False,
+        "input": ["text"],
+        "contextWindow": 1048576,
+        "maxTokens": 65536,
+    },
+    {
+        "id": "claude-sonnet-5-5-low",
+        "name": "Claude Sonnet 5.5 (Low - AGY)",
+        "reasoning": False,
+        "input": ["text"],
+        "contextWindow": 1048576,
+        "maxTokens": 65536,
+    },
+    {
+        "id": "claude-opus-5-5-high",
+        "name": "Claude Opus 5.5 (High - AGY)",
+        "reasoning": False,
+        "input": ["text"],
+        "contextWindow": 1048576,
+        "maxTokens": 65536,
+    },
+    {
+        "id": "claude-opus-5-5-medium",
+        "name": "Claude Opus 5.5 (Medium - AGY)",
+        "reasoning": False,
+        "input": ["text"],
+        "contextWindow": 1048576,
+        "maxTokens": 65536,
+    },
+    {
+        "id": "claude-opus-5-5-low",
+        "name": "Claude Opus 5.5 (Low - AGY)",
+        "reasoning": False,
+        "input": ["text"],
+        "contextWindow": 1048576,
+        "maxTokens": 65536,
+    },
+    {
+        "id": "gemini-2.5-pro",
+        "name": "Gemini 2.5 Pro (AGY)",
+        "reasoning": False,
+        "input": ["text"],
+        "contextWindow": 1048576,
+        "maxTokens": 65536,
+    },
+    {
+        "id": "gemini-2.5-flash",
+        "name": "Gemini 2.5 Flash (AGY)",
+        "reasoning": False,
+        "input": ["text"],
+        "contextWindow": 1048576,
+        "maxTokens": 65536,
+    },
+]
+
+
 def _cleanup_pi_or_gentle_settings(settings_path: Path) -> None:
     """Restores settings.json from backup or surgically cleans agy provider and models."""
     settings_backups = list_backups(settings_path)
@@ -1392,13 +1615,14 @@ def _cleanup_pi_or_gentle_settings(settings_path: Path) -> None:
                     if isinstance(def_model, str) and (
                         def_model.startswith("agy/")
                         or "gemini" in def_model.lower()
+                        or "claude" in def_model.lower()
                     ):
                         s_data.pop("defaultModel", None)
                         modified = True
                     if "enabledModels" in s_data and isinstance(s_data["enabledModels"], list):
                         new_models = [
                             m for m in s_data["enabledModels"]
-                            if not (isinstance(m, str) and (m.startswith("agy/") or "gemini" in m.lower()))
+                            if not (isinstance(m, str) and (m.startswith("agy/") or "gemini" in m.lower() or "claude" in m.lower()))
                         ]
                         if len(new_models) != len(s_data["enabledModels"]):
                             s_data["enabledModels"] = new_models
@@ -1497,32 +1721,7 @@ class PiConfigurator(ClientConfigurator):
             "api": "openai-completions",
             "apiKey": auth_token,
             "headers": {"User-Agent": "pi-coding-agent"},
-            "models": [
-                {
-                    "id": "gemini-3.8-flash-high",
-                    "name": "Gemini 3.8 Flash (High)",
-                    "reasoning": False,
-                    "input": ["text"],
-                    "contextWindow": 1048576,
-                    "maxTokens": 65536,
-                },
-                {
-                    "id": "gemini-2.5-pro",
-                    "name": "Gemini 2.5 Pro",
-                    "reasoning": False,
-                    "input": ["text"],
-                    "contextWindow": 1048576,
-                    "maxTokens": 65536,
-                },
-                {
-                    "id": "gemini-2.5-flash",
-                    "name": "Gemini 2.5 Flash",
-                    "reasoning": False,
-                    "input": ["text"],
-                    "contextWindow": 1048576,
-                    "maxTokens": 65536,
-                },
-            ],
+            "models": [dict(m) for m in DEFAULT_PI_AND_GENTLE_MODELS],
         }
 
         if kwargs.get("set_default"):
@@ -1721,40 +1920,7 @@ class GentleShellConfigurator(ClientConfigurator):
             "api": "openai-completions",
             "apiKey": auth_token,
             "headers": {"User-Agent": "gentle-shell"},
-            "models": [
-                {
-                    "id": "gemini-3.8-flash-high",
-                    "name": "Gemini 3.8 Flash (High)",
-                    "reasoning": False,
-                    "input": ["text"],
-                    "contextWindow": 1048576,
-                    "maxTokens": 65536,
-                },
-                {
-                    "id": "gemini-3.8",
-                    "name": "Gemini 3.8",
-                    "reasoning": False,
-                    "input": ["text"],
-                    "contextWindow": 1048576,
-                    "maxTokens": 65536,
-                },
-                {
-                    "id": "gemini-2.5-pro",
-                    "name": "Gemini 2.5 Pro",
-                    "reasoning": False,
-                    "input": ["text"],
-                    "contextWindow": 1048576,
-                    "maxTokens": 65536,
-                },
-                {
-                    "id": "gemini-2.5-flash",
-                    "name": "Gemini 2.5 Flash",
-                    "reasoning": False,
-                    "input": ["text"],
-                    "contextWindow": 1048576,
-                    "maxTokens": 65536,
-                },
-            ],
+            "models": [dict(m) for m in DEFAULT_PI_AND_GENTLE_MODELS],
         }
 
         if kwargs.get("set_default"):
