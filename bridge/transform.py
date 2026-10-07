@@ -219,6 +219,23 @@ def sanitize_schema_for_gemini(
                 nullable = True
             continue
 
+        if key == "anyOf" and isinstance(value, list) and "type" not in schema:
+            concrete_subschemas: list[dict[str, Any]] = []
+            for sub in value:
+                if isinstance(sub, dict):
+                    if sub.get("type") == "null":
+                        nullable = True
+                    else:
+                        concrete_subschemas.append(sub)
+            if concrete_subschemas:
+                chosen = sanitize_schema_for_gemini(
+                    concrete_subschemas[0], False, root, expanding
+                )
+                if isinstance(chosen, dict):
+                    for ck, cv in chosen.items():
+                        out.setdefault(ck, cv)
+            continue
+
         out[key] = sanitize_schema_for_gemini(value, key == "properties", root, expanding)
 
     if nullable:

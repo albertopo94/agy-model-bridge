@@ -1538,6 +1538,26 @@ class TestSanitizeSchemaForGemini(unittest.TestCase):
         self.assertEqual(author["properties"]["name"]["type"], "string")
         self.assertNotIn("$ref", author)
 
+    def test_collapses_untyped_anyof_to_first_concrete_subschema(self):
+        schema = {
+            "type": "object",
+            "properties": {
+                "provider": {
+                    "anyOf": [
+                        {"type": "string", "description": "Provider name"},
+                        {"type": "array", "items": {"type": "string"}},
+                        {"type": "null"},
+                    ],
+                },
+            },
+        }
+        sanitized = sanitize_schema_for_gemini(schema)
+        prop = sanitized["properties"]["provider"]
+        self.assertEqual(prop.get("type"), "string")
+        self.assertEqual(prop.get("description"), "Provider name")
+        self.assertTrue(prop.get("nullable"))
+        self.assertNotIn("anyOf", prop)
+
 
 class TestOpenAIToolCallingAndAliasing(unittest.TestCase):
     def test_openai_to_cloudcode_request_resolves_auto_model(self):
