@@ -1275,6 +1275,22 @@ class TestUninstall(unittest.TestCase):
         self.assertFalse(result["daemon_dir_removed"])
         self.assertTrue(result["backups_purged"])
 
+    def test_uninstall_honors_agy_bridge_state_dir(self):
+        custom_state_dir = self.root / "custom_state"
+        custom_state_dir.mkdir(parents=True)
+        (custom_state_dir / "bridge.log").write_text("hello", encoding="utf-8")
+
+        with unittest.mock.patch.dict(os.environ, {"AGY_BRIDGE_STATE_DIR": str(custom_state_dir)}):
+            result = uninstall(
+                bin_dir=self.bin_dir,
+                claude_settings_path=self.claude_settings,
+                codex_config_path=self.codex_config,
+                hermes_config_path=self.hermes_config,
+            )
+
+        self.assertTrue(result["daemon_dir_removed"])
+        self.assertFalse(custom_state_dir.exists())
+
 
 class TestCLIUninstall(unittest.TestCase):
     def setUp(self):
@@ -1542,6 +1558,27 @@ class TestUpdateInstallation(unittest.TestCase):
         self.assertEqual(result["status"], "already_up_to_date")
         mock_run.assert_called_once_with(
             ["git", "-C", str(core_dir), "pull", "--ff-only"],
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.mock.patch("bridge.setup.subprocess.run")
+    def test_update_installation_honors_agy_bridge_core_dir(self, mock_run):
+        mock_run.return_value = unittest.mock.MagicMock(
+            returncode=0,
+            stdout="Already up to date.\n",
+            stderr="",
+        )
+        custom_core = Path(self.temp_dir.name) / "custom_core"
+        custom_core.mkdir(parents=True)
+        (custom_core / ".git").mkdir()
+
+        with unittest.mock.patch.dict(os.environ, {"AGY_BRIDGE_CORE_DIR": str(custom_core)}):
+            result = update_installation(core_dir=None)
+
+        self.assertEqual(result["status"], "already_up_to_date")
+        mock_run.assert_called_once_with(
+            ["git", "-C", str(custom_core), "pull", "--ff-only"],
             capture_output=True,
             text=True,
         )

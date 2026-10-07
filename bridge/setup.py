@@ -2319,7 +2319,8 @@ def uninstall(
             "backups_purged": bool,
         }
     """
-    resolved_daemon_dir = Path(daemon_dir) if daemon_dir is not None else Path.home() / ".agy-bridge"
+    default_daemon = Path(os.environ.get("AGY_BRIDGE_STATE_DIR", Path.home() / ".agy-bridge"))
+    resolved_daemon_dir = Path(daemon_dir) if daemon_dir is not None else default_daemon
     resolved_bin_dir = Path(bin_dir) if bin_dir is not None else Path.home() / ".local" / "bin"
 
     # 1. Stop daemon if running
@@ -2441,8 +2442,12 @@ def update_installation(
     """
     if core_dir is not None:
         target_dir = Path(core_dir)
+    elif os.environ.get("AGY_BRIDGE_CORE_DIR"):
+        target_dir = Path(os.environ["AGY_BRIDGE_CORE_DIR"])
     else:
-        default_dir = Path.home() / ".agy-bridge" / "core"
+        state_dir_env = os.environ.get("AGY_BRIDGE_STATE_DIR")
+        base_state = Path(state_dir_env) if state_dir_env else Path.home() / ".agy-bridge"
+        default_dir = base_state / "core"
         if (default_dir / ".git").exists():
             target_dir = default_dir
         elif (Path.cwd() / ".git").exists():

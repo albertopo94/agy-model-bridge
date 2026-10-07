@@ -25,7 +25,7 @@ except ImportError:
 
 from bridge import __version__
 
-DEFAULT_DAEMON_DIR = Path.home() / ".agy-bridge"
+DEFAULT_DAEMON_DIR = Path(os.environ.get("AGY_BRIDGE_STATE_DIR", Path.home() / ".agy-bridge"))
 DEFAULT_PID_FILE = DEFAULT_DAEMON_DIR / "bridge.pid"
 DEFAULT_INFO_FILE = DEFAULT_DAEMON_DIR / "bridge.json"
 DEFAULT_LOG_FILE = DEFAULT_DAEMON_DIR / "bridge.log"

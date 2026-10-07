@@ -5,7 +5,8 @@
 set -e
 
 REPO_URL="https://github.com/albertopo94/agy-model-bridge.git"
-INSTALL_DIR="${AGY_BRIDGE_DIR:-$HOME/.agy-bridge/core}"
+STATE_DIR="${AGY_BRIDGE_STATE_DIR:-$HOME/.agy-bridge}"
+INSTALL_DIR="${AGY_BRIDGE_CORE_DIR:-${AGY_BRIDGE_DIR:-$STATE_DIR/core}}"
 BIN_DIR="${AGY_BRIDGE_BIN:-$HOME/.local/bin}"
 
 BOLD="\033[1m"
@@ -105,7 +106,8 @@ LAUNCHER="$BIN_DIR/agy-bridge"
 cat <<'EOF' > "$LAUNCHER"
 #!/usr/bin/env bash
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CORE_DIR="${AGY_BRIDGE_DIR:-$HOME/.agy-bridge/core}"
+STATE_DIR="${AGY_BRIDGE_STATE_DIR:-$HOME/.agy-bridge}"
+CORE_DIR="${AGY_BRIDGE_CORE_DIR:-${AGY_BRIDGE_DIR:-$STATE_DIR/core}}"
 export PYTHONPATH="$CORE_DIR:$PYTHONPATH"
 exec python3 -u -m bridge "$@"
 EOF

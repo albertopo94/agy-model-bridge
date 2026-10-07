@@ -14,7 +14,7 @@ import stat
 from typing import Any
 import uuid
 
-DEFAULT_DAEMON_DIR = Path.home() / ".agy-bridge"
+DEFAULT_DAEMON_DIR = Path(os.environ.get("AGY_BRIDGE_STATE_DIR", Path.home() / ".agy-bridge"))
 DEFAULT_API_KEY_FILE = DEFAULT_DAEMON_DIR / "api_key"
 
 
