@@ -65,6 +65,8 @@ def get_status_data(client: Any, project: str, host: str, port: int) -> dict[str
                 _models_cache[project] = (now - 45.0, models_count)
 
     return {
+        "service": "agy-model-bridge",
+        "version": __version__,
         "host": host,
         "port": port,
         "address": f"{host}:{port}",

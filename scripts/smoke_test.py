@@ -27,8 +27,8 @@ def test_healthz(base_url: str) -> None:
             if resp.status != 200:
                 raise AssertionError(f"Expected HTTP 200, got {resp.status}")
             data = json.loads(resp.read().decode("utf-8"))
-            if data.get("status") != "ok":
-                raise AssertionError(f"Expected status 'ok', got {data}")
+            if data.get("status") != "ok" or data.get("service") != "agy-model-bridge":
+                raise AssertionError(f"Expected status 'ok' and service 'agy-model-bridge', got {data}")
     except Exception as e:
         print("FAILED")
         print(f"Error in health check: {e}", file=sys.stderr)

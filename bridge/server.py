@@ -8,6 +8,7 @@ import urllib.parse
 import uuid
 from typing import Any
 
+from bridge import __version__
 from bridge.auth import KeychainTokenProvider, AuthenticationError as AuthAuthenticationError
 from bridge.client import (
     CloudCodeClient,
@@ -188,7 +189,14 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
             return
 
         if path == "/healthz":
-            self._send_json(200, {"status": "ok"})
+            self._send_json(
+                200,
+                {
+                    "status": "ok",
+                    "service": "agy-model-bridge",
+                    "version": __version__,
+                },
+            )
             return
 
         if path == "/v1/models":

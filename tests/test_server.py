@@ -119,7 +119,9 @@ class TestServerEndpoints(unittest.TestCase):
     def test_healthz_endpoint(self):
         status, headers, body = self._http_get("/healthz")
         self.assertEqual(status, 200)
-        self.assertEqual(body, {"status": "ok"})
+        self.assertEqual(body.get("status"), "ok")
+        self.assertEqual(body.get("service"), "agy-model-bridge")
+        self.assertIn("version", body)
         self.assertEqual(headers.get_content_type(), "application/json")
 
     def test_v1_models_endpoint(self):
@@ -778,7 +780,8 @@ class TestServerEndpoints(unittest.TestCase):
     def test_path_trailing_slash_normalization_get(self):
         status, _, body = self._http_get("/healthz/")
         self.assertEqual(status, 200)
-        self.assertEqual(body, {"status": "ok"})
+        self.assertEqual(body.get("status"), "ok")
+        self.assertEqual(body.get("service"), "agy-model-bridge")
 
         status, _, body = self._http_get("/v1/models/")
         self.assertEqual(status, 200)
@@ -921,6 +924,8 @@ class TestServerEndpoints(unittest.TestCase):
         status, headers, body = self._http_get("/api/status")
         self.assertEqual(status, 200)
         self.assertEqual(headers.get_content_type(), "application/json")
+        self.assertEqual(body.get("service"), "agy-model-bridge")
+        self.assertIn("version", body)
         self.assertIn("address", body)
         self.assertIn("auth", body)
         self.assertIn("models_count", body)

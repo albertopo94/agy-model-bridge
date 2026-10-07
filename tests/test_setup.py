@@ -1432,7 +1432,7 @@ class TestUpdateInstallation(unittest.TestCase):
 
         self.assertEqual(result["status"], "updated")
         self.assertTrue(result["restarted_daemon"])
-        self.assertEqual(result["version"], "0.15.2")
+        self.assertEqual(result["version"], "0.15.3")
         mock_run.assert_called_once_with(
             ["git", "-C", str(self.repo_dir), "pull", "--ff-only"],
             capture_output=True,
@@ -1624,7 +1624,7 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main([flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.15.2")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.15.3")
 
     def test_cli_subcommand_version_flags(self):
         from bridge.__main__ import main
@@ -1636,19 +1636,19 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main(["update", flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.15.2")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.15.3")
 
     def test_version_unification(self):
         import bridge
         from pathlib import Path
         import re
 
-        self.assertEqual(bridge.__version__, "0.15.2")
+        self.assertEqual(bridge.__version__, "0.15.3")
         pyproject_path = Path(__file__).resolve().parent.parent / "pyproject.toml"
         pyproject_text = pyproject_path.read_text(encoding="utf-8")
         match = re.search(r'version\s*=\s*"([^"]+)"', pyproject_text)
         self.assertIsNotNone(match)
-        self.assertEqual(match.group(1), "0.15.2")
+        self.assertEqual(match.group(1), "0.15.3")
 
 
 class TestClientConfiguratorRegistry(unittest.TestCase):

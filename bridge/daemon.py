@@ -18,9 +18,18 @@ import urllib.request
 import uuid
 import webbrowser
 
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
+
+from bridge import __version__
+
 DEFAULT_DAEMON_DIR = Path.home() / ".agy-bridge"
 DEFAULT_PID_FILE = DEFAULT_DAEMON_DIR / "bridge.pid"
+DEFAULT_INFO_FILE = DEFAULT_DAEMON_DIR / "bridge.json"
 DEFAULT_LOG_FILE = DEFAULT_DAEMON_DIR / "bridge.log"
+DEFAULT_LOCK_FILE = DEFAULT_DAEMON_DIR / "bridge.lock"
 
 
 def is_pid_alive(pid: int | None) -> bool:
@@ -87,8 +96,60 @@ def remove_pid(pid_file: Path | None = None) -> None:
         pass
 
 
+def write_daemon_info(info: dict[str, Any], info_file: Path | None = None) -> None:
+    """Writes the daemon descriptor JSON atomically with 0o600 permissions."""
+    target = Path(info_file) if info_file is not None else DEFAULT_INFO_FILE
+    parent = target.parent
+    if not parent.exists():
+        parent.mkdir(parents=True, exist_ok=True)
+        try:
+            os.chmod(parent, 0o700)
+        except OSError:
+            pass
+
+    tmp_file = parent / f"{target.name}.tmp.{uuid.uuid4().hex}"
+    try:
+        with open(tmp_file, "w", encoding="utf-8") as f:
+            json.dump(info, f, indent=2)
+            f.write("\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp_file, 0o600)
+        os.replace(tmp_file, target)
+    finally:
+        if tmp_file.exists():
+            try:
+                tmp_file.unlink()
+            except OSError:
+                pass
+
+
+def read_daemon_info(info_file: Path | None = None) -> dict[str, Any] | None:
+    """Reads and parses daemon info from bridge.json. Returns None if invalid or missing."""
+    target = Path(info_file) if info_file is not None else DEFAULT_INFO_FILE
+    if not target.exists() or not target.is_file():
+        return None
+    try:
+        content = target.read_text(encoding="utf-8").strip()
+        data = json.loads(content)
+        return data if isinstance(data, dict) else None
+    except (ValueError, OSError, json.JSONDecodeError):
+        return None
+
+
+def remove_daemon_info(info_file: Path | None = None) -> None:
+    """Removes the daemon info JSON file if it exists."""
+    target = Path(info_file) if info_file is not None else DEFAULT_INFO_FILE
+    try:
+        target.unlink()
+    except FileNotFoundError:
+        pass
+    except OSError:
+        pass
+
+
 def is_bridge_process(pid: int | None) -> bool:
-    """Verifies that the process with the given PID is actually an agy-bridge process."""
+    """Verifies that the process with the given PID is strictly an agy-bridge process."""
     if pid is None or pid <= 0:
         return False
     try:
@@ -98,22 +159,37 @@ def is_bridge_process(pid: int | None) -> bool:
             text=True,
             timeout=1.0,
         )
-        if res.returncode == 0:
-            cmdline = res.stdout.strip().lower()
-            return "bridge" in cmdline or "agy" in cmdline or "python" in cmdline
+        if res.returncode != 0:
+            return False
+        cmdline = res.stdout.strip()
+        if not cmdline:
+            return False
+        return (
+            "-m bridge" in cmdline
+            or "agy-bridge" in cmdline
+            or "agy-model-bridge" in cmdline
+            or "bridge/__main__.py" in cmdline
+        )
     except Exception:
-        pass
-    return True
+        return False
 
 
 def check_server_healthy(host: str, port: int, timeout: float = 1.0) -> bool:
-    """Checks if the bridge HTTP server is responding to /healthz."""
+    """Checks if the bridge HTTP server is responding to /healthz with correct service identity."""
     url = f"http://{host}:{port}/healthz"
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "agy-bridge/1.0"})
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return resp.status == 200
-    except (urllib.error.URLError, OSError, TimeoutError):
+            if resp.status != 200:
+                return False
+            raw = resp.read().decode("utf-8")
+            data = json.loads(raw)
+            return (
+                isinstance(data, dict)
+                and data.get("service") == "agy-model-bridge"
+                and data.get("status") == "ok"
+            )
+    except (urllib.error.URLError, OSError, TimeoutError, json.JSONDecodeError):
         return False
 
 
@@ -139,6 +215,7 @@ def start_daemon(
     project: str | None = None,
     base_url: str | None = None,
     pid_file: Path | None = None,
+    info_file: Path | None = None,
     log_file: Path | None = None,
     health_timeout: float = 5.0,
     api_key: str | None = None,
@@ -147,119 +224,172 @@ def start_daemon(
     """Starts the bridge server as a background daemon process.
 
     Checks if already running, launches detached process via subprocess.Popen,
-    polls health check, writes PID file, and opens default web browser.
+    polls health check, writes PID and daemon info files, and opens default web browser.
     """
     target_pid_file = Path(pid_file) if pid_file is not None else DEFAULT_PID_FILE
+    target_info_file = Path(info_file) if info_file is not None else DEFAULT_INFO_FILE
     target_log_file = Path(log_file) if log_file is not None else DEFAULT_LOG_FILE
+    target_lock_file = DEFAULT_LOCK_FILE
     dashboard_url = f"http://{host}:{port}/"
 
-    existing_pid = read_pid(pid_file=target_pid_file)
-    if existing_pid:
-        if is_pid_alive(existing_pid) and is_bridge_process(existing_pid):
+    # Acquire file lock to prevent concurrent start races
+    lock_fd = None
+    if fcntl is not None:
+        target_lock_file.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            lock_fd = os.open(target_lock_file, os.O_CREAT | os.O_RDWR, 0o600)
+            fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        except OSError:
+            lock_fd = None
+
+    try:
+        existing_pid = read_pid(pid_file=target_pid_file)
+        existing_info = read_daemon_info(info_file=target_info_file)
+        if existing_pid:
+            if is_pid_alive(existing_pid) and is_bridge_process(existing_pid):
+                existing_port = existing_info.get("port") if existing_info else None
+                existing_host = existing_info.get("host", "127.0.0.1") if existing_info else "127.0.0.1"
+                if existing_port is not None and (existing_port != port or existing_host != host):
+                    return {
+                        "status": "conflict",
+                        "error": (
+                            f"Bridge daemon is already running on {existing_host}:{existing_port} "
+                            f"(PID {existing_pid}). Stop it before starting on a different port/host."
+                        ),
+                        "pid": existing_pid,
+                        "port": existing_port,
+                        "host": existing_host,
+                        "url": f"http://{existing_host}:{existing_port}/",
+                        "opened_browser": False,
+                    }
+                return {
+                    "status": "already_running",
+                    "pid": existing_pid,
+                    "port": existing_port or port,
+                    "host": existing_host or host,
+                    "url": f"http://{existing_host or host}:{existing_port or port}/",
+                    "opened_browser": False,
+                }
+            else:
+                remove_pid(pid_file=target_pid_file)
+                remove_daemon_info(info_file=target_info_file)
+
+        target_log_file.parent.mkdir(parents=True, exist_ok=True)
+
+        cmd = [
+            sys.executable,
+            "-u",
+            "-m",
+            "bridge",
+            "--port",
+            str(port),
+            "--host",
+            host,
+        ]
+        if project:
+            cmd.extend(["--project", project])
+        if base_url:
+            cmd.extend(["--base-url", base_url])
+        if no_auth:
+            cmd.append("--no-auth")
+        elif api_key:
+            cmd.extend(["--api-key", api_key])
+
+        with open(target_log_file, "a", encoding="utf-8") as out:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=out,
+                stderr=out,
+                start_new_session=True,
+            )
+
+        pid = proc.pid
+        write_pid(pid, pid_file=target_pid_file)
+        daemon_info = {
+            "pid": pid,
+            "host": host,
+            "port": port,
+            "service": "agy-model-bridge",
+            "version": __version__,
+            "started_at": int(time.time()),
+        }
+        write_daemon_info(daemon_info, info_file=target_info_file)
+
+        deadline = time.time() + health_timeout
+        healthy = False
+        while time.time() < deadline:
+            if check_server_healthy(host, port, timeout=0.5):
+                healthy = True
+                break
+            if not is_pid_alive(pid):
+                break
+            time.sleep(0.05)
+
+        if not healthy:
+            try:
+                proc.terminate()
+            except OSError:
+                pass
+            remove_pid(pid_file=target_pid_file)
+            remove_daemon_info(info_file=target_info_file)
             return {
-                "status": "already_running",
-                "pid": existing_pid,
+                "status": "error",
+                "error": f"Timeout waiting for bridge server to respond on port {port}. Check log at {target_log_file}",
                 "port": port,
                 "url": dashboard_url,
                 "opened_browser": False,
             }
-        else:
-            remove_pid(pid_file=target_pid_file)
 
-    target_log_file.parent.mkdir(parents=True, exist_ok=True)
+        opened_browser = False
+        if not no_open:
+            try:
+                opened_browser = bool(webbrowser.open(dashboard_url))
+            except Exception:
+                opened_browser = False
 
-    cmd = [
-        sys.executable,
-        "-u",
-        "-m",
-        "bridge",
-        "--port",
-        str(port),
-        "--host",
-        host,
-    ]
-    if project:
-        cmd.extend(["--project", project])
-    if base_url:
-        cmd.extend(["--base-url", base_url])
-    if no_auth:
-        cmd.append("--no-auth")
-    elif api_key:
-        cmd.extend(["--api-key", api_key])
-
-    with open(target_log_file, "a", encoding="utf-8") as out:
-        proc = subprocess.Popen(
-            cmd,
-            stdout=out,
-            stderr=out,
-            start_new_session=True,
-        )
-
-    pid = proc.pid
-    write_pid(pid, pid_file=target_pid_file)
-
-    deadline = time.time() + health_timeout
-    healthy = False
-    while time.time() < deadline:
-        if check_server_healthy(host, port, timeout=0.5):
-            healthy = True
-            break
-        if not is_pid_alive(pid):
-            break
-        time.sleep(0.05)
-
-    if not healthy:
-        try:
-            proc.terminate()
-        except OSError:
-            pass
-        remove_pid(pid_file=target_pid_file)
         return {
-            "status": "error",
-            "error": f"Timeout waiting for bridge server to respond on port {port}. Check log at {target_log_file}",
+            "status": "started",
+            "pid": pid,
             "port": port,
             "url": dashboard_url,
-            "opened_browser": False,
+            "opened_browser": opened_browser,
         }
-
-    opened_browser = False
-    if not no_open:
-        try:
-            opened_browser = bool(webbrowser.open(dashboard_url))
-        except Exception:
-            opened_browser = False
-
-    return {
-        "status": "started",
-        "pid": pid,
-        "port": port,
-        "url": dashboard_url,
-        "opened_browser": opened_browser,
-    }
+    finally:
+        if fcntl is not None and lock_fd is not None:
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                os.close(lock_fd)
+            except OSError:
+                pass
 
 
 def stop_daemon(
     port: int = 24980,
     host: str = "127.0.0.1",
     pid_file: Path | None = None,
+    info_file: Path | None = None,
     timeout: float = 5.0,
 ) -> dict[str, Any]:
     """Gracefully terminates the background daemon process."""
     target_pid_file = Path(pid_file) if pid_file is not None else DEFAULT_PID_FILE
+    target_info_file = Path(info_file) if info_file is not None else DEFAULT_INFO_FILE
     pid = read_pid(pid_file=target_pid_file)
 
     if not pid or not is_pid_alive(pid):
         remove_pid(pid_file=target_pid_file)
+        remove_daemon_info(info_file=target_info_file)
         return {"status": "not_running", "pid": pid}
 
     if not is_bridge_process(pid):
         remove_pid(pid_file=target_pid_file)
+        remove_daemon_info(info_file=target_info_file)
         return {"status": "not_running", "pid": None}
 
     try:
         os.kill(pid, signal.SIGTERM)
     except ProcessLookupError:
         remove_pid(pid_file=target_pid_file)
+        remove_daemon_info(info_file=target_info_file)
         return {"status": "not_running", "pid": pid}
     except OSError:
         pass
@@ -277,6 +407,7 @@ def stop_daemon(
                 pass
 
     remove_pid(pid_file=target_pid_file)
+    remove_daemon_info(info_file=target_info_file)
     return {"status": "stopped", "pid": pid}
 
 
@@ -284,43 +415,50 @@ def get_daemon_status(
     port: int = 24980,
     host: str = "127.0.0.1",
     pid_file: Path | None = None,
+    info_file: Path | None = None,
 ) -> dict[str, Any]:
     """Returns active daemon runtime status."""
     target_pid_file = Path(pid_file) if pid_file is not None else DEFAULT_PID_FILE
+    target_info_file = Path(info_file) if info_file is not None else DEFAULT_INFO_FILE
     pid = read_pid(pid_file=target_pid_file)
+    daemon_info = read_daemon_info(info_file=target_info_file)
+
+    effective_port = daemon_info.get("port", port) if daemon_info else port
+    effective_host = daemon_info.get("host", host) if daemon_info else host
     alive = (is_pid_alive(pid) and is_bridge_process(pid)) if pid else False
-    dashboard_url = f"http://{host}:{port}/"
+    dashboard_url = f"http://{effective_host}:{effective_port}/"
 
     if alive:
-        status_data = fetch_status_json(host, port, timeout=1.0) or {}
+        status_data = fetch_status_json(effective_host, effective_port, timeout=1.0) or {}
         return {
             "running": True,
             "pid": pid,
-            "port": port,
-            "host": host,
+            "port": effective_port,
+            "host": effective_host,
             "url": dashboard_url,
             "models_count": status_data.get("models_count", 0),
             "auth": status_data.get("auth", {}),
         }
     else:
-        status_data = fetch_status_json(host, port, timeout=0.5)
-        if status_data:
+        status_data = fetch_status_json(effective_host, effective_port, timeout=0.5)
+        if status_data and status_data.get("service") == "agy-model-bridge":
             return {
                 "running": True,
                 "pid": None,
-                "port": port,
-                "host": host,
+                "port": effective_port,
+                "host": effective_host,
                 "url": dashboard_url,
                 "models_count": status_data.get("models_count", 0),
                 "auth": status_data.get("auth", {}),
             }
         if pid and not alive:
             remove_pid(pid_file=target_pid_file)
+            remove_daemon_info(info_file=target_info_file)
         return {
             "running": False,
             "pid": None,
-            "port": port,
-            "host": host,
+            "port": effective_port,
+            "host": effective_host,
             "url": dashboard_url,
         }
 

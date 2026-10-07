@@ -8,13 +8,18 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from bridge.daemon import (
+    check_server_healthy,
     get_daemon_status,
+    is_bridge_process,
     is_pid_alive,
     open_dashboard,
+    read_daemon_info,
     read_pid,
+    remove_daemon_info,
     remove_pid,
     start_daemon,
     stop_daemon,
+    write_daemon_info,
     write_pid,
 )
 
@@ -174,7 +179,7 @@ class TestDaemonLifecycle(unittest.TestCase):
         write_pid(55555, pid_file=self.pid_file)
 
         # First call is alive (in loop), second call is dead
-        with patch("bridge.daemon.is_pid_alive", side_effect=[True, False]):
+        with patch("bridge.daemon.is_pid_alive", side_effect=[True, False]), patch("bridge.daemon.is_bridge_process", return_value=True):
             res = stop_daemon(pid_file=self.pid_file)
 
         self.assertEqual(res["status"], "stopped")
@@ -194,7 +199,7 @@ class TestDaemonLifecycle(unittest.TestCase):
             "models_count": 27,
         }
 
-        with patch("bridge.daemon.is_pid_alive", return_value=True):
+        with patch("bridge.daemon.is_pid_alive", return_value=True), patch("bridge.daemon.is_bridge_process", return_value=True):
             status = get_daemon_status(port=24980, host="127.0.0.1", pid_file=self.pid_file)
 
         self.assertTrue(status["running"])
@@ -341,26 +346,229 @@ class TestDaemonCLI(unittest.TestCase):
 
 class TestProcessIdentity(unittest.TestCase):
     def test_is_bridge_process_invalid_pids(self):
-        from bridge.daemon import is_bridge_process
         self.assertFalse(is_bridge_process(None))
         self.assertFalse(is_bridge_process(0))
         self.assertFalse(is_bridge_process(-1))
 
-    def test_is_bridge_process_current_process(self):
-        from bridge.daemon import is_bridge_process
-        self.assertTrue(is_bridge_process(os.getpid()))
+    @patch("subprocess.run")
+    def test_is_bridge_process_fails_closed_on_unrelated_python(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="/usr/bin/python3 -m unittest discover -s tests\n")
+        self.assertFalse(is_bridge_process(12345))
 
     @patch("subprocess.run")
-    def test_is_bridge_process_unrelated_process(self, mock_run):
-        from bridge.daemon import is_bridge_process
-        mock_run.return_value = MagicMock(returncode=0, stdout="/usr/bin/postgres -D /data")
-        self.assertFalse(is_bridge_process(99999))
+    def test_is_bridge_process_fails_closed_on_generic_python_script(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="/usr/bin/python3 /some/other/script.py\n")
+        self.assertFalse(is_bridge_process(12345))
 
     @patch("subprocess.run")
-    def test_is_bridge_process_matched_process(self, mock_run):
-        from bridge.daemon import is_bridge_process
-        mock_run.return_value = MagicMock(returncode=0, stdout="/path/to/bin/agy-bridge start")
-        self.assertTrue(is_bridge_process(99999))
+    def test_is_bridge_process_fails_closed_on_ps_error(self, mock_run):
+        mock_run.side_effect = OSError("ps binary not found")
+        self.assertFalse(is_bridge_process(12345))
+
+    @patch("subprocess.run")
+    def test_is_bridge_process_fails_closed_on_non_zero_exit(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=1, stdout="")
+        self.assertFalse(is_bridge_process(12345))
+
+    @patch("subprocess.run")
+    def test_is_bridge_process_matches_bridge_module(self, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="/usr/bin/python3 -u -m bridge --port 24980 --host 127.0.0.1\n",
+        )
+        self.assertTrue(is_bridge_process(12345))
+
+    @patch("subprocess.run")
+    def test_is_bridge_process_matches_agy_bridge_binary(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="/usr/local/bin/agy-bridge start\n")
+        self.assertTrue(is_bridge_process(12345))
+
+    @patch("subprocess.run")
+    def test_is_bridge_process_matches_agy_model_bridge_binary(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="/Users/user/.local/bin/agy-model-bridge start\n")
+        self.assertTrue(is_bridge_process(12345))
+
+
+class TestHealthCheck(unittest.TestCase):
+    @patch("urllib.request.urlopen")
+    def test_check_server_healthy_matches_valid_service_identity(self, mock_urlopen):
+        resp = MagicMock()
+        resp.status = 200
+        resp.read.return_value = b'{"status": "ok", "service": "agy-model-bridge", "version": "0.15.3"}'
+        resp.__enter__.return_value = resp
+        mock_urlopen.return_value = resp
+
+        self.assertTrue(check_server_healthy("127.0.0.1", 24980))
+
+    @patch("urllib.request.urlopen")
+    def test_check_server_healthy_rejects_unrelated_service_returning_200(self, mock_urlopen):
+        resp = MagicMock()
+        resp.status = 200
+        resp.read.return_value = b'{"status": "ok"}'
+        resp.__enter__.return_value = resp
+        mock_urlopen.return_value = resp
+
+        self.assertFalse(check_server_healthy("127.0.0.1", 24980))
+
+    @patch("urllib.request.urlopen")
+    def test_check_server_healthy_rejects_other_service_name(self, mock_urlopen):
+        resp = MagicMock()
+        resp.status = 200
+        resp.read.return_value = b'{"status": "ok", "service": "nginx"}'
+        resp.__enter__.return_value = resp
+        mock_urlopen.return_value = resp
+
+        self.assertFalse(check_server_healthy("127.0.0.1", 24980))
+
+    @patch("urllib.request.urlopen")
+    def test_check_server_healthy_rejects_html_or_non_json_200(self, mock_urlopen):
+        resp = MagicMock()
+        resp.status = 200
+        resp.read.return_value = b'<html><body>OK</body></html>'
+        resp.__enter__.return_value = resp
+        mock_urlopen.return_value = resp
+
+        self.assertFalse(check_server_healthy("127.0.0.1", 24980))
+
+
+class TestDaemonDescriptorAndPortBinding(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.dir_path = Path(self.temp_dir.name)
+        self.pid_file = self.dir_path / "bridge.pid"
+        self.info_file = self.dir_path / "bridge.json"
+        self.log_file = self.dir_path / "bridge.log"
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_write_read_remove_daemon_info(self):
+        info_data = {
+            "pid": 54321,
+            "host": "127.0.0.1",
+            "port": 24980,
+            "service": "agy-model-bridge",
+            "version": "0.15.3",
+        }
+        write_daemon_info(info_data, info_file=self.info_file)
+        self.assertTrue(self.info_file.exists())
+        mode = stat.S_IMODE(self.info_file.stat().st_mode)
+        self.assertEqual(mode, 0o600)
+
+        read_data = read_daemon_info(info_file=self.info_file)
+        self.assertIsNotNone(read_data)
+        self.assertEqual(read_data["pid"], 54321)
+        self.assertEqual(read_data["port"], 24980)
+        self.assertEqual(read_data["service"], "agy-model-bridge")
+
+        remove_daemon_info(info_file=self.info_file)
+        self.assertFalse(self.info_file.exists())
+        self.assertIsNone(read_daemon_info(info_file=self.info_file))
+
+    @patch("bridge.daemon.webbrowser.open")
+    @patch("bridge.daemon.check_server_healthy", return_value=True)
+    @patch("bridge.daemon.subprocess.Popen")
+    def test_start_daemon_persists_daemon_info(self, mock_popen, mock_health, mock_browser):
+        mock_proc = MagicMock()
+        mock_proc.pid = 65432
+        mock_popen.return_value = mock_proc
+
+        res = start_daemon(
+            port=24980,
+            host="127.0.0.1",
+            no_open=True,
+            pid_file=self.pid_file,
+            log_file=self.log_file,
+            info_file=self.info_file,
+        )
+
+        self.assertEqual(res["status"], "started")
+        self.assertEqual(read_pid(self.pid_file), 65432)
+        info = read_daemon_info(self.info_file)
+        self.assertIsNotNone(info)
+        self.assertEqual(info["pid"], 65432)
+        self.assertEqual(info["port"], 24980)
+        self.assertEqual(info["host"], "127.0.0.1")
+        self.assertEqual(info["service"], "agy-model-bridge")
+
+    @patch("bridge.daemon.check_server_healthy", return_value=True)
+    def test_start_daemon_detects_port_conflict(self, mock_health):
+        # A daemon is already running on 24980
+        write_pid(11223, pid_file=self.pid_file)
+        write_daemon_info(
+            {
+                "pid": 11223,
+                "host": "127.0.0.1",
+                "port": 24980,
+                "service": "agy-model-bridge",
+                "version": "0.15.3",
+            },
+            info_file=self.info_file,
+        )
+
+        with patch("bridge.daemon.is_pid_alive", return_value=True), patch("bridge.daemon.is_bridge_process", return_value=True):
+            res = start_daemon(
+                port=24981,
+                host="127.0.0.1",
+                pid_file=self.pid_file,
+                info_file=self.info_file,
+                log_file=self.log_file,
+            )
+
+        self.assertEqual(res["status"], "conflict")
+        self.assertEqual(res["pid"], 11223)
+        self.assertEqual(res["port"], 24980)
+        self.assertIn("127.0.0.1:24980", res["error"])
+
+    @patch("bridge.daemon.os.kill")
+    def test_stop_daemon_removes_daemon_info_and_pid(self, mock_kill):
+        write_pid(77777, pid_file=self.pid_file)
+        write_daemon_info(
+            {
+                "pid": 77777,
+                "host": "127.0.0.1",
+                "port": 24980,
+                "service": "agy-model-bridge",
+                "version": "0.15.3",
+            },
+            info_file=self.info_file,
+        )
+
+        with patch("bridge.daemon.is_pid_alive", side_effect=[True, False]), patch("bridge.daemon.is_bridge_process", return_value=True):
+            res = stop_daemon(pid_file=self.pid_file, info_file=self.info_file)
+
+        self.assertEqual(res["status"], "stopped")
+        self.assertEqual(res["pid"], 77777)
+        self.assertIsNone(read_pid(self.pid_file))
+        self.assertIsNone(read_daemon_info(self.info_file))
+
+    @patch("bridge.daemon.fetch_status_json")
+    def test_get_daemon_status_uses_daemon_info(self, mock_fetch):
+        write_pid(88888, pid_file=self.pid_file)
+        write_daemon_info(
+            {
+                "pid": 88888,
+                "host": "127.0.0.1",
+                "port": 24999,
+                "service": "agy-model-bridge",
+                "version": "0.15.3",
+            },
+            info_file=self.info_file,
+        )
+        mock_fetch.return_value = {
+            "service": "agy-model-bridge",
+            "version": "0.15.3",
+            "models_count": 5,
+            "auth": {"status": "Valid"},
+        }
+
+        with patch("bridge.daemon.is_pid_alive", return_value=True), patch("bridge.daemon.is_bridge_process", return_value=True):
+            status = get_daemon_status(pid_file=self.pid_file, info_file=self.info_file)
+
+        self.assertTrue(status["running"])
+        self.assertEqual(status["pid"], 88888)
+        self.assertEqual(status["port"], 24999)
+        self.assertEqual(status["url"], "http://127.0.0.1:24999/")
 
 
 if __name__ == "__main__":
