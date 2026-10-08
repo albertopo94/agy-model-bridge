@@ -192,13 +192,13 @@ class TestDashboardRendering(unittest.TestCase):
             'base_url = "http://127.0.0.1:24980/v1"\n'
             'wire_api = "responses"\n'
             'requires_openai_auth = false\n'
-            'http_headers = { Authorization = "Bearer local-bridge" }'
+            'http_headers = { Authorization = "Bearer $(cat ~/.agy-bridge/api_key)" }'
         )
         self.assertIn(expected_codex_toml, unescaped_html)
-        self.assertIn('export ANTHROPIC_BASE_URL="http://127.0.0.1:24980"\nexport ANTHROPIC_AUTH_TOKEN="local-bridge"', unescaped_html)
-        expected_hermes_snippet = "BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY=local-bridge"
+        self.assertIn('export ANTHROPIC_BASE_URL="http://127.0.0.1:24980"\nexport ANTHROPIC_AUTH_TOKEN="$(cat ~/.agy-bridge/api_key)"', unescaped_html)
+        expected_hermes_snippet = 'BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY="$(cat ~/.agy-bridge/api_key)"'
         self.assertIn(expected_hermes_snippet, unescaped_html)
-        self.assertIn('BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY=local-bridge', unescaped_html)
+        self.assertIn('BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY="$(cat ~/.agy-bridge/api_key)"', unescaped_html)
 
         # Clipboard copy functionality
 
@@ -296,7 +296,7 @@ class TestDashboardRendering(unittest.TestCase):
                 'base_url = "http://127.0.0.1:24980/v1"\n'
                 'wire_api = "responses"\n'
                 'requires_openai_auth = false\n'
-                'http_headers = { Authorization = "Bearer local-bridge" }'
+                'http_headers = { Authorization = "Bearer $(cat ~/.agy-bridge/api_key)" }'
             ),
         )
         self.assertEqual(by_id["codex"]["docs_url"], "https://github.com/openai/codex")
@@ -315,7 +315,7 @@ class TestDashboardRendering(unittest.TestCase):
         )
         self.assertEqual(
             by_id["claude"]["manual_snippet"]("127.0.0.1:24980"),
-            'export ANTHROPIC_BASE_URL="http://127.0.0.1:24980"\nexport ANTHROPIC_AUTH_TOKEN="local-bridge"',
+            'export ANTHROPIC_BASE_URL="http://127.0.0.1:24980"\nexport ANTHROPIC_AUTH_TOKEN="$(cat ~/.agy-bridge/api_key)"',
         )
         self.assertEqual(
             by_id["claude"]["docs_url"],
@@ -339,7 +339,7 @@ class TestDashboardRendering(unittest.TestCase):
         )
         self.assertEqual(
             by_id["hermes"]["manual_snippet"]("127.0.0.1:24980"),
-            "BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY=local-bridge",
+            'BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY="$(cat ~/.agy-bridge/api_key)"',
         )
         self.assertEqual(by_id["hermes"]["docs_url"], "https://hermes-agent.nousresearch.com")
 
@@ -358,7 +358,7 @@ class TestDashboardRendering(unittest.TestCase):
         )
         self.assertEqual(
             by_id["opencode"]["manual_snippet"]("127.0.0.1:24980"),
-            "BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY=local-bridge",
+            'BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY="$(cat ~/.agy-bridge/api_key)"',
         )
         self.assertEqual(by_id["opencode"]["docs_url"], "https://opencode.ai/docs")
 
@@ -377,7 +377,7 @@ class TestDashboardRendering(unittest.TestCase):
         )
         self.assertEqual(
             by_id["openclaw"]["manual_snippet"]("127.0.0.1:24980"),
-            "BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY=local-bridge",
+            'BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY="$(cat ~/.agy-bridge/api_key)"',
         )
         self.assertEqual(by_id["openclaw"]["docs_url"], "https://docs.openclaw.ai/gateway/config-tools/custom-providers")
 
@@ -393,7 +393,7 @@ class TestDashboardRendering(unittest.TestCase):
         self.assertNotIn("restore_cmd", by_id["cursor"])
         self.assertEqual(
             by_id["cursor"]["manual_snippet"]("127.0.0.1:24980"),
-            "BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY=local-bridge",
+            'BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY="$(cat ~/.agy-bridge/api_key)"',
         )
         self.assertEqual(by_id["cursor"]["docs_url"], "https://docs.cursor.com")
 
@@ -413,7 +413,7 @@ class TestDashboardRendering(unittest.TestCase):
         )
         self.assertEqual(
             by_id["pi"]["manual_snippet"]("127.0.0.1:24980"),
-            "BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY=local-bridge",
+            'BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY="$(cat ~/.agy-bridge/api_key)"',
         )
         self.assertEqual(by_id["pi"]["docs_url"], "https://pi.dev/docs/latest")
         self.assertIn("tip_en", by_id["pi"])
@@ -437,7 +437,7 @@ class TestDashboardRendering(unittest.TestCase):
         )
         self.assertEqual(
             by_id["gentle-shell"]["manual_snippet"]("127.0.0.1:24980"),
-            "BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY=local-bridge",
+            'BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY="$(cat ~/.agy-bridge/api_key)"',
         )
         self.assertEqual(
             by_id["gentle-shell"]["docs_url"],
@@ -449,7 +449,7 @@ class TestDashboardRendering(unittest.TestCase):
         self.assertIn('viewBox="0 0 64 64"', by_id["freellmapi"]["icon_svg"])
         self.assertEqual(
             by_id["freellmapi"]["manual_snippet"]("127.0.0.1:24980"),
-            'BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY=local-bridge',
+            'BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY="$(cat ~/.agy-bridge/api_key)"',
         )
         self.assertEqual(by_id["freellmapi"]["docs_url"], "https://github.com/tashfeenahmed/freellmapi")
 

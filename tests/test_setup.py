@@ -1303,6 +1303,57 @@ class TestUninstall(unittest.TestCase):
         self.assertTrue(result["daemon_dir_removed"])
         self.assertFalse(custom_state_dir.exists())
 
+    def test_uninstall_honors_agy_bridge_bin_env(self):
+        custom_bin = self.root / "custom_bin"
+        custom_bin.mkdir(parents=True, exist_ok=True)
+        b1 = custom_bin / "agy-bridge"
+        b1.write_text("#!/bin/sh\n", encoding="utf-8")
+        b2 = custom_bin / "agy-model-bridge"
+        b2.write_text("#!/bin/sh\n", encoding="utf-8")
+
+        with unittest.mock.patch.dict(os.environ, {"AGY_BRIDGE_BIN": str(custom_bin)}):
+            result = uninstall(
+                daemon_dir=self.daemon_dir,
+                bin_dir=None,
+                claude_settings_path=self.claude_settings,
+                codex_config_path=self.codex_config,
+                hermes_config_path=self.hermes_config,
+            )
+
+        self.assertFalse(b1.exists())
+        self.assertFalse(b2.exists())
+        self.assertIn(str(b1), result["binaries_removed"])
+        self.assertIn(str(b2), result["binaries_removed"])
+
+    def test_uninstall_removes_custom_core_dir_from_env(self):
+        custom_core = self.root / "custom_core"
+        custom_core.mkdir(parents=True, exist_ok=True)
+        (custom_core / "some_file.py").write_text("# test\n", encoding="utf-8")
+
+        with unittest.mock.patch.dict(os.environ, {"AGY_BRIDGE_CORE_DIR": str(custom_core)}):
+            uninstall(
+                daemon_dir=self.daemon_dir,
+                bin_dir=self.bin_dir,
+                claude_settings_path=self.claude_settings,
+                codex_config_path=self.codex_config,
+                hermes_config_path=self.hermes_config,
+            )
+
+        self.assertFalse(custom_core.exists())
+
+    def test_uninstall_preserves_unsafe_custom_core_dir(self):
+        # When core dir points to cwd or home or daemon dir, it should not be unlinked as core dir
+        with unittest.mock.patch.dict(os.environ, {"AGY_BRIDGE_CORE_DIR": str(Path.cwd())}):
+            uninstall(
+                daemon_dir=self.daemon_dir,
+                bin_dir=self.bin_dir,
+                claude_settings_path=self.claude_settings,
+                codex_config_path=self.codex_config,
+                hermes_config_path=self.hermes_config,
+            )
+        # Path.cwd() must still exist
+        self.assertTrue(Path.cwd().exists())
+
 
 class TestCLIUninstall(unittest.TestCase):
     def setUp(self):
@@ -1468,6 +1519,51 @@ class TestUpdateInstallation(unittest.TestCase):
         )
         mock_stop.assert_called_once()
         mock_start.assert_called_once_with(no_open=True)
+
+    @unittest.mock.patch("bridge.setup.subprocess.run")
+    @unittest.mock.patch("bridge.daemon.start_daemon")
+    @unittest.mock.patch("bridge.daemon.stop_daemon")
+    @unittest.mock.patch("bridge.daemon.read_daemon_info")
+    @unittest.mock.patch("bridge.daemon.is_pid_alive")
+    @unittest.mock.patch("bridge.daemon.read_pid")
+    def test_update_preserves_daemon_runtime_options(
+        self, mock_read_pid, mock_is_alive, mock_read_info, mock_stop, mock_start, mock_run
+    ):
+        mock_run.return_value = unittest.mock.MagicMock(
+            returncode=0,
+            stdout="Updating 1234abc..5678def\nFast-forward\n",
+            stderr="",
+        )
+        mock_read_pid.return_value = 4242
+        mock_is_alive.return_value = True
+        mock_read_info.return_value = {
+            "pid": 4242,
+            "host": "127.0.0.2",
+            "port": 24999,
+            "project": "preserved-project",
+            "base_url": "https://preserved.pa",
+            "no_auth": True,
+        }
+        mock_stop.return_value = {"status": "stopped", "pid": 4242}
+        mock_start.return_value = {"status": "started", "pid": 4243}
+
+        result = update_installation(
+            core_dir=self.repo_dir,
+            restart_daemon_if_running=True,
+        )
+
+        self.assertEqual(result["status"], "updated")
+        self.assertTrue(result["restarted_daemon"])
+        mock_read_info.assert_called_once()
+        mock_stop.assert_called_once()
+        mock_start.assert_called_once_with(
+            no_open=True,
+            host="127.0.0.2",
+            port=24999,
+            project="preserved-project",
+            base_url="https://preserved.pa",
+            no_auth=True,
+        )
 
     @unittest.mock.patch("bridge.setup.subprocess.run")
     @unittest.mock.patch("bridge.daemon.start_daemon")
@@ -3566,6 +3662,59 @@ class TestPiConfigurator(unittest.TestCase):
         target = self.dir_path / "non_existent.json"
         success = self.configurator.restore(config_path=target)
         self.assertFalse(success)
+
+    def test_cleanup_pi_or_gentle_settings_preserves_non_agy_models(self):
+        from bridge.setup import _cleanup_pi_or_gentle_settings
+        settings_target = self.dir_path / "settings.json"
+        settings_target.write_text(
+            json.dumps({
+                "defaultProvider": "other-provider",
+                "defaultModel": "custom-claude-3-opus",
+                "enabledModels": [
+                    "custom-claude-3-opus",
+                    "user-gemini-pro-1",
+                    "agy/gemini-3.8-flash-high",
+                    "gemini-3.8-flash-high",
+                    "claude-opus-5-5-high",
+                ],
+            }),
+            encoding="utf-8",
+        )
+
+        _cleanup_pi_or_gentle_settings(settings_target)
+
+        cleaned = json.loads(settings_target.read_text(encoding="utf-8"))
+        # Non-AGY provider and model should NOT be wiped
+        self.assertEqual(cleaned.get("defaultProvider"), "other-provider")
+        self.assertEqual(cleaned.get("defaultModel"), "custom-claude-3-opus")
+        # Non-AGY enabled models should be kept, AGY models removed
+        self.assertIn("custom-claude-3-opus", cleaned.get("enabledModels", []))
+        self.assertIn("user-gemini-pro-1", cleaned.get("enabledModels", []))
+        self.assertNotIn("agy/gemini-3.8-flash-high", cleaned.get("enabledModels", []))
+        self.assertNotIn("gemini-3.8-flash-high", cleaned.get("enabledModels", []))
+        self.assertNotIn("claude-opus-5-5-high", cleaned.get("enabledModels", []))
+
+    def test_cleanup_pi_or_gentle_settings_removes_agy_default_and_models(self):
+        from bridge.setup import _cleanup_pi_or_gentle_settings
+        settings_target = self.dir_path / "settings.json"
+        settings_target.write_text(
+            json.dumps({
+                "defaultProvider": "agy",
+                "defaultModel": "gemini-3.8-flash-high",
+                "enabledModels": [
+                    "custom-claude-3-opus",
+                    "agy/gemini-3.8-flash-high",
+                ],
+            }),
+            encoding="utf-8",
+        )
+
+        _cleanup_pi_or_gentle_settings(settings_target)
+
+        cleaned = json.loads(settings_target.read_text(encoding="utf-8"))
+        self.assertNotIn("defaultProvider", cleaned)
+        self.assertNotIn("defaultModel", cleaned)
+        self.assertEqual(cleaned.get("enabledModels"), ["custom-claude-3-opus"])
 
     def test_describe_backup_pi(self):
         p_agy = self.dir_path / "models.json.backup-2026-01-01"

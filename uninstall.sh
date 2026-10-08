@@ -79,7 +79,7 @@ if [ "$UNINSTALL_EXECUTED" = "0" ]; then
         if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
             CMDLINE=$(ps -p "$PID" -o command= 2>/dev/null || true)
             case "$CMDLINE" in
-                *bridge*|*agy-bridge*)
+                *-m\ bridge*|*agy-bridge*|*agy-model-bridge*)
                     if [ "$IS_ES" = "1" ]; then
                         echo -e "Deteniendo el daemon de AGY Model Bridge (PID $PID)..."
                     else
@@ -114,7 +114,7 @@ if [ "$UNINSTALL_EXECUTED" = "0" ]; then
     rm -f "$BIN_DIR/agy-model-bridge"
 
     # Remove state directory
-    if [ -d "$STATE_DIR" ]; then
+    if [ -n "$STATE_DIR" ] && [ -d "$STATE_DIR" ] && [ "$STATE_DIR" != "/" ] && [ "$STATE_DIR" != "$HOME" ] && [ "$STATE_DIR" != "$(pwd)" ]; then
         rm -rf "$STATE_DIR"
     fi
     # Remove core directory only if distinct, not current dir, and not home

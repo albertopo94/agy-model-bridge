@@ -190,7 +190,7 @@ CLIENT_CARDS: list[dict[str, Any]] = [
             else "agy-bridge setup-claude"
         ),
         "restore_cmd": lambda addr: "agy-bridge restore-claude",
-        "manual_snippet": lambda addr, api_key="local-bridge": f'export ANTHROPIC_BASE_URL="http://{addr}"\nexport ANTHROPIC_AUTH_TOKEN="{api_key}"',
+        "manual_snippet": lambda addr, api_key='$(cat ~/.agy-bridge/api_key)': f'export ANTHROPIC_BASE_URL="http://{addr}"\nexport ANTHROPIC_AUTH_TOKEN="{api_key}"',
         "docs_url": "https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview",
     },
     {
@@ -206,7 +206,7 @@ CLIENT_CARDS: list[dict[str, Any]] = [
             else "agy-bridge setup-codex"
         ),
         "restore_cmd": lambda addr: "agy-bridge restore-codex",
-        "manual_snippet": lambda addr, api_key="local-bridge": (
+        "manual_snippet": lambda addr, api_key='$(cat ~/.agy-bridge/api_key)': (
             f'# ~/.codex/config.toml\n'
             f'model = "gemini-3.8-flash-high"\n'
             f'model_provider = "agy"\n'
@@ -234,7 +234,7 @@ CLIENT_CARDS: list[dict[str, Any]] = [
             else "agy-bridge setup-hermes"
         ),
         "restore_cmd": lambda addr: "agy-bridge restore-hermes",
-        "manual_snippet": lambda addr, api_key="local-bridge": f"BASE_URL=http://{addr}/v1\nAPI_KEY={api_key}",
+        "manual_snippet": lambda addr, api_key='$(cat ~/.agy-bridge/api_key)': f'BASE_URL=http://{addr}/v1\nAPI_KEY="{api_key}"',
         "docs_url": "https://hermes-agent.nousresearch.com",
     },
     {
@@ -252,7 +252,7 @@ CLIENT_CARDS: list[dict[str, Any]] = [
             else "agy-bridge setup-pi"
         ),
         "restore_cmd": lambda addr: "agy-bridge restore-pi",
-        "manual_snippet": lambda addr, api_key="local-bridge": f"BASE_URL=http://{addr}/v1\nAPI_KEY={api_key}",
+        "manual_snippet": lambda addr, api_key='$(cat ~/.agy-bridge/api_key)': f'BASE_URL=http://{addr}/v1\nAPI_KEY="{api_key}"',
         "docs_url": "https://pi.dev/docs/latest",
     },
     {
@@ -268,7 +268,7 @@ CLIENT_CARDS: list[dict[str, Any]] = [
             else "agy-bridge setup-gentle-shell"
         ),
         "restore_cmd": lambda addr: "agy-bridge restore-gentle-shell",
-        "manual_snippet": lambda addr, api_key="local-bridge": f"BASE_URL=http://{addr}/v1\nAPI_KEY={api_key}",
+        "manual_snippet": lambda addr, api_key='$(cat ~/.agy-bridge/api_key)': f'BASE_URL=http://{addr}/v1\nAPI_KEY="{api_key}"',
         "docs_url": "https://github.com/Gentleman-Programming/gentle-shell",
     },
     {
@@ -284,7 +284,7 @@ CLIENT_CARDS: list[dict[str, Any]] = [
             else "agy-bridge setup-opencode"
         ),
         "restore_cmd": lambda addr: "agy-bridge restore-opencode",
-        "manual_snippet": lambda addr, api_key="local-bridge": f"BASE_URL=http://{addr}/v1\nAPI_KEY={api_key}",
+        "manual_snippet": lambda addr, api_key='$(cat ~/.agy-bridge/api_key)': f'BASE_URL=http://{addr}/v1\nAPI_KEY="{api_key}"',
         "docs_url": "https://opencode.ai/docs",
     },
     {
@@ -300,7 +300,7 @@ CLIENT_CARDS: list[dict[str, Any]] = [
             else "agy-bridge setup-openclaw"
         ),
         "restore_cmd": lambda addr: "agy-bridge restore-openclaw",
-        "manual_snippet": lambda addr, api_key="local-bridge": f"BASE_URL=http://{addr}/v1\nAPI_KEY={api_key}",
+        "manual_snippet": lambda addr, api_key='$(cat ~/.agy-bridge/api_key)': f'BASE_URL=http://{addr}/v1\nAPI_KEY="{api_key}"',
         "docs_url": "https://docs.openclaw.ai/gateway/config-tools/custom-providers",
     },
     {
@@ -316,7 +316,7 @@ CLIENT_CARDS: list[dict[str, Any]] = [
             else "agy-bridge setup-cursor"
         ),
         # Note: No restore_cmd because Cursor is guide-only and writes no files!
-        "manual_snippet": lambda addr, api_key="local-bridge": f"BASE_URL=http://{addr}/v1\nAPI_KEY={api_key}",
+        "manual_snippet": lambda addr, api_key='$(cat ~/.agy-bridge/api_key)': f'BASE_URL=http://{addr}/v1\nAPI_KEY="{api_key}"',
         "docs_url": "https://docs.cursor.com",
     },
     {
@@ -326,7 +326,7 @@ CLIENT_CARDS: list[dict[str, Any]] = [
         "desc_en": "Custom Provider & Aider integration (Base URL with /v1)",
         "desc_es": "Integración para Custom Provider y Aider (URL base con /v1)",
         "icon_svg": FREELLMAPI_ICON_SVG,
-        "manual_snippet": lambda addr, api_key="local-bridge": f"BASE_URL=http://{addr}/v1\nAPI_KEY={api_key}",
+        "manual_snippet": lambda addr, api_key='$(cat ~/.agy-bridge/api_key)': f'BASE_URL=http://{addr}/v1\nAPI_KEY="{api_key}"',
         "docs_url": "https://github.com/tashfeenahmed/freellmapi",
     },
 ]
@@ -345,7 +345,7 @@ def render_dashboard(
     html_lang = "es" if is_es else "en"
     active_en = " active" if not is_es else ""
     active_es = " active" if is_es else ""
-    active_key = "local-bridge"
+    active_key = '$(cat ~/.agy-bridge/api_key)'
     has_api_key = bool(api_key and str(api_key).strip())
     api_key_badge_class = "badge-success" if has_api_key else "badge-warning"
     api_key_word = ("Configurada" if is_es else "Configured") if has_api_key else ("No requerida" if is_es else "Not required")

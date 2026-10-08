@@ -570,6 +570,111 @@ class TestDaemonDescriptorAndPortBinding(unittest.TestCase):
         self.assertEqual(status["port"], 24999)
         self.assertEqual(status["url"], "http://127.0.0.1:24999/")
 
+    @patch("bridge.daemon.webbrowser.open")
+    @patch("bridge.daemon.check_server_healthy", return_value=True)
+    @patch("bridge.daemon.subprocess.Popen")
+    @patch("bridge.daemon.os.open")
+    def test_start_daemon_uses_state_dir_lock_file_by_default(self, mock_os_open, mock_popen, mock_health, mock_browser):
+        mock_proc = MagicMock()
+        mock_proc.pid = 65433
+        mock_popen.return_value = mock_proc
+        mock_os_open.return_value = 99
+
+        expected_lock = self.dir_path / "bridge.lock"
+
+        res = start_daemon(
+            port=24980,
+            host="127.0.0.1",
+            no_open=True,
+            pid_file=self.pid_file,
+            log_file=self.log_file,
+            info_file=self.info_file,
+        )
+
+        self.assertEqual(res["status"], "started")
+        # Verify os.open was called with self.dir_path / "bridge.lock"
+        mock_os_open.assert_called()
+        opened_path = mock_os_open.call_args[0][0]
+        self.assertEqual(Path(opened_path), expected_lock)
+
+    @patch("bridge.daemon.webbrowser.open")
+    @patch("bridge.daemon.check_server_healthy", return_value=True)
+    @patch("bridge.daemon.subprocess.Popen")
+    @patch("bridge.daemon.os.open")
+    def test_start_daemon_custom_lock_file(self, mock_os_open, mock_popen, mock_health, mock_browser):
+        mock_proc = MagicMock()
+        mock_proc.pid = 65434
+        mock_popen.return_value = mock_proc
+        mock_os_open.return_value = 100
+
+        custom_lock = self.dir_path / "custom.lock"
+
+        res = start_daemon(
+            port=24980,
+            host="127.0.0.1",
+            no_open=True,
+            pid_file=self.pid_file,
+            log_file=self.log_file,
+            info_file=self.info_file,
+            lock_file=custom_lock,
+        )
+
+        self.assertEqual(res["status"], "started")
+        mock_os_open.assert_called()
+        opened_path = mock_os_open.call_args[0][0]
+        self.assertEqual(Path(opened_path), custom_lock)
+
+    @patch("bridge.daemon.webbrowser.open")
+    @patch("bridge.daemon.check_server_healthy", return_value=True)
+    @patch("bridge.daemon.subprocess.Popen")
+    def test_start_daemon_records_runtime_options_in_info(self, mock_popen, mock_health, mock_browser):
+        mock_proc = MagicMock()
+        mock_proc.pid = 65435
+        mock_popen.return_value = mock_proc
+
+        res = start_daemon(
+            port=24980,
+            host="127.0.0.1",
+            no_open=True,
+            project="test-proj-123",
+            base_url="https://custom.endpoint.pa",
+            no_auth=True,
+            pid_file=self.pid_file,
+            log_file=self.log_file,
+            info_file=self.info_file,
+        )
+
+        self.assertEqual(res["status"], "started")
+        info = read_daemon_info(self.info_file)
+        self.assertIsNotNone(info)
+        self.assertEqual(info["project"], "test-proj-123")
+        self.assertEqual(info["base_url"], "https://custom.endpoint.pa")
+        self.assertTrue(info["no_auth"])
+
+    @patch("bridge.daemon.os.kill")
+    def test_stop_daemon_detects_port_mismatch(self, mock_kill):
+        write_pid(99991, pid_file=self.pid_file)
+        write_daemon_info(
+            {
+                "pid": 99991,
+                "host": "127.0.0.1",
+                "port": 24980,
+                "service": "agy-model-bridge",
+                "version": "0.16.0",
+            },
+            info_file=self.info_file,
+        )
+
+        with patch("bridge.daemon.is_pid_alive", return_value=True), patch("bridge.daemon.is_bridge_process", return_value=True):
+            res = stop_daemon(port=24985, pid_file=self.pid_file, info_file=self.info_file)
+
+        self.assertEqual(res["status"], "port_mismatch")
+        self.assertIn("running on port 24980, not requested port 24985", res["error"])
+        # Should not kill or delete PID
+        mock_kill.assert_not_called()
+        self.assertEqual(read_pid(self.pid_file), 99991)
+        self.assertTrue(self.info_file.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

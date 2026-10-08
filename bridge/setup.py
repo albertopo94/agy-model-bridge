@@ -1608,21 +1608,18 @@ def _cleanup_pi_or_gentle_settings(settings_path: Path) -> None:
                     s_data = json.loads(s_cleaned)
                 if isinstance(s_data, dict):
                     modified = False
+                    agy_model_ids = {m["id"] for m in DEFAULT_PI_AND_GENTLE_MODELS} | {"gemini-3.8-flash-high", "gemini-3.8"}
                     if s_data.get("defaultProvider") == "agy":
                         s_data.pop("defaultProvider", None)
                         modified = True
-                    def_model = s_data.get("defaultModel")
-                    if isinstance(def_model, str) and (
-                        def_model.startswith("agy/")
-                        or "gemini" in def_model.lower()
-                        or "claude" in def_model.lower()
-                    ):
-                        s_data.pop("defaultModel", None)
-                        modified = True
+                        def_model = s_data.get("defaultModel")
+                        if def_model in agy_model_ids or (isinstance(def_model, str) and def_model.startswith("agy/")):
+                            s_data.pop("defaultModel", None)
+                            modified = True
                     if "enabledModels" in s_data and isinstance(s_data["enabledModels"], list):
                         new_models = [
                             m for m in s_data["enabledModels"]
-                            if not (isinstance(m, str) and (m.startswith("agy/") or "gemini" in m.lower() or "claude" in m.lower()))
+                            if not (m in agy_model_ids or (isinstance(m, str) and m.startswith("agy/")))
                         ]
                         if len(new_models) != len(s_data["enabledModels"]):
                             s_data["enabledModels"] = new_models
@@ -2321,7 +2318,14 @@ def uninstall(
     """
     default_daemon = Path(os.environ.get("AGY_BRIDGE_STATE_DIR", Path.home() / ".agy-bridge"))
     resolved_daemon_dir = Path(daemon_dir) if daemon_dir is not None else default_daemon
-    resolved_bin_dir = Path(bin_dir) if bin_dir is not None else Path.home() / ".local" / "bin"
+    if bin_dir is not None:
+        resolved_bin_dir = Path(bin_dir)
+    elif os.environ.get("AGY_BRIDGE_BIN"):
+        resolved_bin_dir = Path(os.environ["AGY_BRIDGE_BIN"])
+    else:
+        resolved_bin_dir = Path.home() / ".local" / "bin"
+    core_dir_env = os.environ.get("AGY_BRIDGE_CORE_DIR")
+    resolved_core_dir = Path(core_dir_env) if core_dir_env else None
 
     # 1. Stop daemon if running
     pid_file = resolved_daemon_dir / "bridge.pid"
@@ -2385,6 +2389,26 @@ def uninstall(
             daemon_dir_removed = True
         except OSError:
             daemon_dir_removed = False
+
+    if resolved_core_dir is not None and resolved_core_dir.exists():
+        try:
+            real_core = resolved_core_dir.resolve()
+            real_daemon = resolved_daemon_dir.resolve()
+            real_home = Path.home().resolve()
+            real_cwd = Path.cwd().resolve()
+            real_root = Path("/").resolve()
+            if (
+                real_core != real_daemon
+                and real_core != real_home
+                and real_core != real_cwd
+                and real_core != real_root
+            ):
+                if resolved_core_dir.is_dir():
+                    shutil.rmtree(resolved_core_dir)
+                else:
+                    resolved_core_dir.unlink()
+        except OSError:
+            pass
 
     return {
         "daemon_stopped": daemon_stopped,
@@ -2507,8 +2531,19 @@ def update_installation(
     if restart_daemon_if_running:
         pid = bridge.daemon.read_pid()
         if pid is not None and bridge.daemon.is_pid_alive(pid):
+            info = bridge.daemon.read_daemon_info()
             bridge.daemon.stop_daemon()
-            start_res = bridge.daemon.start_daemon(no_open=True)
+            if info:
+                start_res = bridge.daemon.start_daemon(
+                    no_open=True,
+                    host=info.get("host", "127.0.0.1"),
+                    port=info.get("port", 24980),
+                    project=info.get("project"),
+                    base_url=info.get("base_url"),
+                    no_auth=info.get("no_auth", False),
+                )
+            else:
+                start_res = bridge.daemon.start_daemon(no_open=True)
             if start_res.get("status") == "started":
                 restarted_daemon = True
 

@@ -267,7 +267,7 @@ def main(argv: list[str] | None = None) -> int:
             prog=f"{prog_base} stop",
             description="Stop the running background AGY Model Bridge daemon.",
         )
-        parser.add_argument("--port", type=int, default=24980, help="Gateway port (default: 24980)")
+        parser.add_argument("--port", type=int, default=None, help="Gateway port (default: auto-detect)")
         parser.add_argument("--host", type=str, default="127.0.0.1", help="Host address (default: 127.0.0.1)")
         parser.add_argument("--lang", type=str, default=None, help=t("cli_help_lang"))
         args = parser.parse_args(argv[1:])
@@ -275,9 +275,13 @@ def main(argv: list[str] | None = None) -> int:
         if res.get("status") == "stopped":
             pid_str = f" (PID {res['pid']})" if res.get("pid") else ""
             print(t("daemon_stopped", pid_str=pid_str))
+            return 0
+        elif res.get("status") == "port_mismatch":
+            print(f"Error: {res.get('error')}")
+            return 1
         else:
             print(t("daemon_not_running"))
-        return 0
+            return 0
 
     if argv and argv[0] == "status":
         parser = argparse.ArgumentParser(

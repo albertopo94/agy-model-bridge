@@ -217,6 +217,7 @@ def start_daemon(
     pid_file: Path | None = None,
     info_file: Path | None = None,
     log_file: Path | None = None,
+    lock_file: Path | None = None,
     health_timeout: float = 5.0,
     api_key: str | None = None,
     no_auth: bool = False,
@@ -229,7 +230,10 @@ def start_daemon(
     target_pid_file = Path(pid_file) if pid_file is not None else DEFAULT_PID_FILE
     target_info_file = Path(info_file) if info_file is not None else DEFAULT_INFO_FILE
     target_log_file = Path(log_file) if log_file is not None else DEFAULT_LOG_FILE
-    target_lock_file = DEFAULT_LOCK_FILE
+    if lock_file is not None:
+        target_lock_file = Path(lock_file)
+    else:
+        target_lock_file = target_pid_file.parent / "bridge.lock"
     dashboard_url = f"http://{host}:{port}/"
 
     # Acquire file lock to prevent concurrent start races
@@ -312,6 +316,9 @@ def start_daemon(
             "service": "agy-model-bridge",
             "version": __version__,
             "started_at": int(time.time()),
+            "project": project,
+            "base_url": base_url,
+            "no_auth": no_auth,
         }
         write_daemon_info(daemon_info, info_file=target_info_file)
 
@@ -364,7 +371,7 @@ def start_daemon(
 
 
 def stop_daemon(
-    port: int = 24980,
+    port: int | None = None,
     host: str = "127.0.0.1",
     pid_file: Path | None = None,
     info_file: Path | None = None,
@@ -384,6 +391,14 @@ def stop_daemon(
         remove_pid(pid_file=target_pid_file)
         remove_daemon_info(info_file=target_info_file)
         return {"status": "not_running", "pid": None}
+
+    if port is not None:
+        info = read_daemon_info(info_file=target_info_file)
+        if info and info.get("port") is not None and info.get("port") != port:
+            return {
+                "status": "port_mismatch",
+                "error": f"Daemon PID {pid} is running on port {info.get('port')}, not requested port {port}.",
+            }
 
     try:
         os.kill(pid, signal.SIGTERM)
