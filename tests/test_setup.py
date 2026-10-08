@@ -1325,10 +1325,43 @@ class TestUninstall(unittest.TestCase):
         self.assertIn(str(b1), result["binaries_removed"])
         self.assertIn(str(b2), result["binaries_removed"])
 
-    def test_uninstall_removes_custom_core_dir_from_env(self):
+    def test_uninstall_preserves_custom_core_dir_without_signature(self):
         custom_core = self.root / "custom_core"
         custom_core.mkdir(parents=True, exist_ok=True)
         (custom_core / "some_file.py").write_text("# test\n", encoding="utf-8")
+
+        with unittest.mock.patch.dict(os.environ, {"AGY_BRIDGE_CORE_DIR": str(custom_core)}):
+            uninstall(
+                daemon_dir=self.daemon_dir,
+                bin_dir=self.bin_dir,
+                claude_settings_path=self.claude_settings,
+                codex_config_path=self.codex_config,
+                hermes_config_path=self.hermes_config,
+            )
+
+        # Unsigned directory must NOT be deleted
+        self.assertTrue(custom_core.exists())
+
+    def test_uninstall_removes_custom_core_dir_with_bridge_init_signature(self):
+        custom_core = self.root / "custom_core_bridge"
+        (custom_core / "bridge").mkdir(parents=True, exist_ok=True)
+        (custom_core / "bridge" / "__init__.py").write_text("# bridge\n", encoding="utf-8")
+
+        with unittest.mock.patch.dict(os.environ, {"AGY_BRIDGE_CORE_DIR": str(custom_core)}):
+            uninstall(
+                daemon_dir=self.daemon_dir,
+                bin_dir=self.bin_dir,
+                claude_settings_path=self.claude_settings,
+                codex_config_path=self.codex_config,
+                hermes_config_path=self.hermes_config,
+            )
+
+        self.assertFalse(custom_core.exists())
+
+    def test_uninstall_removes_custom_core_dir_with_installed_sentinel_signature(self):
+        custom_core = self.root / "custom_core_installed"
+        custom_core.mkdir(parents=True, exist_ok=True)
+        (custom_core / ".agy-bridge-installed").write_text("v0.16.1\n", encoding="utf-8")
 
         with unittest.mock.patch.dict(os.environ, {"AGY_BRIDGE_CORE_DIR": str(custom_core)}):
             uninstall(
@@ -1511,7 +1544,7 @@ class TestUpdateInstallation(unittest.TestCase):
 
         self.assertEqual(result["status"], "updated")
         self.assertTrue(result["restarted_daemon"])
-        self.assertEqual(result["version"], "0.16.0")
+        self.assertEqual(result["version"], "0.16.1")
         mock_run.assert_called_once_with(
             ["git", "-C", str(self.repo_dir), "pull", "--ff-only"],
             capture_output=True,
@@ -1769,7 +1802,7 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main([flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.16.0")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.16.1")
 
     def test_cli_subcommand_version_flags(self):
         from bridge.__main__ import main
@@ -1781,19 +1814,19 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main(["update", flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.16.0")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.16.1")
 
     def test_version_unification(self):
         import bridge
         from pathlib import Path
         import re
 
-        self.assertEqual(bridge.__version__, "0.16.0")
+        self.assertEqual(bridge.__version__, "0.16.1")
         pyproject_path = Path(__file__).resolve().parent.parent / "pyproject.toml"
         pyproject_text = pyproject_path.read_text(encoding="utf-8")
         match = re.search(r'version\s*=\s*"([^"]+)"', pyproject_text)
         self.assertIsNotNone(match)
-        self.assertEqual(match.group(1), "0.16.0")
+        self.assertEqual(match.group(1), "0.16.1")
 
 
 class TestClientConfiguratorRegistry(unittest.TestCase):
@@ -2525,8 +2558,8 @@ class TestOpenCodeConfigurator(unittest.TestCase):
                 {
                     "name": m_name,
                     "limit": {
-                        "context": 1048576,
-                        "output": 65536,
+                        "context": 1000000,
+                        "output": 128000,
                     },
                 },
             )
@@ -2856,8 +2889,8 @@ class TestOpenClawConfigurator(unittest.TestCase):
                 "reasoning": True,
                 "input": ["text"],
                 "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
-                "contextWindow": 1048576,
-                "maxTokens": 65536,
+                "contextWindow": 1000000,
+                "maxTokens": 128000,
             },
             {
                 "id": "claude-sonnet-5-5-medium",
@@ -2865,8 +2898,8 @@ class TestOpenClawConfigurator(unittest.TestCase):
                 "reasoning": True,
                 "input": ["text"],
                 "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
-                "contextWindow": 1048576,
-                "maxTokens": 65536,
+                "contextWindow": 1000000,
+                "maxTokens": 128000,
             },
             {
                 "id": "claude-sonnet-5-5-low",
@@ -2874,8 +2907,8 @@ class TestOpenClawConfigurator(unittest.TestCase):
                 "reasoning": True,
                 "input": ["text"],
                 "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
-                "contextWindow": 1048576,
-                "maxTokens": 65536,
+                "contextWindow": 1000000,
+                "maxTokens": 128000,
             },
             {
                 "id": "claude-opus-5-5-high",
@@ -2883,8 +2916,8 @@ class TestOpenClawConfigurator(unittest.TestCase):
                 "reasoning": True,
                 "input": ["text"],
                 "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
-                "contextWindow": 1048576,
-                "maxTokens": 65536,
+                "contextWindow": 1000000,
+                "maxTokens": 128000,
             },
             {
                 "id": "claude-opus-5-5-medium",
@@ -2892,8 +2925,8 @@ class TestOpenClawConfigurator(unittest.TestCase):
                 "reasoning": True,
                 "input": ["text"],
                 "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
-                "contextWindow": 1048576,
-                "maxTokens": 65536,
+                "contextWindow": 1000000,
+                "maxTokens": 128000,
             },
             {
                 "id": "claude-opus-5-5-low",
@@ -2901,8 +2934,8 @@ class TestOpenClawConfigurator(unittest.TestCase):
                 "reasoning": True,
                 "input": ["text"],
                 "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
-                "contextWindow": 1048576,
-                "maxTokens": 65536,
+                "contextWindow": 1000000,
+                "maxTokens": 128000,
             },
             {
                 "id": "gemini-2.5-pro",
@@ -3482,8 +3515,12 @@ class TestPiConfigurator(unittest.TestCase):
             else:
                 self.assertTrue(m["reasoning"])
             self.assertEqual(m["input"], ["text"])
-            self.assertEqual(m["contextWindow"], 1048576)
-            self.assertEqual(m["maxTokens"], 65536)
+            if m["id"].startswith("claude-"):
+                self.assertEqual(m["contextWindow"], 1000000)
+                self.assertEqual(m["maxTokens"], 128000)
+            else:
+                self.assertEqual(m["contextWindow"], 1048576)
+                self.assertEqual(m["maxTokens"], 65536)
 
     def test_setup_with_port(self):
         target = self.dir_path / "models.json"
@@ -4091,8 +4128,12 @@ class TestGentleShellConfigurator(unittest.TestCase):
             else:
                 self.assertTrue(m["reasoning"])
             self.assertEqual(m["input"], ["text"])
-            self.assertEqual(m["contextWindow"], 1048576)
-            self.assertEqual(m["maxTokens"], 65536)
+            if m["id"].startswith("claude-"):
+                self.assertEqual(m["contextWindow"], 1000000)
+                self.assertEqual(m["maxTokens"], 128000)
+            else:
+                self.assertEqual(m["contextWindow"], 1048576)
+                self.assertEqual(m["maxTokens"], 65536)
 
     def test_setup_with_port(self):
         target = self.dir_path / "models.json"

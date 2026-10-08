@@ -3,6 +3,7 @@
 import json
 import unittest
 from bridge.anthropic import (
+    _extract_event_thought_signature,
     anthropic_to_cloudcode_request,
     build_anthropic_message,
     build_anthropic_sse_events,
@@ -851,6 +852,50 @@ class TestAnthropicErrorResponses(unittest.TestCase):
         code, err = build_anthropic_error_response(503, "Service unavailable")
         self.assertEqual(code, 503)
         self.assertIn(err["error"]["type"], ("api_error", "overloaded_error"))
+
+
+class TestExtractEventThoughtSignature(unittest.TestCase):
+    def test_extract_from_candidate_root(self):
+        parsed = {"candidates": [{"thoughtSignature": "sig_root_123"}]}
+        self.assertEqual(_extract_event_thought_signature(parsed), "sig_root_123")
+
+    def test_extract_from_candidate_root_snake_case(self):
+        parsed = {"candidates": [{"thought_signature": "sig_snake_123"}]}
+        self.assertEqual(_extract_event_thought_signature(parsed), "sig_snake_123")
+
+    def test_extract_from_content_level(self):
+        parsed = {"candidates": [{"content": {"thoughtSignature": "sig_content_123", "parts": []}}]}
+        self.assertEqual(_extract_event_thought_signature(parsed), "sig_content_123")
+
+    def test_extract_from_content_level_snake_case(self):
+        parsed = {"candidates": [{"content": {"thought_signature": "sig_content_snake_123", "parts": []}}]}
+        self.assertEqual(_extract_event_thought_signature(parsed), "sig_content_snake_123")
+
+    def test_extract_from_parts(self):
+        parsed = {"candidates": [{"content": {"parts": [{"thought": True, "text": "t", "thoughtSignature": "sig_part_123"}]}}]}
+        self.assertEqual(_extract_event_thought_signature(parsed), "sig_part_123")
+
+    def test_extract_from_parts_without_content_dict(self):
+        parsed = {"candidates": [{"parts": [{"thought": True, "text": "t", "thoughtSignature": "sig_cand_part_123"}]}]}
+        self.assertEqual(_extract_event_thought_signature(parsed), "sig_cand_part_123")
+
+    def test_extract_from_function_call(self):
+        parsed = {"candidates": [{"content": {"parts": [{"functionCall": {"name": "test", "thoughtSignature": "sig_fc_123"}}]}}]}
+        self.assertEqual(_extract_event_thought_signature(parsed), "sig_fc_123")
+
+    def test_extract_from_response_wrapped(self):
+        parsed = {"response": {"candidates": [{"thoughtSignature": "sig_wrapped_123"}]}}
+        self.assertEqual(_extract_event_thought_signature(parsed), "sig_wrapped_123")
+
+    def test_extract_returns_none_when_absent(self):
+        parsed = {"candidates": [{"content": {"parts": [{"text": "no sig"}]}}]}
+        self.assertIsNone(_extract_event_thought_signature(parsed))
+
+    def test_extract_returns_none_for_empty_or_invalid(self):
+        self.assertIsNone(_extract_event_thought_signature({}))
+        self.assertIsNone(_extract_event_thought_signature(None))  # type: ignore
+        self.assertIsNone(_extract_event_thought_signature("invalid"))  # type: ignore
+        self.assertIsNone(_extract_event_thought_signature({"candidates": []}))
 
 
 if __name__ == "__main__":

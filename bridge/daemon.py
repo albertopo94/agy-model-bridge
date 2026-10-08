@@ -164,12 +164,26 @@ def is_bridge_process(pid: int | None) -> bool:
         cmdline = res.stdout.strip()
         if not cmdline:
             return False
-        return (
-            "-m bridge" in cmdline
-            or "agy-bridge" in cmdline
-            or "agy-model-bridge" in cmdline
-            or "bridge/__main__.py" in cmdline
+        tokens = cmdline.split()
+        if not tokens:
+            return False
+
+        has_m_bridge = (
+            "-m" in tokens
+            and (tokens.index("-m") + 1 < len(tokens) and tokens[tokens.index("-m") + 1] == "bridge")
         )
+        if has_m_bridge:
+            return True
+
+        for token in tokens:
+            if token == "agy-bridge" or token.endswith("/agy-bridge"):
+                return True
+            if token == "agy-model-bridge" or token.endswith("/agy-model-bridge"):
+                return True
+            if token == "bridge/__main__.py" or token.endswith("/bridge/__main__.py"):
+                return True
+
+        return False
     except Exception:
         return False
 
@@ -296,14 +310,21 @@ def start_daemon(
             cmd.extend(["--base-url", base_url])
         if no_auth:
             cmd.append("--no-auth")
-        elif api_key:
-            cmd.extend(["--api-key", api_key])
+
+        if api_key:
+            import bridge.security
+            bridge.security.write_api_key(api_key, daemon_dir=target_pid_file.parent)
+
+        child_env = os.environ.copy()
+        if api_key:
+            child_env["AGY_API_KEY"] = api_key
 
         with open(target_log_file, "a", encoding="utf-8") as out:
             proc = subprocess.Popen(
                 cmd,
                 stdout=out,
                 stderr=out,
+                env=child_env,
                 start_new_session=True,
             )
 
@@ -415,7 +436,7 @@ def stop_daemon(
             break
         time.sleep(0.05)
     else:
-        if is_pid_alive(pid):
+        if is_pid_alive(pid) and is_bridge_process(pid):
             try:
                 os.kill(pid, signal.SIGKILL)
             except OSError:

@@ -40,6 +40,7 @@ from bridge.dashboard import render_dashboard, get_status_data
 from bridge.i18n import parse_accept_language
 from bridge.security import validate_api_key
 from bridge.anthropic import (
+    _extract_event_thought_signature,
     anthropic_to_cloudcode_request,
     build_anthropic_message,
     build_anthropic_sse_events,
@@ -434,6 +435,7 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                 collected_text: list[str] = []
                 collected_thoughts: list[str] = []
                 collected_tool_calls: list[dict[str, Any]] = []
+                latest_thought_sig: str | None = None
                 last_usage = None
                 last_finish = "end_turn"
                 event_count = 0
@@ -443,6 +445,9 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                     if parsed is not None:
                         event_count += 1
                         check_sse_error(parsed)
+                        sig = _extract_event_thought_signature(parsed)
+                        if sig:
+                            latest_thought_sig = sig
                         usage = extract_usage(parsed)
                         if usage:
                             last_usage = usage
@@ -488,6 +493,7 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                     stop_reason=last_finish,
                     thinking=full_thought,
                     tool_calls=collected_tool_calls if collected_tool_calls else None,
+                    signature=latest_thought_sig,
                 )
                 try:
                     self._send_json(200, resp_obj)

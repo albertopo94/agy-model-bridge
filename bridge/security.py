@@ -18,6 +18,32 @@ DEFAULT_DAEMON_DIR = Path(os.environ.get("AGY_BRIDGE_STATE_DIR", Path.home() / "
 DEFAULT_API_KEY_FILE = DEFAULT_DAEMON_DIR / "api_key"
 
 
+def write_api_key(api_key: str, daemon_dir: Path | None = None) -> None:
+    """Persists the API key to <daemon_dir>/api_key with 0o600 permissions."""
+    target_dir = Path(daemon_dir) if daemon_dir is not None else DEFAULT_DAEMON_DIR
+    target_file = target_dir / "api_key"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(target_dir, 0o700)
+    except OSError:
+        pass
+
+    tmp_file = target_dir / f"api_key.tmp.{uuid.uuid4().hex}"
+    try:
+        with open(tmp_file, "w", encoding="utf-8") as f:
+            f.write(f"{api_key.strip()}\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp_file, 0o600)
+        os.replace(tmp_file, target_file)
+    finally:
+        if tmp_file.exists():
+            try:
+                tmp_file.unlink()
+            except OSError:
+                pass
+
+
 def get_or_create_api_key(daemon_dir: Path | None = None) -> str:
     """Retrieves existing API key or generates a new 48-char hex secret.
 
@@ -45,27 +71,7 @@ def get_or_create_api_key(daemon_dir: Path | None = None) -> str:
 
     # Generate new key
     new_key = secrets.token_hex(24)
-    target_dir.mkdir(parents=True, exist_ok=True)
-    try:
-        os.chmod(target_dir, 0o700)
-    except OSError:
-        pass
-
-    tmp_file = target_dir / f"api_key.tmp.{uuid.uuid4().hex}"
-    try:
-        with open(tmp_file, "w", encoding="utf-8") as f:
-            f.write(f"{new_key}\n")
-            f.flush()
-            os.fsync(f.fileno())
-        os.chmod(tmp_file, 0o600)
-        os.replace(tmp_file, target_file)
-    finally:
-        if tmp_file.exists():
-            try:
-                tmp_file.unlink()
-            except OSError:
-                pass
-
+    write_api_key(new_key, daemon_dir=target_dir)
     return new_key
 
 

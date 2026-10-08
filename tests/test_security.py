@@ -10,6 +10,7 @@ from unittest import mock
 from bridge.security import (
     get_or_create_api_key,
     validate_api_key,
+    write_api_key,
 )
 
 
@@ -20,6 +21,14 @@ class TestSecurityModule(unittest.TestCase):
 
     def tearDown(self):
         self.temp_dir.cleanup()
+
+    def test_write_api_key_persists_with_secure_permissions(self):
+        secret = "test-explicit-key-42"
+        write_api_key(secret, daemon_dir=self.daemon_dir)
+        key_file = self.daemon_dir / "api_key"
+        self.assertTrue(key_file.exists())
+        self.assertEqual(stat.S_IMODE(key_file.stat().st_mode), 0o600)
+        self.assertEqual(key_file.read_text(encoding="utf-8").strip(), secret)
 
     def test_get_or_create_api_key_creates_and_persists(self):
         key = get_or_create_api_key(daemon_dir=self.daemon_dir)

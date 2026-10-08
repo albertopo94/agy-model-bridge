@@ -10,6 +10,7 @@ import urllib.error
 import urllib.request
 
 from bridge.server import create_server, OpenAIRequestHandler
+from bridge.transform import DUMMY_THOUGHT_SIGNATURE
 from bridge.client import (
     CloudCodeClient,
     BridgeError,
@@ -1009,6 +1010,90 @@ class TestServerEndpoints(unittest.TestCase):
         think_blocks = [b for b in body["content"] if b.get("type") == "thinking"]
         self.assertTrue(len(think_blocks) > 0)
         self.assertEqual(think_blocks[0]["thinking"], "thinking...")
+
+    def test_anthropic_messages_non_streaming_with_upstream_thought_signature(self):
+        def sig_stream():
+            yield 'data: {"candidates": [{"content": {"parts": [{"thought": true, "text": "Deep thinking"}]}, "thoughtSignature": "expected_cand_sig_001"}]}\n'
+            yield 'data: {"candidates": [{"content": {"parts": [{"text": "The answer"}]}}]}\n'
+            yield 'data: {"candidates": [{"finishReason": "STOP"}]}\n'
+
+        self.mock_client.custom_stream_generator = sig_stream
+        payload = {
+            "model": "claude-sonnet-5-5",
+            "messages": [{"role": "user", "content": "Explain relativity"}],
+        }
+        status, headers, body = self._http_post("/v1/messages", payload)
+        self.assertEqual(status, 200)
+        self.assertEqual(body["type"], "message")
+        self.assertEqual(body["role"], "assistant")
+        self.assertEqual(len(body["content"]), 2)
+        self.assertEqual(body["content"][0]["type"], "thinking")
+        self.assertEqual(body["content"][0]["thinking"], "Deep thinking")
+        self.assertEqual(body["content"][0]["signature"], "expected_cand_sig_001")
+        self.assertEqual(body["content"][1]["type"], "text")
+        self.assertEqual(body["content"][1]["text"], "The answer")
+
+    def test_anthropic_messages_non_streaming_with_thought_signature_in_parts(self):
+        def sig_parts_stream():
+            yield 'data: {"candidates": [{"content": {"parts": [{"thought": true, "text": "Part thinking", "thoughtSignature": "expected_part_sig_002"}]}}]}\n'
+            yield 'data: {"candidates": [{"content": {"parts": [{"text": "Result text"}]}}]}\n'
+            yield 'data: {"candidates": [{"finishReason": "STOP"}]}\n'
+
+        self.mock_client.custom_stream_generator = sig_parts_stream
+        payload = {
+            "model": "claude-sonnet-5-5",
+            "messages": [{"role": "user", "content": "Tell me a joke"}],
+        }
+        status, headers, body = self._http_post("/v1/messages", payload)
+        self.assertEqual(status, 200)
+        self.assertEqual(body["type"], "message")
+        self.assertEqual(body["role"], "assistant")
+        self.assertEqual(len(body["content"]), 2)
+        self.assertEqual(body["content"][0]["type"], "thinking")
+        self.assertEqual(body["content"][0]["thinking"], "Part thinking")
+        self.assertEqual(body["content"][0]["signature"], "expected_part_sig_002")
+        self.assertEqual(body["content"][1]["type"], "text")
+        self.assertEqual(body["content"][1]["text"], "Result text")
+
+    def test_anthropic_messages_non_streaming_no_thought_signature_and_no_tools_behaves_cleanly(self):
+        def pure_text_stream():
+            yield 'data: {"candidates": [{"content": {"parts": [{"text": "Simple answer"}]}}]}\n'
+            yield 'data: {"candidates": [{"finishReason": "STOP"}]}\n'
+
+        self.mock_client.custom_stream_generator = pure_text_stream
+        payload = {
+            "model": "claude-sonnet-5-5",
+            "messages": [{"role": "user", "content": "Hello"}],
+        }
+        status, headers, body = self._http_post("/v1/messages", payload)
+        self.assertEqual(status, 200)
+        self.assertEqual(body["type"], "message")
+        self.assertEqual(body["role"], "assistant")
+        self.assertEqual(body["stop_reason"], "end_turn")
+        self.assertEqual(len(body["content"]), 1)
+        self.assertEqual(body["content"][0]["type"], "text")
+        self.assertEqual(body["content"][0]["text"], "Simple answer")
+
+    def test_anthropic_messages_non_streaming_thinking_without_signature_falls_back_to_dummy(self):
+        def thinking_no_sig_stream():
+            yield 'data: {"candidates": [{"content": {"parts": [{"thought": true, "text": "Thinking without sig"}]}}]}\n'
+            yield 'data: {"candidates": [{"content": {"parts": [{"text": "Done"}]}}]}\n'
+            yield 'data: {"candidates": [{"finishReason": "STOP"}]}\n'
+
+        self.mock_client.custom_stream_generator = thinking_no_sig_stream
+        payload = {
+            "model": "claude-sonnet-5-5",
+            "messages": [{"role": "user", "content": "Hello"}],
+        }
+        status, headers, body = self._http_post("/v1/messages", payload)
+        self.assertEqual(status, 200)
+        self.assertEqual(body["type"], "message")
+        self.assertEqual(len(body["content"]), 2)
+        self.assertEqual(body["content"][0]["type"], "thinking")
+        self.assertEqual(body["content"][0]["thinking"], "Thinking without sig")
+        self.assertEqual(body["content"][0]["signature"], DUMMY_THOUGHT_SIGNATURE)
+        self.assertEqual(body["content"][1]["type"], "text")
+        self.assertEqual(body["content"][1]["text"], "Done")
 
     def test_anthropic_messages_streaming(self):
         payload = {

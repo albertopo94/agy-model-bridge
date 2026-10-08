@@ -206,8 +206,9 @@ CLIENT_CARDS: list[dict[str, Any]] = [
             else "agy-bridge setup-codex"
         ),
         "restore_cmd": lambda addr: "agy-bridge restore-codex",
-        "manual_snippet": lambda addr, api_key='$(cat ~/.agy-bridge/api_key)': (
+        "manual_snippet": lambda addr, api_key='<YOUR_API_KEY>': (
             f'# ~/.codex/config.toml\n'
+            f'# Replace <YOUR_API_KEY> with key from ~/.agy-bridge/api_key\n'
             f'model = "gemini-3.8-flash-high"\n'
             f'model_provider = "agy"\n'
             f'model_context_window = 1048576\n'
@@ -217,7 +218,7 @@ CLIENT_CARDS: list[dict[str, Any]] = [
             f'base_url = "http://{addr}/v1"\n'
             f'wire_api = "responses"\n'
             f'requires_openai_auth = false\n'
-            f'http_headers = {{ Authorization = "Bearer {api_key}" }}'
+            f'http_headers = {{ Authorization = "Bearer {api_key if not str(api_key).startswith("$(") else "<YOUR_API_KEY>"}" }}'
         ),
         "docs_url": "https://github.com/openai/codex",
     },

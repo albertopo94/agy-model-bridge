@@ -137,6 +137,41 @@ class TestDaemonLifecycle(unittest.TestCase):
         self.assertFalse(res["opened_browser"])
         mock_browser.assert_not_called()
 
+    @patch("bridge.daemon.webbrowser.open")
+    @patch("bridge.daemon.check_server_healthy", return_value=True)
+    @patch("bridge.daemon.subprocess.Popen")
+    def test_start_daemon_with_api_key_passes_env_and_persists_key_file_without_argv(self, mock_popen, mock_health, mock_browser):
+        mock_proc = MagicMock()
+        mock_proc.pid = 44447
+        mock_popen.return_value = mock_proc
+
+        res = start_daemon(
+            port=24980,
+            host="127.0.0.1",
+            api_key="secret-token-xyz-123",
+            no_open=True,
+            pid_file=self.pid_file,
+            log_file=self.log_file,
+        )
+
+        self.assertEqual(res["status"], "started")
+        mock_popen.assert_called_once()
+        cmd_args = mock_popen.call_args[0][0]
+        # Must NEVER leak secret API key in argv
+        self.assertNotIn("--api-key", cmd_args)
+        self.assertNotIn("secret-token-xyz-123", cmd_args)
+
+        # Must pass AGY_API_KEY in child environment
+        call_kwargs = mock_popen.call_args[1]
+        self.assertIn("env", call_kwargs)
+        self.assertEqual(call_kwargs["env"].get("AGY_API_KEY"), "secret-token-xyz-123")
+
+        # Must persist key file in daemon directory with 0o600 permissions
+        key_file = self.pid_file.parent / "api_key"
+        self.assertTrue(key_file.exists())
+        self.assertEqual(stat.S_IMODE(key_file.stat().st_mode), 0o600)
+        self.assertEqual(key_file.read_text(encoding="utf-8").strip(), "secret-token-xyz-123")
+
     @patch("bridge.daemon.check_server_healthy", return_value=True)
     @patch("bridge.daemon.subprocess.Popen")
     def test_start_daemon_already_running(self, mock_popen, mock_health):
@@ -186,6 +221,22 @@ class TestDaemonLifecycle(unittest.TestCase):
         self.assertEqual(res["pid"], 55555)
         self.assertIsNone(read_pid(self.pid_file))
         mock_kill.assert_called()
+
+    @patch("bridge.daemon.os.kill")
+    def test_stop_daemon_reverifies_bridge_process_before_sigkill(self, mock_kill):
+        import signal
+        write_pid(55556, pid_file=self.pid_file)
+
+        # Process is alive during SIGTERM and during timeout loop.
+        # But when timeout expires, is_bridge_process returns False (PID recycled).
+        with patch("bridge.daemon.is_pid_alive", return_value=True), \
+             patch("bridge.daemon.is_bridge_process", side_effect=[True, False]):
+            res = stop_daemon(pid_file=self.pid_file, timeout=0.01)
+
+        self.assertEqual(res["status"], "stopped")
+        # SIGTERM was called once at start, but SIGKILL should NOT be called because it is no longer bridge process
+        for call_args in mock_kill.call_args_list:
+            self.assertNotEqual(call_args[0][1], signal.SIGKILL)
 
     def test_stop_daemon_not_running(self):
         res = stop_daemon(pid_file=self.pid_file)
@@ -388,13 +439,33 @@ class TestProcessIdentity(unittest.TestCase):
         mock_run.return_value = MagicMock(returncode=0, stdout="/Users/user/.local/bin/agy-model-bridge start\n")
         self.assertTrue(is_bridge_process(12345))
 
+    @patch("subprocess.run")
+    def test_is_bridge_process_rejects_malicious_module_suffix(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="/usr/bin/python3 -m bridge-malicious\n")
+        self.assertFalse(is_bridge_process(12345))
+
+    @patch("subprocess.run")
+    def test_is_bridge_process_rejects_similar_module_name(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="/usr/bin/python3 -m bridge_helper\n")
+        self.assertFalse(is_bridge_process(12345))
+
+    @patch("subprocess.run")
+    def test_is_bridge_process_matches_main_script_token(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="/usr/bin/python3 /opt/bridge/__main__.py --port 24980\n")
+        self.assertTrue(is_bridge_process(12345))
+
+    @patch("subprocess.run")
+    def test_is_bridge_process_matches_relative_main_script(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="python bridge/__main__.py\n")
+        self.assertTrue(is_bridge_process(12345))
+
 
 class TestHealthCheck(unittest.TestCase):
     @patch("urllib.request.urlopen")
     def test_check_server_healthy_matches_valid_service_identity(self, mock_urlopen):
         resp = MagicMock()
         resp.status = 200
-        resp.read.return_value = b'{"status": "ok", "service": "agy-model-bridge", "version": "0.16.0"}'
+        resp.read.return_value = b'{"status": "ok", "service": "agy-model-bridge", "version": "0.16.1"}'
         resp.__enter__.return_value = resp
         mock_urlopen.return_value = resp
 
@@ -448,7 +519,7 @@ class TestDaemonDescriptorAndPortBinding(unittest.TestCase):
             "host": "127.0.0.1",
             "port": 24980,
             "service": "agy-model-bridge",
-            "version": "0.16.0",
+            "version": "0.16.1",
         }
         write_daemon_info(info_data, info_file=self.info_file)
         self.assertTrue(self.info_file.exists())
@@ -501,7 +572,7 @@ class TestDaemonDescriptorAndPortBinding(unittest.TestCase):
                 "host": "127.0.0.1",
                 "port": 24980,
                 "service": "agy-model-bridge",
-                "version": "0.16.0",
+                "version": "0.16.1",
             },
             info_file=self.info_file,
         )
@@ -529,7 +600,7 @@ class TestDaemonDescriptorAndPortBinding(unittest.TestCase):
                 "host": "127.0.0.1",
                 "port": 24980,
                 "service": "agy-model-bridge",
-                "version": "0.16.0",
+                "version": "0.16.1",
             },
             info_file=self.info_file,
         )
@@ -551,13 +622,13 @@ class TestDaemonDescriptorAndPortBinding(unittest.TestCase):
                 "host": "127.0.0.1",
                 "port": 24999,
                 "service": "agy-model-bridge",
-                "version": "0.16.0",
+                "version": "0.16.1",
             },
             info_file=self.info_file,
         )
         mock_fetch.return_value = {
             "service": "agy-model-bridge",
-            "version": "0.16.0",
+            "version": "0.16.1",
             "models_count": 5,
             "auth": {"status": "Valid"},
         }
@@ -660,7 +731,7 @@ class TestDaemonDescriptorAndPortBinding(unittest.TestCase):
                 "host": "127.0.0.1",
                 "port": 24980,
                 "service": "agy-model-bridge",
-                "version": "0.16.0",
+                "version": "0.16.1",
             },
             info_file=self.info_file,
         )

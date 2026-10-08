@@ -183,6 +183,7 @@ class TestDashboardRendering(unittest.TestCase):
         unescaped_html = html_lib.unescape(html)
         expected_codex_toml = (
             '# ~/.codex/config.toml\n'
+            '# Replace <YOUR_API_KEY> with key from ~/.agy-bridge/api_key\n'
             'model = "gemini-3.8-flash-high"\n'
             'model_provider = "agy"\n'
             'model_context_window = 1048576\n'
@@ -192,7 +193,7 @@ class TestDashboardRendering(unittest.TestCase):
             'base_url = "http://127.0.0.1:24980/v1"\n'
             'wire_api = "responses"\n'
             'requires_openai_auth = false\n'
-            'http_headers = { Authorization = "Bearer $(cat ~/.agy-bridge/api_key)" }'
+            'http_headers = { Authorization = "Bearer <YOUR_API_KEY>" }'
         )
         self.assertIn(expected_codex_toml, unescaped_html)
         self.assertIn('export ANTHROPIC_BASE_URL="http://127.0.0.1:24980"\nexport ANTHROPIC_AUTH_TOKEN="$(cat ~/.agy-bridge/api_key)"', unescaped_html)
@@ -287,6 +288,7 @@ class TestDashboardRendering(unittest.TestCase):
             by_id["codex"]["manual_snippet"]("127.0.0.1:24980"),
             (
                 '# ~/.codex/config.toml\n'
+                '# Replace <YOUR_API_KEY> with key from ~/.agy-bridge/api_key\n'
                 'model = "gemini-3.8-flash-high"\n'
                 'model_provider = "agy"\n'
                 'model_context_window = 1048576\n'
@@ -296,8 +298,18 @@ class TestDashboardRendering(unittest.TestCase):
                 'base_url = "http://127.0.0.1:24980/v1"\n'
                 'wire_api = "responses"\n'
                 'requires_openai_auth = false\n'
-                'http_headers = { Authorization = "Bearer $(cat ~/.agy-bridge/api_key)" }'
+                'http_headers = { Authorization = "Bearer <YOUR_API_KEY>" }'
             ),
+        )
+        # Shell expansion placeholder in api_key falls back to <YOUR_API_KEY> in TOML
+        self.assertIn(
+            'Authorization = "Bearer <YOUR_API_KEY>"',
+            by_id["codex"]["manual_snippet"]("127.0.0.1:24980", api_key='$(cat ~/.agy-bridge/api_key)'),
+        )
+        # Explicit key is preserved in TOML
+        self.assertIn(
+            'Authorization = "Bearer explicit-key-abc"',
+            by_id["codex"]["manual_snippet"]("127.0.0.1:24980", api_key='explicit-key-abc'),
         )
         self.assertEqual(by_id["codex"]["docs_url"], "https://github.com/openai/codex")
 

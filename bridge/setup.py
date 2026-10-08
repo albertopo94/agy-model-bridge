@@ -1070,43 +1070,43 @@ class OpenCodeConfigurator(ClientConfigurator):
                 "claude-sonnet-5-5-high": {
                     "name": "Claude Sonnet 5.5 (High - AGY)",
                     "limit": {
-                        "context": 1048576,
-                        "output": 65536,
+                        "context": 1000000,
+                        "output": 128000,
                     },
                 },
                 "claude-sonnet-5-5-medium": {
                     "name": "Claude Sonnet 5.5 (Medium - AGY)",
                     "limit": {
-                        "context": 1048576,
-                        "output": 65536,
+                        "context": 1000000,
+                        "output": 128000,
                     },
                 },
                 "claude-sonnet-5-5-low": {
                     "name": "Claude Sonnet 5.5 (Low - AGY)",
                     "limit": {
-                        "context": 1048576,
-                        "output": 65536,
+                        "context": 1000000,
+                        "output": 128000,
                     },
                 },
                 "claude-opus-5-5-high": {
                     "name": "Claude Opus 5.5 (High - AGY)",
                     "limit": {
-                        "context": 1048576,
-                        "output": 65536,
+                        "context": 1000000,
+                        "output": 128000,
                     },
                 },
                 "claude-opus-5-5-medium": {
                     "name": "Claude Opus 5.5 (Medium - AGY)",
                     "limit": {
-                        "context": 1048576,
-                        "output": 65536,
+                        "context": 1000000,
+                        "output": 128000,
                     },
                 },
                 "claude-opus-5-5-low": {
                     "name": "Claude Opus 5.5 (Low - AGY)",
                     "limit": {
-                        "context": 1048576,
-                        "output": 65536,
+                        "context": 1000000,
+                        "output": 128000,
                     },
                 },
             },
@@ -1293,8 +1293,8 @@ class OpenClawConfigurator(ClientConfigurator):
                     "reasoning": True,
                     "input": ["text"],
                     "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
-                    "contextWindow": 1048576,
-                    "maxTokens": 65536,
+                    "contextWindow": 1000000,
+                    "maxTokens": 128000,
                 },
                 {
                     "id": "claude-sonnet-5-5-medium",
@@ -1302,8 +1302,8 @@ class OpenClawConfigurator(ClientConfigurator):
                     "reasoning": True,
                     "input": ["text"],
                     "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
-                    "contextWindow": 1048576,
-                    "maxTokens": 65536,
+                    "contextWindow": 1000000,
+                    "maxTokens": 128000,
                 },
                 {
                     "id": "claude-sonnet-5-5-low",
@@ -1311,8 +1311,8 @@ class OpenClawConfigurator(ClientConfigurator):
                     "reasoning": True,
                     "input": ["text"],
                     "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
-                    "contextWindow": 1048576,
-                    "maxTokens": 65536,
+                    "contextWindow": 1000000,
+                    "maxTokens": 128000,
                 },
                 {
                     "id": "claude-opus-5-5-high",
@@ -1320,8 +1320,8 @@ class OpenClawConfigurator(ClientConfigurator):
                     "reasoning": True,
                     "input": ["text"],
                     "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
-                    "contextWindow": 1048576,
-                    "maxTokens": 65536,
+                    "contextWindow": 1000000,
+                    "maxTokens": 128000,
                 },
                 {
                     "id": "claude-opus-5-5-medium",
@@ -1329,8 +1329,8 @@ class OpenClawConfigurator(ClientConfigurator):
                     "reasoning": True,
                     "input": ["text"],
                     "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
-                    "contextWindow": 1048576,
-                    "maxTokens": 65536,
+                    "contextWindow": 1000000,
+                    "maxTokens": 128000,
                 },
                 {
                     "id": "claude-opus-5-5-low",
@@ -1338,8 +1338,8 @@ class OpenClawConfigurator(ClientConfigurator):
                     "reasoning": True,
                     "input": ["text"],
                     "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
-                    "contextWindow": 1048576,
-                    "maxTokens": 65536,
+                    "contextWindow": 1000000,
+                    "maxTokens": 128000,
                 },
                 {
                     "id": "gemini-2.5-pro",
@@ -1526,48 +1526,48 @@ DEFAULT_PI_AND_GENTLE_MODELS: list[dict[str, Any]] = [
         "name": "Claude Sonnet 5.5 (High - AGY)",
         "reasoning": True,
         "input": ["text"],
-        "contextWindow": 1048576,
-        "maxTokens": 65536,
+        "contextWindow": 1000000,
+        "maxTokens": 128000,
     },
     {
         "id": "claude-sonnet-5-5-medium",
         "name": "Claude Sonnet 5.5 (Medium - AGY)",
         "reasoning": True,
         "input": ["text"],
-        "contextWindow": 1048576,
-        "maxTokens": 65536,
+        "contextWindow": 1000000,
+        "maxTokens": 128000,
     },
     {
         "id": "claude-sonnet-5-5-low",
         "name": "Claude Sonnet 5.5 (Low - AGY)",
         "reasoning": True,
         "input": ["text"],
-        "contextWindow": 1048576,
-        "maxTokens": 65536,
+        "contextWindow": 1000000,
+        "maxTokens": 128000,
     },
     {
         "id": "claude-opus-5-5-high",
         "name": "Claude Opus 5.5 (High - AGY)",
         "reasoning": True,
         "input": ["text"],
-        "contextWindow": 1048576,
-        "maxTokens": 65536,
+        "contextWindow": 1000000,
+        "maxTokens": 128000,
     },
     {
         "id": "claude-opus-5-5-medium",
         "name": "Claude Opus 5.5 (Medium - AGY)",
         "reasoning": True,
         "input": ["text"],
-        "contextWindow": 1048576,
-        "maxTokens": 65536,
+        "contextWindow": 1000000,
+        "maxTokens": 128000,
     },
     {
         "id": "claude-opus-5-5-low",
         "name": "Claude Opus 5.5 (Low - AGY)",
         "reasoning": True,
         "input": ["text"],
-        "contextWindow": 1048576,
-        "maxTokens": 65536,
+        "contextWindow": 1000000,
+        "maxTokens": 128000,
     },
     {
         "id": "gemini-2.5-pro",
@@ -2404,7 +2404,11 @@ def uninstall(
                 and real_core != real_root
             ):
                 if resolved_core_dir.is_dir():
-                    shutil.rmtree(resolved_core_dir)
+                    if (
+                        (resolved_core_dir / "bridge" / "__init__.py").is_file()
+                        or (resolved_core_dir / ".agy-bridge-installed").is_file()
+                    ):
+                        shutil.rmtree(resolved_core_dir)
                 else:
                     resolved_core_dir.unlink()
         except OSError:
