@@ -140,7 +140,7 @@ class TestDaemonLifecycle(unittest.TestCase):
     @patch("bridge.daemon.webbrowser.open")
     @patch("bridge.daemon.check_server_healthy", return_value=True)
     @patch("bridge.daemon.subprocess.Popen")
-    def test_start_daemon_with_api_key_passes_env_and_persists_key_file_without_argv(self, mock_popen, mock_health, mock_browser):
+    def test_start_daemon_with_api_key_persists_key_file_without_argv_or_env(self, mock_popen, mock_health, mock_browser):
         mock_proc = MagicMock()
         mock_proc.pid = 44447
         mock_popen.return_value = mock_proc
@@ -161,16 +161,37 @@ class TestDaemonLifecycle(unittest.TestCase):
         self.assertNotIn("--api-key", cmd_args)
         self.assertNotIn("secret-token-xyz-123", cmd_args)
 
-        # Must pass AGY_API_KEY in child environment
+        # Must NEVER leak secret API key in child environment (zero environ exposure)
         call_kwargs = mock_popen.call_args[1]
         self.assertIn("env", call_kwargs)
-        self.assertEqual(call_kwargs["env"].get("AGY_API_KEY"), "secret-token-xyz-123")
+        self.assertNotIn("AGY_API_KEY", call_kwargs["env"])
 
         # Must persist key file in daemon directory with 0o600 permissions
         key_file = self.pid_file.parent / "api_key"
         self.assertTrue(key_file.exists())
         self.assertEqual(stat.S_IMODE(key_file.stat().st_mode), 0o600)
         self.assertEqual(key_file.read_text(encoding="utf-8").strip(), "secret-token-xyz-123")
+
+    @patch("bridge.daemon.webbrowser.open")
+    @patch("bridge.daemon.check_server_healthy", return_value=True)
+    @patch("bridge.daemon.subprocess.Popen")
+    def test_start_daemon_strips_ambient_agy_api_key_from_env(self, mock_popen, mock_health, mock_browser):
+        mock_proc = MagicMock()
+        mock_proc.pid = 44448
+        mock_popen.return_value = mock_proc
+
+        with patch.dict(os.environ, {"AGY_API_KEY": "leaked-ambient-key"}):
+            res = start_daemon(
+                port=24980,
+                host="127.0.0.1",
+                no_open=True,
+                pid_file=self.pid_file,
+                log_file=self.log_file,
+            )
+
+        self.assertEqual(res["status"], "started")
+        call_kwargs = mock_popen.call_args[1]
+        self.assertNotIn("AGY_API_KEY", call_kwargs["env"])
 
     @patch("bridge.daemon.check_server_healthy", return_value=True)
     @patch("bridge.daemon.subprocess.Popen")
@@ -315,6 +336,22 @@ class TestDaemonCLI(unittest.TestCase):
         self.assertEqual(code, 0)
         mock_stop.assert_called_once()
         self.assertIn("11111", out.getvalue())
+
+    @patch("bridge.__main__.stop_daemon")
+    def test_cli_stop_host_mismatch_exits_with_error(self, mock_stop):
+        import io
+        from bridge.__main__ import main
+        mock_stop.return_value = {
+            "status": "host_mismatch",
+            "error": "Daemon PID 99992 is running on host 127.0.0.1, not requested host 192.168.1.50.",
+        }
+        out = io.StringIO()
+        with patch("sys.stdout", out):
+            code = main(["stop", "--host", "192.168.1.50"])
+
+        self.assertEqual(code, 1)
+        mock_stop.assert_called_once_with(port=None, host="192.168.1.50")
+        self.assertIn("Error: Daemon PID 99992 is running on host 127.0.0.1, not requested host 192.168.1.50.", out.getvalue())
 
     @patch("bridge.__main__.get_daemon_status")
     def test_cli_status_dispatches(self, mock_status):
@@ -465,7 +502,7 @@ class TestHealthCheck(unittest.TestCase):
     def test_check_server_healthy_matches_valid_service_identity(self, mock_urlopen):
         resp = MagicMock()
         resp.status = 200
-        resp.read.return_value = b'{"status": "ok", "service": "agy-model-bridge", "version": "0.16.1"}'
+        resp.read.return_value = b'{"status": "ok", "service": "agy-model-bridge", "version": "0.17.0"}'
         resp.__enter__.return_value = resp
         mock_urlopen.return_value = resp
 
@@ -519,7 +556,7 @@ class TestDaemonDescriptorAndPortBinding(unittest.TestCase):
             "host": "127.0.0.1",
             "port": 24980,
             "service": "agy-model-bridge",
-            "version": "0.16.1",
+            "version": "0.17.0",
         }
         write_daemon_info(info_data, info_file=self.info_file)
         self.assertTrue(self.info_file.exists())
@@ -572,7 +609,7 @@ class TestDaemonDescriptorAndPortBinding(unittest.TestCase):
                 "host": "127.0.0.1",
                 "port": 24980,
                 "service": "agy-model-bridge",
-                "version": "0.16.1",
+                "version": "0.17.0",
             },
             info_file=self.info_file,
         )
@@ -600,7 +637,7 @@ class TestDaemonDescriptorAndPortBinding(unittest.TestCase):
                 "host": "127.0.0.1",
                 "port": 24980,
                 "service": "agy-model-bridge",
-                "version": "0.16.1",
+                "version": "0.17.0",
             },
             info_file=self.info_file,
         )
@@ -622,13 +659,13 @@ class TestDaemonDescriptorAndPortBinding(unittest.TestCase):
                 "host": "127.0.0.1",
                 "port": 24999,
                 "service": "agy-model-bridge",
-                "version": "0.16.1",
+                "version": "0.17.0",
             },
             info_file=self.info_file,
         )
         mock_fetch.return_value = {
             "service": "agy-model-bridge",
-            "version": "0.16.1",
+            "version": "0.17.0",
             "models_count": 5,
             "auth": {"status": "Valid"},
         }
@@ -731,7 +768,7 @@ class TestDaemonDescriptorAndPortBinding(unittest.TestCase):
                 "host": "127.0.0.1",
                 "port": 24980,
                 "service": "agy-model-bridge",
-                "version": "0.16.1",
+                "version": "0.17.0",
             },
             info_file=self.info_file,
         )
@@ -745,6 +782,49 @@ class TestDaemonDescriptorAndPortBinding(unittest.TestCase):
         mock_kill.assert_not_called()
         self.assertEqual(read_pid(self.pid_file), 99991)
         self.assertTrue(self.info_file.exists())
+
+    @patch("bridge.daemon.os.kill")
+    def test_stop_daemon_detects_host_mismatch(self, mock_kill):
+        write_pid(99992, pid_file=self.pid_file)
+        write_daemon_info(
+            {
+                "pid": 99992,
+                "host": "127.0.0.1",
+                "port": 24980,
+                "service": "agy-model-bridge",
+                "version": "0.17.0",
+            },
+            info_file=self.info_file,
+        )
+
+        with patch("bridge.daemon.is_pid_alive", return_value=True), patch("bridge.daemon.is_bridge_process", return_value=True):
+            res = stop_daemon(host="192.168.1.50", pid_file=self.pid_file, info_file=self.info_file)
+
+        self.assertEqual(res["status"], "host_mismatch")
+        self.assertIn("running on host 127.0.0.1, not requested host 192.168.1.50", res["error"])
+        # Should not kill or delete PID
+        mock_kill.assert_not_called()
+        self.assertEqual(read_pid(self.pid_file), 99992)
+        self.assertTrue(self.info_file.exists())
+
+    @patch("bridge.daemon.os.kill")
+    def test_stop_daemon_allows_wildcard_host_and_matching_host(self, mock_kill):
+        write_pid(99993, pid_file=self.pid_file)
+        write_daemon_info(
+            {
+                "pid": 99993,
+                "host": "127.0.0.1",
+                "port": 24980,
+                "service": "agy-model-bridge",
+                "version": "0.17.0",
+            },
+            info_file=self.info_file,
+        )
+
+        # 0.0.0.0 wildcard host should not trigger host_mismatch
+        with patch("bridge.daemon.is_pid_alive", side_effect=[True, False]), patch("bridge.daemon.is_bridge_process", return_value=True):
+            res = stop_daemon(host="0.0.0.0", pid_file=self.pid_file, info_file=self.info_file)
+        self.assertEqual(res["status"], "stopped")
 
 
 if __name__ == "__main__":

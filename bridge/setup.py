@@ -1109,6 +1109,27 @@ class OpenCodeConfigurator(ClientConfigurator):
                         "output": 128000,
                     },
                 },
+                "claude-haiku-5-5-high": {
+                    "name": "Claude Haiku 5.5 · High (AGY)",
+                    "limit": {
+                        "context": 1000000,
+                        "output": 128000,
+                    },
+                },
+                "claude-haiku-5-5-medium": {
+                    "name": "Claude Haiku 5.5 · Medium (AGY)",
+                    "limit": {
+                        "context": 1000000,
+                        "output": 128000,
+                    },
+                },
+                "claude-haiku-5-5-low": {
+                    "name": "Claude Haiku 5.5 · Low (AGY)",
+                    "limit": {
+                        "context": 1000000,
+                        "output": 128000,
+                    },
+                },
             },
         }
 
@@ -1342,6 +1363,33 @@ class OpenClawConfigurator(ClientConfigurator):
                     "maxTokens": 128000,
                 },
                 {
+                    "id": "claude-haiku-5-5-high",
+                    "name": "Claude Haiku 5.5 · High (AGY)",
+                    "reasoning": True,
+                    "input": ["text"],
+                    "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+                    "contextWindow": 1000000,
+                    "maxTokens": 128000,
+                },
+                {
+                    "id": "claude-haiku-5-5-medium",
+                    "name": "Claude Haiku 5.5 · Medium (AGY)",
+                    "reasoning": True,
+                    "input": ["text"],
+                    "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+                    "contextWindow": 1000000,
+                    "maxTokens": 128000,
+                },
+                {
+                    "id": "claude-haiku-5-5-low",
+                    "name": "Claude Haiku 5.5 · Low (AGY)",
+                    "reasoning": True,
+                    "input": ["text"],
+                    "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+                    "contextWindow": 1000000,
+                    "maxTokens": 128000,
+                },
+                {
                     "id": "gemini-2.5-pro",
                     "name": "Gemini 2.5 Pro",
                     "reasoning": False,
@@ -1564,6 +1612,30 @@ DEFAULT_PI_AND_GENTLE_MODELS: list[dict[str, Any]] = [
     {
         "id": "claude-opus-5-5-low",
         "name": "Claude Opus 5.5 (Low - AGY)",
+        "reasoning": True,
+        "input": ["text"],
+        "contextWindow": 1000000,
+        "maxTokens": 128000,
+    },
+    {
+        "id": "claude-haiku-5-5-high",
+        "name": "Claude Haiku 5.5 · High (AGY)",
+        "reasoning": True,
+        "input": ["text"],
+        "contextWindow": 1000000,
+        "maxTokens": 128000,
+    },
+    {
+        "id": "claude-haiku-5-5-medium",
+        "name": "Claude Haiku 5.5 · Medium (AGY)",
+        "reasoning": True,
+        "input": ["text"],
+        "contextWindow": 1000000,
+        "maxTokens": 128000,
+    },
+    {
+        "id": "claude-haiku-5-5-low",
+        "name": "Claude Haiku 5.5 · Low (AGY)",
         "reasoning": True,
         "input": ["text"],
         "contextWindow": 1000000,
@@ -2475,17 +2547,28 @@ def update_installation(
     else:
         state_dir_env = os.environ.get("AGY_BRIDGE_STATE_DIR")
         base_state = Path(state_dir_env) if state_dir_env else Path.home() / ".agy-bridge"
-        default_dir = base_state / "core"
-        if (default_dir / ".git").exists():
-            target_dir = default_dir
-        elif (Path.cwd() / ".git").exists():
-            target_dir = Path.cwd()
+        persisted_core = base_state / ".core_dir"
+        if persisted_core.is_file():
+            try:
+                candidate = persisted_core.read_text(encoding="utf-8").strip()
+                target_dir = Path(candidate) if candidate else None
+            except OSError:
+                target_dir = None
         else:
-            repo_root = Path(__file__).resolve().parent.parent
-            if (repo_root / ".git").exists():
-                target_dir = repo_root
-            else:
+            target_dir = None
+
+        if target_dir is None:
+            default_dir = base_state / "core"
+            if (default_dir / ".git").exists():
                 target_dir = default_dir
+            elif (Path.cwd() / ".git").exists():
+                target_dir = Path.cwd()
+            else:
+                repo_root = Path(__file__).resolve().parent.parent
+                if (repo_root / ".git").exists():
+                    target_dir = repo_root
+                else:
+                    target_dir = default_dir
 
     if not target_dir.exists() or not (target_dir / ".git").exists():
         return {

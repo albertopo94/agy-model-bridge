@@ -1307,6 +1307,67 @@ class TestBuildThinkingConfig(unittest.TestCase):
                 config = build_thinking_config("gemini-3.1-pro-high", payload)
                 self.assertIsNone(config)
 
+    def test_payload_override_output_config_effort(self):
+        for effort, expected in (
+            ("high", "HIGH"),
+            ("max", "HIGH"),
+            ("medium", "MEDIUM"),
+            ("low", "LOW"),
+        ):
+            with self.subTest(effort=effort):
+                payload = {"output_config": {"effort": effort}}
+                config = build_thinking_config("claude-sonnet-5-5", payload)
+                self.assertEqual(config, {"thinkingLevel": expected})
+
+    def test_payload_override_output_config_camel_case(self):
+        payload = {"outputConfig": {"effort": "medium"}}
+        config = build_thinking_config("claude-sonnet-5-5", payload)
+        self.assertEqual(config, {"thinkingLevel": "MEDIUM"})
+
+    def test_payload_override_thinking_type_between_tools(self):
+        # Without output_config effort, between_tools defaults to LOW
+        payload = {"thinking": {"type": "between_tools"}}
+        config = build_thinking_config("claude-sonnet-5-5", payload)
+        self.assertEqual(config, {"thinkingLevel": "LOW"})
+
+        # With output_config effort, effort determines thinkingLevel
+        payload_med = {
+            "thinking": {"type": "between_tools"},
+            "output_config": {"effort": "medium"},
+        }
+        config_med = build_thinking_config("claude-sonnet-5-5", payload_med)
+        self.assertEqual(config_med, {"thinkingLevel": "MEDIUM"})
+
+        payload_high = {
+            "thinking": {"type": "between_tools"},
+            "output_config": {"effort": "high"},
+        }
+        config_high = build_thinking_config("claude-sonnet-5-5", payload_high)
+        self.assertEqual(config_high, {"thinkingLevel": "HIGH"})
+
+        payload_low = {
+            "thinking": {"type": "between_tools"},
+            "output_config": {"effort": "low"},
+        }
+        config_low = build_thinking_config("claude-sonnet-5-5", payload_low)
+        self.assertEqual(config_low, {"thinkingLevel": "LOW"})
+
+    def test_payload_override_thinking_type_adaptive_with_output_config(self):
+        payload = {
+            "thinking": {"type": "adaptive"},
+            "output_config": {"effort": "high"},
+        }
+        config = build_thinking_config("claude-sonnet-5-5", payload)
+        self.assertEqual(config, {"thinkingLevel": "HIGH"})
+
+    def test_payload_thinking_config_precedence_over_output_config(self):
+        payload = {
+            "thinkingConfig": {"thinkingLevel": "LOW"},
+            "output_config": {"effort": "high"},
+        }
+        config = build_thinking_config("claude-sonnet-5-5", payload)
+        self.assertEqual(config, {"thinkingLevel": "LOW"})
+
     def test_default_thinking_budget_clamped_with_max_tokens(self):
         # Default budget 2048 clamped to max(0, max_tokens - 128)
         config1 = build_thinking_config("claude-opus-4-6-thinking", {"max_tokens": 256})
@@ -1479,6 +1540,46 @@ class TestResolveModelAndThinking(unittest.TestCase):
         )
         self.assertEqual(model3, "claude-sonnet-5-5")
         self.assertEqual(thinking3, {"thinkingBudget": 1024})
+
+    def test_claude_5_5_haiku_tiers_aliasing(self):
+        cases = [
+            ("claude-haiku-5-5-high", "claude-haiku-5-5", {"thinkingLevel": "HIGH"}),
+            ("claude-haiku-5-5-medium", "claude-haiku-5-5", {"thinkingLevel": "MEDIUM"}),
+            ("claude-haiku-5-5-low", "claude-haiku-5-5", {"thinkingLevel": "LOW"}),
+            ("claude-haiku-5-5", "claude-haiku-5-5", None),
+            ("CLAUDE-HAIKU-5-5-HIGH", "claude-haiku-5-5", {"thinkingLevel": "HIGH"}),
+            ("CLAUDE-HAIKU-5-5", "claude-haiku-5-5", None),
+        ]
+        for raw_model, exp_model, exp_thinking in cases:
+            model, thinking = resolve_model_and_thinking(raw_model, {})
+            self.assertEqual(model, exp_model, f"Failed model resolution for {raw_model}")
+            self.assertEqual(thinking, exp_thinking, f"Failed thinking resolution for {raw_model}")
+
+    def test_claude_5_5_haiku_output_config_and_thinking_overrides(self):
+        model, thinking = resolve_model_and_thinking(
+            "claude-haiku-5-5", {"output_config": {"effort": "high"}}
+        )
+        self.assertEqual(model, "claude-haiku-5-5")
+        self.assertEqual(thinking, {"thinkingLevel": "HIGH"})
+
+        model2, thinking2 = resolve_model_and_thinking(
+            "claude-haiku-5-5-high", {"output_config": {"effort": "low"}}
+        )
+        self.assertEqual(model2, "claude-haiku-5-5")
+        self.assertEqual(thinking2, {"thinkingLevel": "LOW"})
+
+        model3, thinking3 = resolve_model_and_thinking(
+            "claude-haiku-5-5", {"thinking": {"type": "between_tools"}}
+        )
+        self.assertEqual(model3, "claude-haiku-5-5")
+        self.assertEqual(thinking3, {"thinkingLevel": "LOW"})
+
+        model4, thinking4 = resolve_model_and_thinking(
+            "claude-haiku-5-5",
+            {"thinking": {"type": "between_tools"}, "output_config": {"effort": "medium"}},
+        )
+        self.assertEqual(model4, "claude-haiku-5-5")
+        self.assertEqual(thinking4, {"thinkingLevel": "MEDIUM"})
 
     def test_unaliased_model_preserved(self):
         model, thinking = resolve_model_and_thinking("gemini-2.5-pro", {})

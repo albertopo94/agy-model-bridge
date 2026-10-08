@@ -279,6 +279,9 @@ def main(argv: list[str] | None = None) -> int:
         elif res.get("status") == "port_mismatch":
             print(f"Error: {res.get('error')}")
             return 1
+        elif res.get("status") == "host_mismatch":
+            print(f"Error: {res.get('error')}")
+            return 1
         else:
             print(t("daemon_not_running"))
             return 0

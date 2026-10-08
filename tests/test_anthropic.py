@@ -167,6 +167,65 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
         self.assertEqual(gen_config.get("thinkingConfig"), {"thinkingLevel": "HIGH"})
         self.assertNotIn("type", gen_config.get("thinkingConfig", {}))
 
+    def test_anthropic_output_config_effort(self):
+        for effort, expected in (
+            ("high", "HIGH"),
+            ("max", "HIGH"),
+            ("medium", "MEDIUM"),
+            ("low", "LOW"),
+        ):
+            with self.subTest(effort=effort):
+                payload = {
+                    "model": "claude-sonnet-5-5",
+                    "messages": [{"role": "user", "content": "hola"}],
+                    "output_config": {"effort": effort},
+                }
+                _, _, _, gen_config, _ = anthropic_to_cloudcode_request(payload, "test-project")
+                self.assertIsNotNone(gen_config)
+                self.assertEqual(gen_config.get("thinkingConfig"), {"thinkingLevel": expected})
+
+    def test_anthropic_thinking_between_tools(self):
+        # Default between_tools gives LOW
+        payload_default = {
+            "model": "claude-sonnet-5-5",
+            "messages": [{"role": "user", "content": "hola"}],
+            "thinking": {"type": "between_tools"},
+        }
+        _, _, _, gen_config_def, _ = anthropic_to_cloudcode_request(payload_default, "test-project")
+        self.assertIsNotNone(gen_config_def)
+        self.assertEqual(gen_config_def.get("thinkingConfig"), {"thinkingLevel": "LOW"})
+
+        # between_tools with output_config effort
+        payload_med = {
+            "model": "claude-sonnet-5-5",
+            "messages": [{"role": "user", "content": "hola"}],
+            "thinking": {"type": "between_tools"},
+            "output_config": {"effort": "medium"},
+        }
+        _, _, _, gen_config_med, _ = anthropic_to_cloudcode_request(payload_med, "test-project")
+        self.assertIsNotNone(gen_config_med)
+        self.assertEqual(gen_config_med.get("thinkingConfig"), {"thinkingLevel": "MEDIUM"})
+
+    def test_anthropic_haiku_5_5_models(self):
+        for model_name, expected_thinking in (
+            ("claude-haiku-5-5-high", {"thinkingLevel": "HIGH"}),
+            ("claude-haiku-5-5-medium", {"thinkingLevel": "MEDIUM"}),
+            ("claude-haiku-5-5-low", {"thinkingLevel": "LOW"}),
+            ("claude-haiku-5-5", None),
+        ):
+            with self.subTest(model=model_name):
+                payload = {
+                    "model": model_name,
+                    "messages": [{"role": "user", "content": "hola"}],
+                }
+                res_model, _, _, gen_config, _ = anthropic_to_cloudcode_request(payload, "test-project")
+                self.assertEqual(res_model, "claude-haiku-5-5")
+                if expected_thinking is not None:
+                    self.assertIsNotNone(gen_config)
+                    self.assertEqual(gen_config.get("thinkingConfig"), expected_thinking)
+                else:
+                    self.assertTrue(gen_config is None or "thinkingConfig" not in gen_config)
+
     def test_user_content_as_blocks_and_multi_turn(self):
         payload = {
             "model": "gemini-2.5-pro",

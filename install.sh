@@ -100,6 +100,12 @@ else
 fi
 
 # 4. Create binary launcher wrapper in ~/.local/bin
+mkdir -p "$STATE_DIR"
+if [ "$INSTALL_DIR" != "$STATE_DIR/core" ]; then
+    printf "%s\n" "$INSTALL_DIR" > "$STATE_DIR/.core_dir"
+    chmod 600 "$STATE_DIR/.core_dir"
+fi
+
 mkdir -p "$BIN_DIR"
 LAUNCHER="$BIN_DIR/agy-bridge"
 
@@ -107,6 +113,9 @@ cat <<'EOF' > "$LAUNCHER"
 #!/usr/bin/env bash
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATE_DIR="${AGY_BRIDGE_STATE_DIR:-$HOME/.agy-bridge}"
+if [ -z "$AGY_BRIDGE_CORE_DIR" ] && [ -f "$STATE_DIR/.core_dir" ]; then
+    AGY_BRIDGE_CORE_DIR="$(cat "$STATE_DIR/.core_dir")"
+fi
 CORE_DIR="${AGY_BRIDGE_CORE_DIR:-${AGY_BRIDGE_DIR:-$STATE_DIR/core}}"
 export PYTHONPATH="$CORE_DIR:$PYTHONPATH"
 exec python3 -u -m bridge "$@"

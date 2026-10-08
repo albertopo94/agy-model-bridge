@@ -207,7 +207,7 @@ def test_chat_streaming(base_url: str, model: str, api_key: str = "local-bridge"
 
 
 def test_anthropic_non_streaming(base_url: str, model: str, api_key: str = "local-bridge") -> None:
-    print(f"[6/9] Verifying POST /v1/messages (stream=False, model='{model}') ... ", end="", flush=True)
+    print(f"[6/9] Verifying POST /v1/messages (stream=False, model='{model}', output_config.effort='high') ... ", end="", flush=True)
     url = f"{base_url}/v1/messages"
     payload = {
         "model": model,
@@ -215,6 +215,7 @@ def test_anthropic_non_streaming(base_url: str, model: str, api_key: str = "loca
             {"role": "user", "content": "Respond with the word 'ANTHROPIC' only."}
         ],
         "max_tokens": 100,
+        "output_config": {"effort": "high"},
         "stream": False,
     }
     data = json.dumps(payload).encode("utf-8")

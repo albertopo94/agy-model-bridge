@@ -316,8 +316,7 @@ def start_daemon(
             bridge.security.write_api_key(api_key, daemon_dir=target_pid_file.parent)
 
         child_env = os.environ.copy()
-        if api_key:
-            child_env["AGY_API_KEY"] = api_key
+        child_env.pop("AGY_API_KEY", None)
 
         with open(target_log_file, "a", encoding="utf-8") as out:
             proc = subprocess.Popen(
@@ -413,12 +412,19 @@ def stop_daemon(
         remove_daemon_info(info_file=target_info_file)
         return {"status": "not_running", "pid": None}
 
+    info = read_daemon_info(info_file=target_info_file)
     if port is not None:
-        info = read_daemon_info(info_file=target_info_file)
         if info and info.get("port") is not None and info.get("port") != port:
             return {
                 "status": "port_mismatch",
                 "error": f"Daemon PID {pid} is running on port {info.get('port')}, not requested port {port}.",
+            }
+
+    if host is not None and info:
+        if info.get("host") is not None and info.get("host") != host and host not in ("0.0.0.0", ""):
+            return {
+                "status": "host_mismatch",
+                "error": f"Daemon PID {pid} is running on host {info.get('host')}, not requested host {host}.",
             }
 
     try:

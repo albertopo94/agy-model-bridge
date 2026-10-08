@@ -335,6 +335,19 @@ def build_thinking_config(model: str, payload: dict[str, Any]) -> dict[str, Any]
         if sanitized:
             return sanitized
 
+    output_cfg = payload.get("output_config") or payload.get("outputConfig")
+    output_effort: str | None = None
+    if isinstance(output_cfg, dict):
+        effort_val = output_cfg.get("effort")
+        if effort_val:
+            effort_str = str(effort_val).strip().lower()
+            if effort_str in ("high", "max"):
+                output_effort = "HIGH"
+            elif effort_str == "medium":
+                output_effort = "MEDIUM"
+            elif effort_str == "low":
+                output_effort = "LOW"
+
     if "thinking" in payload:
         val = payload["thinking"]
         if isinstance(val, dict):
@@ -355,9 +368,17 @@ def build_thinking_config(model: str, payload: dict[str, Any]) -> dict[str, Any]
                     pass
             if "thinkingLevel" in val and val["thinkingLevel"] is not None:
                 return {"thinkingLevel": str(val["thinkingLevel"]).upper()}
+            if t_type == "between_tools":
+                if output_effort is not None:
+                    return {"thinkingLevel": output_effort}
+                return {"thinkingLevel": "LOW"}
             if t_type in ("adaptive", "auto"):
+                if output_effort is not None:
+                    return {"thinkingLevel": output_effort}
                 return _tiered_or_budget()
             if t_type == "enabled":
+                if output_effort is not None:
+                    return {"thinkingLevel": output_effort}
                 return _tiered_or_budget()
             # If any other dict, only extract thinkingBudget or thinkingLevel
             sanitized_thinking: dict[str, Any] = {}
@@ -370,11 +391,20 @@ def build_thinking_config(model: str, payload: dict[str, Any]) -> dict[str, Any]
                     pass
             if "thinkingLevel" in val and val["thinkingLevel"] is not None:
                 sanitized_thinking["thinkingLevel"] = str(val["thinkingLevel"]).upper()
-            return sanitized_thinking if sanitized_thinking else None
+            if sanitized_thinking:
+                return sanitized_thinking
+            if output_effort is not None:
+                return {"thinkingLevel": output_effort}
+            return None
         elif val is False:
             return None
         elif val is True:
+            if output_effort is not None:
+                return {"thinkingLevel": output_effort}
             return _tiered_or_budget()
+
+    if output_effort is not None:
+        return {"thinkingLevel": output_effort}
 
     effort = None
     if "reasoning_effort" in payload and payload["reasoning_effort"] is not None:
@@ -456,9 +486,24 @@ def resolve_model_and_thinking(
     elif m == "claude-opus-5-5":
         resolved_model = "claude-opus-5-5"
         default_thinking = None
+    elif m == "claude-haiku-5-5-high":
+        resolved_model = "claude-haiku-5-5"
+        default_thinking = {"thinkingLevel": "HIGH"}
+    elif m == "claude-haiku-5-5-medium":
+        resolved_model = "claude-haiku-5-5"
+        default_thinking = {"thinkingLevel": "MEDIUM"}
+    elif m == "claude-haiku-5-5-low":
+        resolved_model = "claude-haiku-5-5"
+        default_thinking = {"thinkingLevel": "LOW"}
+    elif m == "claude-haiku-5-5":
+        resolved_model = "claude-haiku-5-5"
+        default_thinking = None
     else:
         resolved_model = raw_model
         default_thinking = None
+
+    output_cfg = payload.get("output_config") or payload.get("outputConfig")
+    has_output_effort = isinstance(output_cfg, dict) and bool(output_cfg.get("effort"))
 
     has_payload_override = (
         ("thinkingConfig" in payload and isinstance(payload["thinkingConfig"], dict))
@@ -466,6 +511,7 @@ def resolve_model_and_thinking(
         or "reasoning_effort" in payload
         or "effort" in payload
         or "thinking_budget" in payload
+        or has_output_effort
     )
 
     if has_payload_override:

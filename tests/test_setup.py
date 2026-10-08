@@ -1361,7 +1361,7 @@ class TestUninstall(unittest.TestCase):
     def test_uninstall_removes_custom_core_dir_with_installed_sentinel_signature(self):
         custom_core = self.root / "custom_core_installed"
         custom_core.mkdir(parents=True, exist_ok=True)
-        (custom_core / ".agy-bridge-installed").write_text("v0.16.1\n", encoding="utf-8")
+        (custom_core / ".agy-bridge-installed").write_text("v0.17.0\n", encoding="utf-8")
 
         with unittest.mock.patch.dict(os.environ, {"AGY_BRIDGE_CORE_DIR": str(custom_core)}):
             uninstall(
@@ -1544,7 +1544,7 @@ class TestUpdateInstallation(unittest.TestCase):
 
         self.assertEqual(result["status"], "updated")
         self.assertTrue(result["restarted_daemon"])
-        self.assertEqual(result["version"], "0.16.1")
+        self.assertEqual(result["version"], "0.17.0")
         mock_run.assert_called_once_with(
             ["git", "-C", str(self.repo_dir), "pull", "--ff-only"],
             capture_output=True,
@@ -1724,6 +1724,37 @@ class TestUpdateInstallation(unittest.TestCase):
             text=True,
         )
 
+    @unittest.mock.patch("bridge.setup.subprocess.run")
+    def test_update_installation_discovers_core_dir_from_state_file(self, mock_run):
+        mock_run.return_value = unittest.mock.MagicMock(
+            returncode=0,
+            stdout="Already up to date.\n",
+            stderr="",
+        )
+        fake_state = Path(self.temp_dir.name) / "fake_state"
+        fake_state.mkdir(parents=True)
+        custom_core = Path(self.temp_dir.name) / "custom_persisted_core"
+        custom_core.mkdir(parents=True)
+        (custom_core / ".git").mkdir()
+
+        # Write custom core path into .core_dir in base state directory
+        core_file = fake_state / ".core_dir"
+        core_file.write_text(str(custom_core), encoding="utf-8")
+
+        env_copy = os.environ.copy()
+        env_copy["AGY_BRIDGE_STATE_DIR"] = str(fake_state)
+        env_copy.pop("AGY_BRIDGE_CORE_DIR", None)
+
+        with unittest.mock.patch.dict(os.environ, env_copy, clear=True):
+            result = update_installation(core_dir=None)
+
+        self.assertEqual(result["status"], "already_up_to_date")
+        mock_run.assert_called_once_with(
+            ["git", "-C", str(custom_core), "pull", "--ff-only"],
+            capture_output=True,
+            text=True,
+        )
+
 
 class TestCLIUpdateAndVersion(unittest.TestCase):
     @unittest.mock.patch("bridge.__main__.update_installation")
@@ -1802,7 +1833,7 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main([flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.16.1")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.17.0")
 
     def test_cli_subcommand_version_flags(self):
         from bridge.__main__ import main
@@ -1814,19 +1845,19 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main(["update", flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.16.1")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.17.0")
 
     def test_version_unification(self):
         import bridge
         from pathlib import Path
         import re
 
-        self.assertEqual(bridge.__version__, "0.16.1")
+        self.assertEqual(bridge.__version__, "0.17.0")
         pyproject_path = Path(__file__).resolve().parent.parent / "pyproject.toml"
         pyproject_text = pyproject_path.read_text(encoding="utf-8")
         match = re.search(r'version\s*=\s*"([^"]+)"', pyproject_text)
         self.assertIsNotNone(match)
-        self.assertEqual(match.group(1), "0.16.1")
+        self.assertEqual(match.group(1), "0.17.0")
 
 
 class TestClientConfiguratorRegistry(unittest.TestCase):
@@ -2550,6 +2581,9 @@ class TestOpenCodeConfigurator(unittest.TestCase):
             ("claude-opus-5-5-high", "Claude Opus 5.5 (High - AGY)"),
             ("claude-opus-5-5-medium", "Claude Opus 5.5 (Medium - AGY)"),
             ("claude-opus-5-5-low", "Claude Opus 5.5 (Low - AGY)"),
+            ("claude-haiku-5-5-high", "Claude Haiku 5.5 · High (AGY)"),
+            ("claude-haiku-5-5-medium", "Claude Haiku 5.5 · Medium (AGY)"),
+            ("claude-haiku-5-5-low", "Claude Haiku 5.5 · Low (AGY)"),
         ]
         for m_id, m_name in claude_5_5_models:
             self.assertIn(m_id, agy_conf["models"])
@@ -2871,7 +2905,7 @@ class TestOpenClawConfigurator(unittest.TestCase):
         self.assertEqual(agy_provider["apiKey"], get_active_api_key())
         self.assertEqual(agy_provider["api"], "openai-completions")
         self.assertEqual(agy_provider["headers"], {"User-Agent": "openclaw"})
-        self.assertEqual(len(agy_provider["models"]), 9)
+        self.assertEqual(len(agy_provider["models"]), 12)
 
         expected_models = [
             {
@@ -2931,6 +2965,33 @@ class TestOpenClawConfigurator(unittest.TestCase):
             {
                 "id": "claude-opus-5-5-low",
                 "name": "Claude Opus 5.5 (Low - AGY)",
+                "reasoning": True,
+                "input": ["text"],
+                "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+                "contextWindow": 1000000,
+                "maxTokens": 128000,
+            },
+            {
+                "id": "claude-haiku-5-5-high",
+                "name": "Claude Haiku 5.5 · High (AGY)",
+                "reasoning": True,
+                "input": ["text"],
+                "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+                "contextWindow": 1000000,
+                "maxTokens": 128000,
+            },
+            {
+                "id": "claude-haiku-5-5-medium",
+                "name": "Claude Haiku 5.5 · Medium (AGY)",
+                "reasoning": True,
+                "input": ["text"],
+                "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+                "contextWindow": 1000000,
+                "maxTokens": 128000,
+            },
+            {
+                "id": "claude-haiku-5-5-low",
+                "name": "Claude Haiku 5.5 · Low (AGY)",
                 "reasoning": True,
                 "input": ["text"],
                 "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
@@ -3485,7 +3546,7 @@ class TestPiConfigurator(unittest.TestCase):
         self.assertEqual(agy["headers"], {"User-Agent": "pi-coding-agent"})
 
         models = agy["models"]
-        self.assertEqual(len(models), 10)
+        self.assertEqual(len(models), 13)
         expected_ids = [
             "gemini-3.8-flash-high",
             "gemini-3.8",
@@ -3495,6 +3556,9 @@ class TestPiConfigurator(unittest.TestCase):
             "claude-opus-5-5-high",
             "claude-opus-5-5-medium",
             "claude-opus-5-5-low",
+            "claude-haiku-5-5-high",
+            "claude-haiku-5-5-medium",
+            "claude-haiku-5-5-low",
             "gemini-2.5-pro",
             "gemini-2.5-flash",
         ]
@@ -3507,8 +3571,11 @@ class TestPiConfigurator(unittest.TestCase):
         self.assertEqual(models[5]["name"], "Claude Opus 5.5 (High - AGY)")
         self.assertEqual(models[6]["name"], "Claude Opus 5.5 (Medium - AGY)")
         self.assertEqual(models[7]["name"], "Claude Opus 5.5 (Low - AGY)")
-        self.assertEqual(models[8]["name"], "Gemini 2.5 Pro (AGY)")
-        self.assertEqual(models[9]["name"], "Gemini 2.5 Flash (AGY)")
+        self.assertEqual(models[8]["name"], "Claude Haiku 5.5 · High (AGY)")
+        self.assertEqual(models[9]["name"], "Claude Haiku 5.5 · Medium (AGY)")
+        self.assertEqual(models[10]["name"], "Claude Haiku 5.5 · Low (AGY)")
+        self.assertEqual(models[11]["name"], "Gemini 2.5 Pro (AGY)")
+        self.assertEqual(models[12]["name"], "Gemini 2.5 Flash (AGY)")
         for m in models:
             if m["id"] in ("gemini-2.5-pro", "gemini-2.5-flash"):
                 self.assertFalse(m["reasoning"])
@@ -3521,6 +3588,24 @@ class TestPiConfigurator(unittest.TestCase):
             else:
                 self.assertEqual(m["contextWindow"], 1048576)
                 self.assertEqual(m["maxTokens"], 65536)
+
+    def test_default_pi_and_gentle_models_contains_claude_haiku_5_5(self):
+        from bridge.setup import DEFAULT_PI_AND_GENTLE_MODELS
+
+        model_map = {m["id"]: m for m in DEFAULT_PI_AND_GENTLE_MODELS}
+        expected = [
+            ("claude-haiku-5-5-high", "Claude Haiku 5.5 · High (AGY)"),
+            ("claude-haiku-5-5-medium", "Claude Haiku 5.5 · Medium (AGY)"),
+            ("claude-haiku-5-5-low", "Claude Haiku 5.5 · Low (AGY)"),
+        ]
+        for m_id, m_name in expected:
+            self.assertIn(m_id, model_map)
+            item = model_map[m_id]
+            self.assertEqual(item["name"], m_name)
+            self.assertTrue(item["reasoning"])
+            self.assertEqual(item["contextWindow"], 1000000)
+            self.assertEqual(item["maxTokens"], 128000)
+            self.assertEqual(item["input"], ["text"])
 
     def test_setup_with_port(self):
         target = self.dir_path / "models.json"
@@ -4098,7 +4183,7 @@ class TestGentleShellConfigurator(unittest.TestCase):
         self.assertEqual(agy["headers"], {"User-Agent": "gentle-shell"})
 
         models = agy["models"]
-        self.assertEqual(len(models), 10)
+        self.assertEqual(len(models), 13)
         expected_ids = [
             "gemini-3.8-flash-high",
             "gemini-3.8",
@@ -4108,6 +4193,9 @@ class TestGentleShellConfigurator(unittest.TestCase):
             "claude-opus-5-5-high",
             "claude-opus-5-5-medium",
             "claude-opus-5-5-low",
+            "claude-haiku-5-5-high",
+            "claude-haiku-5-5-medium",
+            "claude-haiku-5-5-low",
             "gemini-2.5-pro",
             "gemini-2.5-flash",
         ]
@@ -4120,8 +4208,11 @@ class TestGentleShellConfigurator(unittest.TestCase):
         self.assertEqual(models[5]["name"], "Claude Opus 5.5 (High - AGY)")
         self.assertEqual(models[6]["name"], "Claude Opus 5.5 (Medium - AGY)")
         self.assertEqual(models[7]["name"], "Claude Opus 5.5 (Low - AGY)")
-        self.assertEqual(models[8]["name"], "Gemini 2.5 Pro (AGY)")
-        self.assertEqual(models[9]["name"], "Gemini 2.5 Flash (AGY)")
+        self.assertEqual(models[8]["name"], "Claude Haiku 5.5 · High (AGY)")
+        self.assertEqual(models[9]["name"], "Claude Haiku 5.5 · Medium (AGY)")
+        self.assertEqual(models[10]["name"], "Claude Haiku 5.5 · Low (AGY)")
+        self.assertEqual(models[11]["name"], "Gemini 2.5 Pro (AGY)")
+        self.assertEqual(models[12]["name"], "Gemini 2.5 Flash (AGY)")
         for m in models:
             if m["id"] in ("gemini-2.5-pro", "gemini-2.5-flash"):
                 self.assertFalse(m["reasoning"])
