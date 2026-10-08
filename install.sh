@@ -104,6 +104,8 @@ mkdir -p "$STATE_DIR"
 if [ "$INSTALL_DIR" != "$STATE_DIR/core" ]; then
     printf "%s\n" "$INSTALL_DIR" > "$STATE_DIR/.core_dir"
     chmod 600 "$STATE_DIR/.core_dir"
+else
+    rm -f "$STATE_DIR/.core_dir"
 fi
 
 mkdir -p "$BIN_DIR"

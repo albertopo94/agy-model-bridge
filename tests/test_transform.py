@@ -1250,6 +1250,16 @@ class TestBuildThinkingConfig(unittest.TestCase):
         config = build_thinking_config("gemini-3.1-pro-high", payload)
         self.assertIsNone(config)
 
+    def test_thinking_disabled_claude_returns_low(self):
+        payload = {"thinking": {"type": "disabled"}}
+        config = build_thinking_config("claude-sonnet-5-5", payload)
+        self.assertEqual(config, {"thinkingLevel": "LOW"})
+
+    def test_thinking_disabled_gemini_returns_none(self):
+        payload = {"thinking": {"type": "disabled"}}
+        config = build_thinking_config("gemini-2.5-pro", payload)
+        self.assertIsNone(config)
+
     def test_payload_override_thinking_type_enabled(self):
         payload = {"thinking": {"type": "enabled", "budget_tokens": 1024}}
         config = build_thinking_config("gemini-2.5-pro", payload)
@@ -1310,6 +1320,7 @@ class TestBuildThinkingConfig(unittest.TestCase):
     def test_payload_override_output_config_effort(self):
         for effort, expected in (
             ("high", "HIGH"),
+            ("xhigh", "HIGH"),
             ("max", "HIGH"),
             ("medium", "MEDIUM"),
             ("low", "LOW"),
@@ -1318,6 +1329,16 @@ class TestBuildThinkingConfig(unittest.TestCase):
                 payload = {"output_config": {"effort": effort}}
                 config = build_thinking_config("claude-sonnet-5-5", payload)
                 self.assertEqual(config, {"thinkingLevel": expected})
+
+    def test_output_config_effort_xhigh(self):
+        payload = {"output_config": {"effort": "xhigh"}}
+        config = build_thinking_config("claude-sonnet-5-5", payload)
+        self.assertEqual(config, {"thinkingLevel": "HIGH"})
+
+    def test_output_config_effort_max(self):
+        payload = {"output_config": {"effort": "max"}}
+        config = build_thinking_config("claude-sonnet-5-5", payload)
+        self.assertEqual(config, {"thinkingLevel": "HIGH"})
 
     def test_payload_override_output_config_camel_case(self):
         payload = {"outputConfig": {"effort": "medium"}}

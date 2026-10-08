@@ -2,6 +2,7 @@ import json
 import os
 import re
 import stat
+import subprocess
 import tempfile
 import unittest
 import unittest.mock
@@ -1361,7 +1362,7 @@ class TestUninstall(unittest.TestCase):
     def test_uninstall_removes_custom_core_dir_with_installed_sentinel_signature(self):
         custom_core = self.root / "custom_core_installed"
         custom_core.mkdir(parents=True, exist_ok=True)
-        (custom_core / ".agy-bridge-installed").write_text("v0.17.0\n", encoding="utf-8")
+        (custom_core / ".agy-bridge-installed").write_text("v0.17.1\n", encoding="utf-8")
 
         with unittest.mock.patch.dict(os.environ, {"AGY_BRIDGE_CORE_DIR": str(custom_core)}):
             uninstall(
@@ -1544,7 +1545,7 @@ class TestUpdateInstallation(unittest.TestCase):
 
         self.assertEqual(result["status"], "updated")
         self.assertTrue(result["restarted_daemon"])
-        self.assertEqual(result["version"], "0.17.0")
+        self.assertEqual(result["version"], "0.17.1")
         mock_run.assert_called_once_with(
             ["git", "-C", str(self.repo_dir), "pull", "--ff-only"],
             capture_output=True,
@@ -1833,7 +1834,7 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main([flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.17.0")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.17.1")
 
     def test_cli_subcommand_version_flags(self):
         from bridge.__main__ import main
@@ -1845,19 +1846,19 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main(["update", flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.17.0")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.17.1")
 
     def test_version_unification(self):
         import bridge
         from pathlib import Path
         import re
 
-        self.assertEqual(bridge.__version__, "0.17.0")
+        self.assertEqual(bridge.__version__, "0.17.1")
         pyproject_path = Path(__file__).resolve().parent.parent / "pyproject.toml"
         pyproject_text = pyproject_path.read_text(encoding="utf-8")
         match = re.search(r'version\s*=\s*"([^"]+)"', pyproject_text)
         self.assertIsNotNone(match)
-        self.assertEqual(match.group(1), "0.17.0")
+        self.assertEqual(match.group(1), "0.17.1")
 
 
 class TestClientConfiguratorRegistry(unittest.TestCase):
@@ -4672,6 +4673,193 @@ class TestUninstallGentleShell(unittest.TestCase):
             self.assertNotIn("agy", cleaned.get("providers", {}))
         else:
             self.assertFalse(gs_config.exists())
+
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+INSTALL_SH = REPO_ROOT / "install.sh"
+UNINSTALL_SH = REPO_ROOT / "uninstall.sh"
+
+
+class TestInstallScript(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp_dir.name)
+        self.state_dir = self.root / ".agy-bridge"
+        self.state_dir.mkdir(parents=True, exist_ok=True)
+        self.bin_dir = self.root / "bin"
+        self.bin_dir.mkdir(parents=True, exist_ok=True)
+
+        fake_git = self.bin_dir / "git"
+        fake_git.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        fake_git.chmod(0o755)
+
+        self.base_env = os.environ.copy()
+        self.base_env["AGY_BRIDGE_STATE_DIR"] = str(self.state_dir)
+        self.base_env["AGY_BRIDGE_BIN"] = str(self.bin_dir)
+        self.base_env["PATH"] = f"{self.bin_dir}:{self.base_env.get('PATH', '')}"
+        self.base_env.pop("AGY_BRIDGE_CORE_DIR", None)
+        self.base_env.pop("AGY_BRIDGE_DIR", None)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_install_script_cleans_core_dir_on_default_install(self):
+        stale_core = self.state_dir / ".core_dir"
+        stale_core.write_text("/some/previous/custom/dir\n", encoding="utf-8")
+        self.assertTrue(stale_core.exists())
+
+        res = subprocess.run(
+            ["bash", str(INSTALL_SH)],
+            env=self.base_env,
+            cwd=str(self.root),
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(res.returncode, 0, f"install.sh failed: {res.stderr}")
+        self.assertFalse(stale_core.exists(), ".core_dir must be removed on default installation")
+
+    def test_install_script_persists_core_dir_on_custom_install(self):
+        custom_core = self.root / "custom_core"
+        env = self.base_env.copy()
+        env["AGY_BRIDGE_CORE_DIR"] = str(custom_core)
+
+        res = subprocess.run(
+            ["bash", str(INSTALL_SH)],
+            env=env,
+            cwd=str(self.root),
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(res.returncode, 0, f"install.sh failed: {res.stderr}")
+        core_file = self.state_dir / ".core_dir"
+        self.assertTrue(core_file.exists(), ".core_dir must be created on custom installation")
+        self.assertEqual(core_file.read_text(encoding="utf-8").strip(), str(custom_core))
+        file_mode = stat.S_IMODE(core_file.stat().st_mode)
+        self.assertEqual(file_mode, 0o600)
+
+    def test_install_script_switching_from_custom_to_default_cleans_core_dir(self):
+        custom_core = self.root / "custom_core"
+        custom_env = self.base_env.copy()
+        custom_env["AGY_BRIDGE_CORE_DIR"] = str(custom_core)
+
+        res1 = subprocess.run(
+            ["bash", str(INSTALL_SH)],
+            env=custom_env,
+            cwd=str(self.root),
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(res1.returncode, 0)
+        core_file = self.state_dir / ".core_dir"
+        self.assertTrue(core_file.exists())
+
+        res2 = subprocess.run(
+            ["bash", str(INSTALL_SH)],
+            env=self.base_env,
+            cwd=str(self.root),
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(res2.returncode, 0)
+        self.assertFalse(core_file.exists(), ".core_dir must be removed after switching back to default")
+
+
+class TestUninstallScriptFallback(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp_dir.name)
+        self.state_dir = self.root / ".agy-bridge"
+        self.state_dir.mkdir(parents=True, exist_ok=True)
+        self.bin_dir = self.root / "bin"
+        self.bin_dir.mkdir(parents=True, exist_ok=True)
+
+        fake_python = self.bin_dir / "python3"
+        fake_python.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+        fake_python.chmod(0o755)
+
+        self.env = {
+            "HOME": str(self.root),
+            "AGY_BRIDGE_STATE_DIR": str(self.state_dir),
+            "AGY_BRIDGE_BIN": str(self.bin_dir),
+            "PATH": f"{self.bin_dir}:/bin:/usr/bin",
+        }
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_uninstall_fallback_preserves_custom_core_dir_without_artifacts(self):
+        custom_core = self.root / "unsigned_core"
+        custom_core.mkdir(parents=True, exist_ok=True)
+        (custom_core / "user_data.txt").write_text("precious data", encoding="utf-8")
+
+        env = self.env.copy()
+        env["AGY_BRIDGE_CORE_DIR"] = str(custom_core)
+
+        res = subprocess.run(
+            ["bash", str(UNINSTALL_SH)],
+            env=env,
+            cwd=str(self.root),
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(res.returncode, 0, f"uninstall.sh failed: {res.stderr}")
+        self.assertTrue(custom_core.exists(), "Unsigned core directory must be preserved by fallback")
+        self.assertTrue((custom_core / "user_data.txt").exists())
+
+    def test_uninstall_fallback_removes_custom_core_dir_with_bridge_init(self):
+        custom_core = self.root / "core_with_bridge"
+        (custom_core / "bridge").mkdir(parents=True, exist_ok=True)
+        (custom_core / "bridge" / "__init__.py").write_text("# bridge\n", encoding="utf-8")
+
+        env = self.env.copy()
+        env["AGY_BRIDGE_CORE_DIR"] = str(custom_core)
+
+        res = subprocess.run(
+            ["bash", str(UNINSTALL_SH)],
+            env=env,
+            cwd=str(self.root),
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(res.returncode, 0, f"uninstall.sh failed: {res.stderr}")
+        self.assertFalse(custom_core.exists(), "Core directory with bridge/__init__.py must be removed")
+
+    def test_uninstall_fallback_removes_custom_core_dir_with_installed_sentinel(self):
+        custom_core = self.root / "core_with_sentinel"
+        custom_core.mkdir(parents=True, exist_ok=True)
+        (custom_core / ".agy-bridge-installed").write_text("v0.17.1\n", encoding="utf-8")
+
+        env = self.env.copy()
+        env["AGY_BRIDGE_CORE_DIR"] = str(custom_core)
+
+        res = subprocess.run(
+            ["bash", str(UNINSTALL_SH)],
+            env=env,
+            cwd=str(self.root),
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(res.returncode, 0, f"uninstall.sh failed: {res.stderr}")
+        self.assertFalse(custom_core.exists(), "Core directory with .agy-bridge-installed must be removed")
+
+    def test_uninstall_fallback_does_not_kill_unrelated_process(self):
+        proc = subprocess.Popen(["sleep", "60"])
+        try:
+            pid = proc.pid
+            (self.state_dir / "bridge.pid").write_text(str(pid), encoding="utf-8")
+
+            res = subprocess.run(
+                ["bash", str(UNINSTALL_SH)],
+                env=self.env,
+                cwd=str(self.root),
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(res.returncode, 0)
+            self.assertIsNone(proc.poll(), "Unrelated process must not be killed by fallback")
+        finally:
+            proc.kill()
+            proc.wait()
 
 
 if __name__ == "__main__":

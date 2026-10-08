@@ -341,7 +341,7 @@ def build_thinking_config(model: str, payload: dict[str, Any]) -> dict[str, Any]
         effort_val = output_cfg.get("effort")
         if effort_val:
             effort_str = str(effort_val).strip().lower()
-            if effort_str in ("high", "max"):
+            if effort_str in ("high", "xhigh", "max"):
                 output_effort = "HIGH"
             elif effort_str == "medium":
                 output_effort = "MEDIUM"
@@ -353,6 +353,8 @@ def build_thinking_config(model: str, payload: dict[str, Any]) -> dict[str, Any]
         if isinstance(val, dict):
             t_type = str(val.get("type", "")).strip().lower()
             if t_type in ("disabled", "off", "none"):
+                if m.startswith("claude-") or "claude" in m:
+                    return {"thinkingLevel": "LOW"}
                 return None
             if "budget_tokens" in val and val["budget_tokens"] is not None:
                 try:
@@ -397,6 +399,8 @@ def build_thinking_config(model: str, payload: dict[str, Any]) -> dict[str, Any]
                 return {"thinkingLevel": output_effort}
             return None
         elif val is False:
+            if m.startswith("claude-") or "claude" in m:
+                return {"thinkingLevel": "LOW"}
             return None
         elif val is True:
             if output_effort is not None:
@@ -414,9 +418,15 @@ def build_thinking_config(model: str, payload: dict[str, Any]) -> dict[str, Any]
 
     if effort is not None:
         if effort in ("none", "disabled", "off"):
+            if m.startswith("claude-") or "claude" in m:
+                return {"thinkingLevel": "LOW"}
             return None
-        if effort in ("high", "medium", "low"):
-            return {"thinkingLevel": effort.upper()}
+        if effort in ("high", "xhigh", "max"):
+            return {"thinkingLevel": "HIGH"}
+        elif effort == "medium":
+            return {"thinkingLevel": "MEDIUM"}
+        elif effort == "low":
+            return {"thinkingLevel": "LOW"}
 
     if "thinking_budget" in payload and payload["thinking_budget"] is not None:
         b = int(payload["thinking_budget"])

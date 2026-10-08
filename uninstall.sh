@@ -93,7 +93,12 @@ if [ "$UNINSTALL_EXECUTED" = "0" ]; then
                         sleep 0.1
                     done
                     if kill -0 "$PID" 2>/dev/null; then
-                        kill -9 "$PID" 2>/dev/null || true
+                        CURRENT_CMD="$(ps -p "$PID" -o command= 2>/dev/null || true)"
+                        case "$CURRENT_CMD" in
+                            *-m\ bridge*|*agy-bridge*|*agy-model-bridge*)
+                                kill -9 "$PID" 2>/dev/null || true
+                                ;;
+                        esac
                     fi
                     ;;
                 *)
@@ -117,9 +122,11 @@ if [ "$UNINSTALL_EXECUTED" = "0" ]; then
     if [ -n "$STATE_DIR" ] && [ -d "$STATE_DIR" ] && [ "$STATE_DIR" != "/" ] && [ "$STATE_DIR" != "$HOME" ] && [ "$STATE_DIR" != "$(pwd)" ]; then
         rm -rf "$STATE_DIR"
     fi
-    # Remove core directory only if distinct, not current dir, and not home
+    # Remove core directory only if distinct, not current dir, not home, and contains bridge signature
     if [ -d "$CORE_DIR" ] && [ "$CORE_DIR" != "$STATE_DIR" ] && [ "$CORE_DIR" != "$(pwd)" ] && [ "$CORE_DIR" != "$HOME" ]; then
-        rm -rf "$CORE_DIR"
+        if [ -f "$CORE_DIR/bridge/__init__.py" ] || [ -f "$CORE_DIR/.agy-bridge-installed" ]; then
+            rm -rf "$CORE_DIR"
+        fi
     fi
 fi
 

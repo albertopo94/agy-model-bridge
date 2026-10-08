@@ -226,6 +226,27 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
                 else:
                     self.assertTrue(gen_config is None or "thinkingConfig" not in gen_config)
 
+    def test_anthropic_thinking_disabled_claude_sets_low_thinking_level(self):
+        payload = {
+            "model": "claude-sonnet-5-5",
+            "messages": [{"role": "user", "content": "Hello"}],
+            "thinking": {"type": "disabled"},
+        }
+        res_model, _, _, gen_config, _ = anthropic_to_cloudcode_request(payload, "test-project")
+        self.assertEqual(res_model, "claude-sonnet-5-5")
+        self.assertIsNotNone(gen_config)
+        self.assertEqual(gen_config.get("thinkingConfig"), {"thinkingLevel": "LOW"})
+
+    def test_anthropic_thinking_disabled_gemini_omits_thinking_config(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [{"role": "user", "content": "Hello"}],
+            "thinking": {"type": "disabled"},
+        }
+        res_model, _, _, gen_config, _ = anthropic_to_cloudcode_request(payload, "test-project")
+        self.assertEqual(res_model, "gemini-2.5-pro")
+        self.assertTrue(gen_config is None or "thinkingConfig" not in gen_config)
+
     def test_user_content_as_blocks_and_multi_turn(self):
         payload = {
             "model": "gemini-2.5-pro",
