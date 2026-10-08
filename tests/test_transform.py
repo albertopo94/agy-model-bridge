@@ -1352,6 +1352,25 @@ class TestBuildThinkingConfig(unittest.TestCase):
         self.assertIsNotNone(gen_config_ovr)
         self.assertEqual(gen_config_ovr.get("thinkingConfig"), {"thinkingBudget": 1024})
 
+    def test_openai_to_cloudcode_request_resolves_claude_5_5_models(self):
+        # Sonnet 5.5 High
+        p1 = {"model": "claude-sonnet-5-5-high", "messages": [{"role": "user", "content": "hi"}]}
+        m1, _, _, g1, _ = openai_to_cloudcode_request(p1, "p")
+        self.assertEqual(m1, "claude-sonnet-5-5")
+        self.assertEqual(g1["thinkingConfig"], {"thinkingLevel": "HIGH"})
+
+        # Opus 5.5 Low
+        p2 = {"model": "claude-opus-5-5-low", "messages": [{"role": "user", "content": "hi"}]}
+        m2, _, _, g2, _ = openai_to_cloudcode_request(p2, "p")
+        self.assertEqual(m2, "claude-opus-5-5")
+        self.assertEqual(g2["thinkingConfig"], {"thinkingLevel": "LOW"})
+
+        # Sonnet 5.5 base without thinking
+        p3 = {"model": "claude-sonnet-5-5", "messages": [{"role": "user", "content": "hi"}]}
+        m3, _, _, g3, _ = openai_to_cloudcode_request(p3, "p")
+        self.assertEqual(m3, "claude-sonnet-5-5")
+        self.assertNotIn("thinkingConfig", g3 or {})
+
 
 class TestResolveModelAndThinking(unittest.TestCase):
     def test_none_model_resolves_to_tiered_high(self):
@@ -1423,6 +1442,43 @@ class TestResolveModelAndThinking(unittest.TestCase):
         )
         self.assertEqual(model3, "gemini-3.8-flash-tiered")
         self.assertEqual(thinking3, {"thinkingLevel": "LOW"})
+
+    def test_claude_5_5_sonnet_and_opus_tiers_aliasing(self):
+        cases = [
+            ("claude-sonnet-5-5-high", "claude-sonnet-5-5", {"thinkingLevel": "HIGH"}),
+            ("claude-sonnet-5-5-medium", "claude-sonnet-5-5", {"thinkingLevel": "MEDIUM"}),
+            ("claude-sonnet-5-5-low", "claude-sonnet-5-5", {"thinkingLevel": "LOW"}),
+            ("claude-opus-5-5-high", "claude-opus-5-5", {"thinkingLevel": "HIGH"}),
+            ("claude-opus-5-5-medium", "claude-opus-5-5", {"thinkingLevel": "MEDIUM"}),
+            ("claude-opus-5-5-low", "claude-opus-5-5", {"thinkingLevel": "LOW"}),
+            ("claude-sonnet-5-5", "claude-sonnet-5-5", None),
+            ("claude-opus-5-5", "claude-opus-5-5", None),
+            ("CLAUDE-SONNET-5-5-HIGH", "claude-sonnet-5-5", {"thinkingLevel": "HIGH"}),
+            ("CLAUDE-OPUS-5-5", "claude-opus-5-5", None),
+        ]
+        for raw_model, exp_model, exp_thinking in cases:
+            model, thinking = resolve_model_and_thinking(raw_model, {})
+            self.assertEqual(model, exp_model, f"Failed model resolution for {raw_model}")
+            self.assertEqual(thinking, exp_thinking, f"Failed thinking resolution for {raw_model}")
+
+    def test_claude_5_5_explicit_thinking_overrides(self):
+        model, thinking = resolve_model_and_thinking(
+            "claude-sonnet-5-5-high", {"thinkingConfig": {"thinkingLevel": "LOW"}}
+        )
+        self.assertEqual(model, "claude-sonnet-5-5")
+        self.assertEqual(thinking, {"thinkingLevel": "LOW"})
+
+        model2, thinking2 = resolve_model_and_thinking(
+            "claude-opus-5-5-high", {"reasoning_effort": "low"}
+        )
+        self.assertEqual(model2, "claude-opus-5-5")
+        self.assertEqual(thinking2, {"thinkingLevel": "LOW"})
+
+        model3, thinking3 = resolve_model_and_thinking(
+            "claude-sonnet-5-5", {"thinking": {"type": "enabled", "budget_tokens": 1024}}
+        )
+        self.assertEqual(model3, "claude-sonnet-5-5")
+        self.assertEqual(thinking3, {"thinkingBudget": 1024})
 
     def test_unaliased_model_preserved(self):
         model, thinking = resolve_model_and_thinking("gemini-2.5-pro", {})

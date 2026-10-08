@@ -9,6 +9,7 @@ import uuid
 from typing import Any, Iterator
 
 from bridge.transform import (
+    DUMMY_THOUGHT_SIGNATURE,
     build_thinking_config,
     cache_thought_signature,
     cache_tool_name,
@@ -24,6 +25,42 @@ from bridge.transform import (
     resolve_model_and_thinking,
     sanitize_schema_for_gemini,
 )
+
+
+def _extract_event_thought_signature(parsed: dict[str, Any]) -> str | None:
+    """Extracts thought signature from Cloud Code SSE candidate or content parts if present."""
+    if not isinstance(parsed, dict):
+        return None
+    resp = parsed.get("response") if isinstance(parsed.get("response"), dict) else parsed
+    cands = resp.get("candidates") if isinstance(resp, dict) else None
+    if not cands or not isinstance(cands, list):
+        return None
+    cand = cands[0]
+    if not isinstance(cand, dict):
+        return None
+    sig = cand.get("thoughtSignature") or cand.get("thought_signature")
+    if sig:
+        return str(sig)
+    content = cand.get("content")
+    if isinstance(content, dict):
+        sig = content.get("thoughtSignature") or content.get("thought_signature")
+        if sig:
+            return str(sig)
+        parts = content.get("parts")
+    else:
+        parts = cand.get("parts")
+    if isinstance(parts, list):
+        for part in parts:
+            if isinstance(part, dict):
+                sig = part.get("thoughtSignature") or part.get("thought_signature")
+                if sig:
+                    return str(sig)
+                fc = part.get("functionCall")
+                if isinstance(fc, dict):
+                    sig = fc.get("thoughtSignature") or fc.get("thought_signature")
+                    if sig:
+                        return str(sig)
+    return None
 
 
 def anthropic_to_cloudcode_request(
@@ -86,6 +123,7 @@ def anthropic_to_cloudcode_request(
             raise ValueError("Each message must be a dictionary")
         role = msg.get("role")
         raw_content = msg.get("content")
+        turn_thought_signature: str | None = None
 
         if role in ("system", "developer"):
             if isinstance(raw_content, str):
@@ -122,7 +160,27 @@ def anthropic_to_cloudcode_request(
             for block in raw_content:
                 if isinstance(block, dict):
                     b_type = block.get("type")
-                    if b_type == "tool_use":
+                    if b_type == "thinking":
+                        sig = (
+                            block.get("signature")
+                            or block.get("thoughtSignature")
+                            or block.get("thought_signature")
+                        )
+                        if sig:
+                            cache_thought_signature(signature=sig)
+                            turn_thought_signature = sig
+                            if contents and contents[-1]["role"] == "model":
+                                for p in contents[-1]["parts"]:
+                                    if "functionCall" in p and p.get("thoughtSignature") == DUMMY_THOUGHT_SIGNATURE:
+                                        p["thoughtSignature"] = sig
+                        thought_text = str(block.get("thinking") or block.get("text") or "")
+                        part: dict[str, Any] = {"thought": True, "text": thought_text}
+                        if sig:
+                            part["thoughtSignature"] = sig
+                        part_role = "model" if role == "assistant" else "user"
+                        _add_part(part_role, part)
+                        parts_added += 1
+                    elif b_type == "tool_use":
                         call_id = block.get("id") or f"toolu_{uuid.uuid4().hex[:16]}"
                         name = block.get("name", "tool")
                         tool_names_by_call_id[call_id] = name
@@ -140,8 +198,11 @@ def anthropic_to_cloudcode_request(
                         sig = (
                             block.get("thoughtSignature")
                             or block.get("thought_signature")
+                            or turn_thought_signature
                             or get_thought_signature(call_id, name, args)
                         )
+                        if sig:
+                            cache_thought_signature(call_id=call_id, signature=sig, name=name, args=args)
                         part = {
                             "thoughtSignature": sig,
                             "functionCall": {"name": name, "args": args},
@@ -269,6 +330,7 @@ def build_anthropic_message(
     stop_reason: str = "end_turn",
     thinking: str | None = None,
     tool_calls: list[dict[str, Any]] | None = None,
+    signature: str | None = None,
 ) -> dict[str, Any]:
     """Constructs non-streaming Anthropic Messages response dictionary."""
     if tool_calls and stop_reason == "end_turn":
@@ -288,10 +350,11 @@ def build_anthropic_message(
 
     content: list[dict[str, Any]] = []
     if thinking:
+        sig = signature if signature is not None else (get_thought_signature() or "")
         content.append({
             "type": "thinking",
             "thinking": thinking,
-            "signature": "",
+            "signature": sig,
         })
     if text:
         content.append({
@@ -354,6 +417,26 @@ def build_anthropic_sse_events(lines_gen: Iterator[str], model: str) -> Iterator
     text_block_index = -1
 
     accumulated_tool_calls: list[dict[str, Any]] = []
+    current_thought_sig: str | None = None
+
+    def _close_thinking() -> Iterator[str]:
+        nonlocal thinking_block_open
+        sig = current_thought_sig or get_thought_signature() or ""
+        sig_delta_payload = {
+            "type": "content_block_delta",
+            "index": thinking_block_index,
+            "delta": {
+                "type": "signature_delta",
+                "signature": sig,
+            },
+        }
+        yield f"event: content_block_delta\ndata: {json.dumps(sig_delta_payload)}\n\n"
+        stop_payload = {
+            "type": "content_block_stop",
+            "index": thinking_block_index,
+        }
+        yield f"event: content_block_stop\ndata: {json.dumps(stop_payload)}\n\n"
+        thinking_block_open = False
 
     # 1. message_start
     start_payload = {
@@ -381,6 +464,10 @@ def build_anthropic_sse_events(lines_gen: Iterator[str], model: str) -> Iterator
             continue
 
         check_sse_error(parsed)
+
+        ev_sig = _extract_event_thought_signature(parsed)
+        if ev_sig:
+            current_thought_sig = ev_sig
 
         usage = extract_usage(parsed)
         if usage:
@@ -413,8 +500,7 @@ def build_anthropic_sse_events(lines_gen: Iterator[str], model: str) -> Iterator
         text_delta = extract_text_delta(parsed)
         if text_delta:
             if thinking_block_open:
-                yield f"event: content_block_stop\ndata: {json.dumps({'type': 'content_block_stop', 'index': thinking_block_index})}\n\n"
-                thinking_block_open = False
+                yield from _close_thinking()
 
             if not text_block_open:
                 text_block_index = next_index
@@ -427,8 +513,7 @@ def build_anthropic_sse_events(lines_gen: Iterator[str], model: str) -> Iterator
         fc_list = extract_function_calls(parsed)
         if fc_list:
             if thinking_block_open:
-                yield f"event: content_block_stop\ndata: {json.dumps({'type': 'content_block_stop', 'index': thinking_block_index})}\n\n"
-                thinking_block_open = False
+                yield from _close_thinking()
 
             if text_block_open:
                 yield f"event: content_block_stop\ndata: {json.dumps({'type': 'content_block_stop', 'index': text_block_index})}\n\n"
@@ -458,8 +543,7 @@ def build_anthropic_sse_events(lines_gen: Iterator[str], model: str) -> Iterator
 
     # 3. Close open blocks
     if thinking_block_open:
-        yield f"event: content_block_stop\ndata: {json.dumps({'type': 'content_block_stop', 'index': thinking_block_index})}\n\n"
-        thinking_block_open = False
+        yield from _close_thinking()
 
     if text_block_open:
         yield f"event: content_block_stop\ndata: {json.dumps({'type': 'content_block_stop', 'index': text_block_index})}\n\n"

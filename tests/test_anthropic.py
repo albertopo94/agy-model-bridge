@@ -362,6 +362,109 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
         with self.assertRaises(ValueError):
             anthropic_to_cloudcode_request({"model": "gemini-2.5-pro", "messages": []}, "p")
 
+    def test_anthropic_to_cloudcode_request_with_thinking_blocks_in_history(self):
+        payload = {
+            "model": "claude-sonnet-5-5-high",
+            "messages": [
+                {"role": "user", "content": "How far is the moon?"},
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "thinking",
+                            "thinking": "The average distance to the Moon is about 384,400 km.",
+                            "signature": "sig_moon_123",
+                        },
+                        {
+                            "type": "text",
+                            "text": "The Moon is approximately 384,400 km away.",
+                        },
+                    ],
+                },
+                {"role": "user", "content": "What about Mars?"},
+            ],
+        }
+        model, contents, _, gen_config, _ = anthropic_to_cloudcode_request(payload, "test-project")
+        self.assertEqual(model, "claude-sonnet-5-5")
+        self.assertIsNotNone(gen_config)
+        self.assertEqual(gen_config["thinkingConfig"], {"thinkingLevel": "HIGH"})
+        self.assertEqual(len(contents), 3)
+
+        model_turn = contents[1]
+        self.assertEqual(model_turn["role"], "model")
+        self.assertEqual(len(model_turn["parts"]), 2)
+        self.assertEqual(
+            model_turn["parts"][0],
+            {
+                "thought": True,
+                "text": "The average distance to the Moon is about 384,400 km.",
+                "thoughtSignature": "sig_moon_123",
+            },
+        )
+        self.assertEqual(
+            model_turn["parts"][1],
+            {"text": "The Moon is approximately 384,400 km away."},
+        )
+        for p in model_turn["parts"]:
+            if "text" in p:
+                self.assertNotIn("<thinking>", p["text"])
+                self.assertNotIn("</thinking>", p["text"])
+
+    def test_anthropic_to_cloudcode_request_thinking_with_tool_use(self):
+        payload = {
+            "model": "claude-sonnet-5-5",
+            "messages": [
+                {"role": "user", "content": "Check weather"},
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "thinking",
+                            "thinking": "I should call get_weather.",
+                            "signature": "sig_tool_weather_99",
+                        },
+                        {
+                            "type": "tool_use",
+                            "id": "t_weather",
+                            "name": "get_weather",
+                            "input": {"city": "Paris"},
+                        },
+                    ],
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "t_weather",
+                            "content": "Sunny, 20C",
+                        }
+                    ],
+                },
+            ],
+        }
+        model, contents, _, _, _ = anthropic_to_cloudcode_request(payload, "test-project")
+        self.assertEqual(model, "claude-sonnet-5-5")
+        self.assertEqual(len(contents), 3)
+        model_turn = contents[1]
+        self.assertEqual(model_turn["role"], "model")
+        self.assertEqual(len(model_turn["parts"]), 2)
+        self.assertEqual(
+            model_turn["parts"][0],
+            {
+                "thought": True,
+                "text": "I should call get_weather.",
+                "thoughtSignature": "sig_tool_weather_99",
+            },
+        )
+        self.assertEqual(
+            model_turn["parts"][1],
+            {
+                "thoughtSignature": "sig_tool_weather_99",
+                "functionCall": {"name": "get_weather", "args": {"city": "Paris"}},
+            },
+        )
+
 
 class TestAnthropicResponseBuilder(unittest.TestCase):
     def test_build_anthropic_message_structure(self):
@@ -407,8 +510,27 @@ class TestAnthropicResponseBuilder(unittest.TestCase):
             thinking="Thinking carefully...",
         )
         self.assertEqual(len(resp["content"]), 2)
-        self.assertEqual(resp["content"][0], {"type": "thinking", "thinking": "Thinking carefully...", "signature": ""})
+        self.assertEqual(resp["content"][0]["type"], "thinking")
+        self.assertEqual(resp["content"][0]["thinking"], "Thinking carefully...")
+        self.assertEqual(resp["content"][0]["signature"], DUMMY_THOUGHT_SIGNATURE)
         self.assertEqual(resp["content"][1], {"type": "text", "text": "Done"})
+
+    def test_build_anthropic_message_includes_signature_in_thinking_block(self):
+        resp = build_anthropic_message(
+            message_id="msg_think_sig",
+            model="claude-sonnet-5-5",
+            text="Done",
+            thinking="Thinking with signature...",
+            signature="test_signature_xyz",
+        )
+        self.assertEqual(
+            resp["content"][0],
+            {
+                "type": "thinking",
+                "thinking": "Thinking with signature...",
+                "signature": "test_signature_xyz",
+            },
+        )
 
     def test_build_anthropic_message_with_tool_use(self):
         resp = build_anthropic_message(
@@ -494,8 +616,20 @@ class TestAnthropicSSEEvents(unittest.TestCase):
         self.assertEqual(len(block_0_starts), 1)
         self.assertEqual(block_0_starts[0]["content_block"]["type"], "thinking")
 
-        thinking_deltas = [d["delta"]["thinking"] for n, d in parsed_events if n == "content_block_delta" and d["index"] == 0]
+        thinking_deltas = [
+            d["delta"]["thinking"]
+            for n, d in parsed_events
+            if n == "content_block_delta" and d["index"] == 0 and d["delta"].get("type") == "thinking_delta"
+        ]
         self.assertEqual("".join(thinking_deltas), "hidden")
+
+        sig_deltas = [
+            d["delta"]["signature"]
+            for n, d in parsed_events
+            if n == "content_block_delta" and d["index"] == 0 and d["delta"].get("type") == "signature_delta"
+        ]
+        self.assertEqual(len(sig_deltas), 1)
+        self.assertTrue(sig_deltas[0])
 
         # Verify block 1 is text
         block_1_starts = [d for n, d in parsed_events if n == "content_block_start" and d["index"] == 1]
@@ -638,6 +772,64 @@ class TestAnthropicSSEEvents(unittest.TestCase):
         list(build_anthropic_sse_events(iter(mock_upstream_lines), "gemini-2.5-pro"))
         self.assertEqual(get_tool_name("toolu_stream999"), "fetch_data")
         self.assertEqual(get_thought_signature("toolu_stream999", "fetch_data", {"key": "val"}), "stream_sig_999")
+
+    def test_build_anthropic_sse_events_emits_signature_delta_before_stop(self):
+        mock_upstream_lines = [
+            'data: {"candidates": [{"content": {"parts": [{"thought": true, "text": "thinking..."}]}}]}\n',
+            'data: {"candidates": [{"content": {"parts": [{"text": "final answer"}]}}]}\n',
+            'data: {"candidates": [{"finishReason": "STOP"}]}\n',
+        ]
+        events = list(build_anthropic_sse_events(iter(mock_upstream_lines), "claude-sonnet-5-5"))
+        parsed = []
+        for raw in events:
+            lines = [l for l in raw.strip().split("\n") if l]
+            ev_name = None
+            ev_data = None
+            for l in lines:
+                if l.startswith("event:"):
+                    ev_name = l[6:].strip()
+                elif l.startswith("data:"):
+                    ev_data = json.loads(l[5:].strip())
+            if ev_name and ev_data:
+                parsed.append((ev_name, ev_data))
+
+        idx0_events = [(n, d) for n, d in parsed if d.get("index") == 0]
+        self.assertEqual(len(idx0_events), 4)
+        self.assertEqual(idx0_events[0][0], "content_block_start")
+        self.assertEqual(idx0_events[0][1]["content_block"]["type"], "thinking")
+        self.assertEqual(idx0_events[1][0], "content_block_delta")
+        self.assertEqual(idx0_events[1][1]["delta"]["type"], "thinking_delta")
+        self.assertEqual(idx0_events[2][0], "content_block_delta")
+        self.assertEqual(idx0_events[2][1]["delta"]["type"], "signature_delta")
+        self.assertEqual(idx0_events[2][1]["delta"]["signature"], DUMMY_THOUGHT_SIGNATURE)
+        self.assertEqual(idx0_events[3][0], "content_block_stop")
+
+    def test_build_anthropic_sse_events_signature_delta_from_upstream_event(self):
+        mock_upstream_lines = [
+            'data: {"candidates": [{"content": {"parts": [{"thought": true, "text": "deep thought"}]}, "thoughtSignature": "upstream_sig_777"}]}\n',
+            'data: {"candidates": [{"content": {"parts": [{"text": "result"}]}}]}\n',
+            'data: {"candidates": [{"finishReason": "STOP"}]}\n',
+        ]
+        events = list(build_anthropic_sse_events(iter(mock_upstream_lines), "claude-sonnet-5-5"))
+        parsed = []
+        for raw in events:
+            lines = [l for l in raw.strip().split("\n") if l]
+            ev_name = None
+            ev_data = None
+            for l in lines:
+                if l.startswith("event:"):
+                    ev_name = l[6:].strip()
+                elif l.startswith("data:"):
+                    ev_data = json.loads(l[5:].strip())
+            if ev_name and ev_data:
+                parsed.append((ev_name, ev_data))
+
+        sig_deltas = [
+            d["delta"]["signature"]
+            for n, d in parsed
+            if n == "content_block_delta" and d.get("index") == 0 and d["delta"].get("type") == "signature_delta"
+        ]
+        self.assertEqual(sig_deltas, ["upstream_sig_777"])
 
 
 class TestAnthropicErrorResponses(unittest.TestCase):

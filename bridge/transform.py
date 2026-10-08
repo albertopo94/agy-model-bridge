@@ -432,6 +432,30 @@ def resolve_model_and_thinking(
     elif m == "gemini-3.8-flash-low":
         resolved_model = "gemini-3.8-flash-tiered"
         default_thinking = {"thinkingLevel": "LOW"}
+    elif m == "claude-sonnet-5-5-high":
+        resolved_model = "claude-sonnet-5-5"
+        default_thinking = {"thinkingLevel": "HIGH"}
+    elif m == "claude-sonnet-5-5-medium":
+        resolved_model = "claude-sonnet-5-5"
+        default_thinking = {"thinkingLevel": "MEDIUM"}
+    elif m == "claude-sonnet-5-5-low":
+        resolved_model = "claude-sonnet-5-5"
+        default_thinking = {"thinkingLevel": "LOW"}
+    elif m == "claude-sonnet-5-5":
+        resolved_model = "claude-sonnet-5-5"
+        default_thinking = None
+    elif m == "claude-opus-5-5-high":
+        resolved_model = "claude-opus-5-5"
+        default_thinking = {"thinkingLevel": "HIGH"}
+    elif m == "claude-opus-5-5-medium":
+        resolved_model = "claude-opus-5-5"
+        default_thinking = {"thinkingLevel": "MEDIUM"}
+    elif m == "claude-opus-5-5-low":
+        resolved_model = "claude-opus-5-5"
+        default_thinking = {"thinkingLevel": "LOW"}
+    elif m == "claude-opus-5-5":
+        resolved_model = "claude-opus-5-5"
+        default_thinking = None
     else:
         resolved_model = raw_model
         default_thinking = None
