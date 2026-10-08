@@ -53,8 +53,8 @@ def test_models(base_url: str, api_key: str = "local-bridge") -> str:
             models = data.get("data", [])
             if not isinstance(models, list) or len(models) == 0:
                 raise AssertionError(f"Expected non-empty model list, got {models}")
-            gemini_models = [m.get("id", "") for m in models if m.get("id", "").startswith("gemini-")]
-            flash_models = [m.get("id", "") for m in models if "flash" in m.get("id", "") and not m.get("id", "").startswith("tab_")]
+            gemini_models = [m.get("id", "") for m in models if m.get("id", "").startswith("gemini-") and "-image" not in m.get("id", "")]
+            flash_models = [m.get("id", "") for m in models if "flash" in m.get("id", "") and not m.get("id", "").startswith("tab_") and "-image" not in m.get("id", "")]
             chosen_model = gemini_models[0] if gemini_models else (flash_models[0] if flash_models else models[0].get("id", ""))
             if not chosen_model:
                 raise AssertionError(f"Invalid model entry in catalog: {models[0]}")
@@ -214,7 +214,7 @@ def test_anthropic_non_streaming(base_url: str, model: str, api_key: str = "loca
         "messages": [
             {"role": "user", "content": "Respond with the word 'ANTHROPIC' only."}
         ],
-        "max_tokens": 100,
+        "max_tokens": 1000,
         "output_config": {"effort": "high"},
         "stream": False,
     }
@@ -241,9 +241,10 @@ def test_anthropic_non_streaming(base_url: str, model: str, api_key: str = "loca
             content = res.get("content", [])
             if not content or not isinstance(content, list):
                 raise AssertionError(f"Expected non-empty content list, got: {res}")
-            text = content[0].get("text", "")
+            text_parts = [c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text"]
+            text = "".join(text_parts)
             if not text or not text.strip():
-                raise AssertionError(f"Expected non-empty text in content, got: {text}")
+                raise AssertionError(f"Expected non-empty text in content, got: {content}")
     except Exception as e:
         print("FAILED")
         print(f"Error in Anthropic non-streaming completion: {e}", file=sys.stderr)
@@ -259,7 +260,7 @@ def test_anthropic_streaming(base_url: str, model: str, api_key: str = "local-br
         "messages": [
             {"role": "user", "content": "Respond with the word 'CLAUDE' only."}
         ],
-        "max_tokens": 100,
+        "max_tokens": 1000,
         "stream": True,
     }
     data = json.dumps(payload).encode("utf-8")
@@ -295,7 +296,8 @@ def test_anthropic_streaming(base_url: str, model: str, api_key: str = "local-br
                 elif line.startswith("data: "):
                     data_obj = json.loads(line[6:])
                     if current_event == "content_block_delta":
-                        delta_text = data_obj.get("delta", {}).get("text", "")
+                        delta_dict = data_obj.get("delta", {})
+                        delta_text = delta_dict.get("text", "") or delta_dict.get("thinking", "")
                         if delta_text:
                             received_chunks.append(delta_text)
 

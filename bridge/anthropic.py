@@ -71,6 +71,7 @@ def anthropic_to_cloudcode_request(
     dict[str, Any] | None,
     dict[str, Any] | None,
     list[dict[str, Any]] | None,
+    dict[str, Any] | None,
 ]:
     """Validates Anthropic Messages payload and transforms to Cloud Code parameters.
 
@@ -79,15 +80,34 @@ def anthropic_to_cloudcode_request(
         project: Upstream project identifier.
 
     Returns:
-        tuple of (model_name, contents_list, system_instruction_dict_or_None, generation_config_dict_or_None, tools_list_or_None)
+        tuple of (model_name, contents_list, system_instruction_dict_or_None, generation_config_dict_or_None, tools_list_or_None, tool_config_dict_or_None)
 
     Raises:
-        ValueError: If model or messages are missing or invalid.
+        ValueError: If model or messages are missing or invalid, or if parameters violate model constraints.
     """
     raw_model = payload.get("model")
     if raw_model is not None and not isinstance(raw_model, str):
         raise ValueError("Invalid 'model' parameter: must be a string")
     model, thinking_cfg = resolve_model_and_thinking(raw_model, payload)
+
+    # Validate thinking semantics for Anthropic Messages API
+    raw_thinking = payload.get("thinking")
+    if isinstance(raw_thinking, dict):
+        th_type = str(raw_thinking.get("type", "")).strip().lower()
+        if th_type in ("disabled", "off", "none") and "sonnet" in model and ("5-5" in model or "5.5" in model):
+            raise ValueError(
+                "thinking: type 'disabled' is not supported for model claude-sonnet-5-5. Use 'between_tools' to omit reasoning before tool calls."
+            )
+        if th_type == "between_tools":
+            output_cfg = payload.get("output_config") or payload.get("outputConfig")
+            if isinstance(output_cfg, dict):
+                effort_val = output_cfg.get("effort")
+                if effort_val:
+                    eff_str = str(effort_val).strip().lower()
+                    if eff_str in ("xhigh", "max"):
+                        raise ValueError(
+                            "thinking: type 'between_tools' only supports effort levels 'low', 'medium', 'high'. Effort 'xhigh' and 'max' are invalid."
+                        )
 
     messages = payload.get("messages")
     if not messages or not isinstance(messages, list) or len(messages) == 0:
@@ -319,7 +339,56 @@ def anthropic_to_cloudcode_request(
         if function_declarations:
             tools = [{"functionDeclarations": function_declarations}]
 
-    return model, contents, system_instruction, generation_config, tools
+    # Tool choice translation
+    raw_tool_choice = payload.get("tool_choice")
+    tool_config: dict[str, Any] | None = None
+    if raw_tool_choice is not None:
+        if isinstance(raw_tool_choice, dict):
+            tc_type = str(raw_tool_choice.get("type", "")).strip().lower()
+            if tc_type == "auto":
+                tool_config = {"functionCallingConfig": {"mode": "AUTO"}}
+            elif tc_type == "none":
+                tool_config = {"functionCallingConfig": {"mode": "NONE"}}
+            elif tc_type == "any":
+                if ("5-5" in model or "5.5" in model) and ("claude" in model or "sonnet" in model or "opus" in model):
+                    raise ValueError(
+                        "tool_choice: type 'any' is not supported for Claude 5.5 models. Only 'auto' and 'none' are supported."
+                    )
+                tool_config = {"functionCallingConfig": {"mode": "ANY"}}
+            elif tc_type == "tool":
+                if ("5-5" in model or "5.5" in model) and ("claude" in model or "sonnet" in model or "opus" in model):
+                    raise ValueError(
+                        "tool_choice: type 'tool' is not supported for Claude 5.5 models. Only 'auto' and 'none' are supported."
+                    )
+                fn_name = raw_tool_choice.get("name")
+                if not fn_name or not isinstance(fn_name, str):
+                    raise ValueError("tool_choice: 'name' is required when type is 'tool'")
+                tool_config = {
+                    "functionCallingConfig": {
+                        "mode": "ANY",
+                        "allowedFunctionNames": [fn_name.strip()],
+                    }
+                }
+            else:
+                raise ValueError(f"Invalid tool_choice type: '{tc_type}'")
+        elif isinstance(raw_tool_choice, str):
+            tc_str = raw_tool_choice.strip().lower()
+            if tc_str == "auto":
+                tool_config = {"functionCallingConfig": {"mode": "AUTO"}}
+            elif tc_str == "none":
+                tool_config = {"functionCallingConfig": {"mode": "NONE"}}
+            elif tc_str == "any":
+                if ("5-5" in model or "5.5" in model) and ("claude" in model or "sonnet" in model or "opus" in model):
+                    raise ValueError(
+                        "tool_choice: type 'any' is not supported for Claude 5.5 models. Only 'auto' and 'none' are supported."
+                    )
+                tool_config = {"functionCallingConfig": {"mode": "ANY"}}
+            else:
+                raise ValueError(f"Invalid tool_choice: '{raw_tool_choice}'")
+        else:
+            raise ValueError("Invalid 'tool_choice' parameter: must be a dictionary or string")
+
+    return model, contents, system_instruction, generation_config, tools, tool_config
 
 
 def build_anthropic_message(

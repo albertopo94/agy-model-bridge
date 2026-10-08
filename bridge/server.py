@@ -350,7 +350,7 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
     def _handle_anthropic_messages(self, payload: dict[str, Any]) -> None:
         try:
             stream = bool(payload.get("stream", False))
-            model, contents, system_instruction, generation_config, tools = anthropic_to_cloudcode_request(
+            model, contents, system_instruction, generation_config, tools, tool_config = anthropic_to_cloudcode_request(
                 payload, self.project
             )
         except ValueError as ve:
@@ -366,6 +366,8 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
             extra_kwargs["generation_config"] = generation_config
         if tools is not None:
             extra_kwargs["tools"] = tools
+        if tool_config is not None:
+            extra_kwargs["tool_config"] = tool_config
 
         if stream:
             try:

@@ -27,7 +27,7 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
             "max_tokens": 1024,
             "temperature": 0.5,
         }
-        model, contents, system_inst, gen_config, tools = anthropic_to_cloudcode_request(
+        model, contents, system_inst, gen_config, tools, tool_config = anthropic_to_cloudcode_request(
             payload, project="test-project"
         )
         self.assertEqual(model, "gemini-2.5-pro")
@@ -38,6 +38,7 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
         self.assertEqual(gen_config["temperature"], 0.5)
         self.assertNotIn("thinkingConfig", gen_config)
         self.assertIsNone(tools)
+        self.assertIsNone(tool_config)
 
     def test_request_translation_with_tools(self):
         payload = {
@@ -55,7 +56,8 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
                 }
             ],
         }
-        _, _, _, _, tools = anthropic_to_cloudcode_request(payload, "test-project")
+        _, _, _, _, tools, tool_config = anthropic_to_cloudcode_request(payload, "test-project")
+        self.assertIsNone(tool_config)
         self.assertIsNotNone(tools)
         self.assertEqual(len(tools), 1)
         self.assertIn("functionDeclarations", tools[0])
@@ -103,7 +105,7 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
                 }
             ],
         }
-        _, _, _, _, tools = anthropic_to_cloudcode_request(payload, "test-project")
+        _, _, _, _, tools, _ = anthropic_to_cloudcode_request(payload, "test-project")
         self.assertIsNotNone(tools)
         decls = tools[0]["functionDeclarations"]
         params = decls[0]["parameters"]
@@ -120,7 +122,7 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
             "messages": [{"role": "user", "content": "Hi"}],
             "tools": [],
         }
-        _, _, _, _, tools = anthropic_to_cloudcode_request(payload, "test-project")
+        _, _, _, _, tools, _ = anthropic_to_cloudcode_request(payload, "test-project")
         self.assertIsNone(tools)
 
     def test_system_as_content_blocks(self):
@@ -132,7 +134,7 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
             ],
             "messages": [{"role": "user", "content": "Hi"}],
         }
-        _, _, system_inst, _, _ = anthropic_to_cloudcode_request(payload, "test-project")
+        _, _, system_inst, _, _, _ = anthropic_to_cloudcode_request(payload, "test-project")
         self.assertEqual(
             system_inst,
             {"parts": [{"text": "First instruction.\nSecond instruction."}]},
@@ -146,7 +148,7 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
                 {"role": "user", "content": "hola"},
             ],
         }
-        _, contents, system_inst, _, _ = anthropic_to_cloudcode_request(payload, "test-project")
+        _, contents, system_inst, _, _, _ = anthropic_to_cloudcode_request(payload, "test-project")
         self.assertEqual(
             system_inst,
             {"parts": [{"text": "You are Claude Code assistant."}]},
@@ -161,7 +163,7 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
             "messages": [{"role": "user", "content": "hola"}],
             "thinking": {"type": "adaptive"},
         }
-        model, contents, _, gen_config, _ = anthropic_to_cloudcode_request(payload, "test-project")
+        model, contents, _, gen_config, _, _ = anthropic_to_cloudcode_request(payload, "test-project")
         self.assertEqual(model, "gemini-3.8-flash-tiered")
         self.assertIsNotNone(gen_config)
         self.assertEqual(gen_config.get("thinkingConfig"), {"thinkingLevel": "HIGH"})
@@ -170,6 +172,7 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
     def test_anthropic_output_config_effort(self):
         for effort, expected in (
             ("high", "HIGH"),
+            ("xhigh", "HIGH"),
             ("max", "HIGH"),
             ("medium", "MEDIUM"),
             ("low", "LOW"),
@@ -180,7 +183,7 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
                     "messages": [{"role": "user", "content": "hola"}],
                     "output_config": {"effort": effort},
                 }
-                _, _, _, gen_config, _ = anthropic_to_cloudcode_request(payload, "test-project")
+                _, _, _, gen_config, _, _ = anthropic_to_cloudcode_request(payload, "test-project")
                 self.assertIsNotNone(gen_config)
                 self.assertEqual(gen_config.get("thinkingConfig"), {"thinkingLevel": expected})
 
@@ -191,7 +194,7 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
             "messages": [{"role": "user", "content": "hola"}],
             "thinking": {"type": "between_tools"},
         }
-        _, _, _, gen_config_def, _ = anthropic_to_cloudcode_request(payload_default, "test-project")
+        _, _, _, gen_config_def, _, _ = anthropic_to_cloudcode_request(payload_default, "test-project")
         self.assertIsNotNone(gen_config_def)
         self.assertEqual(gen_config_def.get("thinkingConfig"), {"thinkingLevel": "LOW"})
 
@@ -202,9 +205,21 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
             "thinking": {"type": "between_tools"},
             "output_config": {"effort": "medium"},
         }
-        _, _, _, gen_config_med, _ = anthropic_to_cloudcode_request(payload_med, "test-project")
+        _, _, _, gen_config_med, _, _ = anthropic_to_cloudcode_request(payload_med, "test-project")
         self.assertIsNotNone(gen_config_med)
         self.assertEqual(gen_config_med.get("thinkingConfig"), {"thinkingLevel": "MEDIUM"})
+
+        # between_tools with xhigh or max raises ValueError
+        for invalid_eff in ("xhigh", "max"):
+            payload_invalid = {
+                "model": "claude-sonnet-5-5",
+                "messages": [{"role": "user", "content": "hola"}],
+                "thinking": {"type": "between_tools"},
+                "output_config": {"effort": invalid_eff},
+            }
+            with self.assertRaises(ValueError) as cm:
+                anthropic_to_cloudcode_request(payload_invalid, "test-project")
+            self.assertIn("between_tools", str(cm.exception))
 
     def test_anthropic_haiku_5_5_models(self):
         for model_name, expected_thinking in (
@@ -218,7 +233,7 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
                     "model": model_name,
                     "messages": [{"role": "user", "content": "hola"}],
                 }
-                res_model, _, _, gen_config, _ = anthropic_to_cloudcode_request(payload, "test-project")
+                res_model, _, _, gen_config, _, _ = anthropic_to_cloudcode_request(payload, "test-project")
                 self.assertEqual(res_model, "claude-haiku-5-5")
                 if expected_thinking is not None:
                     self.assertIsNotNone(gen_config)
@@ -226,16 +241,15 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
                 else:
                     self.assertTrue(gen_config is None or "thinkingConfig" not in gen_config)
 
-    def test_anthropic_thinking_disabled_claude_sets_low_thinking_level(self):
+    def test_anthropic_thinking_disabled_claude_raises_value_error(self):
         payload = {
             "model": "claude-sonnet-5-5",
             "messages": [{"role": "user", "content": "Hello"}],
             "thinking": {"type": "disabled"},
         }
-        res_model, _, _, gen_config, _ = anthropic_to_cloudcode_request(payload, "test-project")
-        self.assertEqual(res_model, "claude-sonnet-5-5")
-        self.assertIsNotNone(gen_config)
-        self.assertEqual(gen_config.get("thinkingConfig"), {"thinkingLevel": "LOW"})
+        with self.assertRaises(ValueError) as cm:
+            anthropic_to_cloudcode_request(payload, "test-project")
+        self.assertIn("between_tools", str(cm.exception))
 
     def test_anthropic_thinking_disabled_gemini_omits_thinking_config(self):
         payload = {
@@ -243,7 +257,7 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
             "messages": [{"role": "user", "content": "Hello"}],
             "thinking": {"type": "disabled"},
         }
-        res_model, _, _, gen_config, _ = anthropic_to_cloudcode_request(payload, "test-project")
+        res_model, _, _, gen_config, _, _ = anthropic_to_cloudcode_request(payload, "test-project")
         self.assertEqual(res_model, "gemini-2.5-pro")
         self.assertTrue(gen_config is None or "thinkingConfig" not in gen_config)
 
@@ -256,7 +270,7 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
                 {"role": "user", "content": "Thanks!"},
             ],
         }
-        _, contents, _, _, _ = anthropic_to_cloudcode_request(payload, "test-project")
+        _, contents, _, _, _, _ = anthropic_to_cloudcode_request(payload, "test-project")
         self.assertEqual(len(contents), 3)
         self.assertEqual(contents[0]["role"], "user")
         self.assertEqual(contents[0]["parts"], [{"text": "What is 2+2?"}])
@@ -289,7 +303,7 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
                 },
             ],
         }
-        _, contents, _, _, _ = anthropic_to_cloudcode_request(payload, "test-project")
+        _, contents, _, _, _, _ = anthropic_to_cloudcode_request(payload, "test-project")
         # Starts with assistant turn, so "Hello" user turn prepended
         self.assertEqual(contents[0]["role"], "user")
         self.assertEqual(contents[0]["parts"], [{"text": "Hello"}])
@@ -325,7 +339,7 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
                 },
             ],
         }
-        _, contents, _, _, _ = anthropic_to_cloudcode_request(payload, "test-project")
+        _, contents, _, _, _, _ = anthropic_to_cloudcode_request(payload, "test-project")
         # Turn 0: user
         self.assertEqual(contents[0]["role"], "user")
         self.assertEqual(contents[0]["parts"], [{"text": "What is the weather in Tokyo?"}])
@@ -370,7 +384,7 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
                 },
             ],
         }
-        _, contents, _, _, _ = anthropic_to_cloudcode_request(payload, "test-project")
+        _, contents, _, _, _, _ = anthropic_to_cloudcode_request(payload, "test-project")
         self.assertEqual(len(contents), 3)
         # Turn 1: model
         self.assertEqual(contents[1]["role"], "model")
@@ -399,7 +413,7 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
             "model": "gemini-3.1-pro-high",
             "messages": [{"role": "user", "content": "Think deeply"}],
         }
-        _, _, _, gen_config_high, _ = anthropic_to_cloudcode_request(payload_high, "test-project")
+        _, _, _, gen_config_high, _, _ = anthropic_to_cloudcode_request(payload_high, "test-project")
         self.assertEqual(gen_config_high["thinkingConfig"], {"thinkingLevel": "HIGH"})
 
         # Explicit client thinking override
@@ -408,26 +422,26 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
             "messages": [{"role": "user", "content": "Think deeply"}],
             "thinking": {"type": "enabled", "budget_tokens": 4096},
         }
-        _, _, _, gen_config_ovr, _ = anthropic_to_cloudcode_request(payload_override, "test-project")
+        _, _, _, gen_config_ovr, _, _ = anthropic_to_cloudcode_request(payload_override, "test-project")
         self.assertEqual(gen_config_ovr["thinkingConfig"], {"thinkingBudget": 4096})
 
     def test_omitted_or_aliased_model_resolves_to_flash_tiered(self):
         # Omitted model defaults to flash-tiered with HIGH thinking
-        model, _, _, gen_config, _ = anthropic_to_cloudcode_request(
+        model, _, _, gen_config, _, _ = anthropic_to_cloudcode_request(
             {"messages": [{"role": "user", "content": "Hi"}]}, "p"
         )
         self.assertEqual(model, "gemini-3.8-flash-tiered")
         self.assertEqual(gen_config.get("thinkingConfig"), {"thinkingLevel": "HIGH"})
 
         # "auto" model
-        model_auto, _, _, gen_config_auto, _ = anthropic_to_cloudcode_request(
+        model_auto, _, _, gen_config_auto, _, _ = anthropic_to_cloudcode_request(
             {"model": "auto", "messages": [{"role": "user", "content": "Hi"}]}, "p"
         )
         self.assertEqual(model_auto, "gemini-3.8-flash-tiered")
         self.assertEqual(gen_config_auto.get("thinkingConfig"), {"thinkingLevel": "HIGH"})
 
         # "gemini-3.8-flash-high"
-        model_fh, _, _, gen_config_fh, _ = anthropic_to_cloudcode_request(
+        model_fh, _, _, gen_config_fh, _, _ = anthropic_to_cloudcode_request(
             {"model": "gemini-3.8-flash-high", "messages": [{"role": "user", "content": "Hi"}]}, "p"
         )
         self.assertEqual(model_fh, "gemini-3.8-flash-tiered")
@@ -465,7 +479,7 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
                 {"role": "user", "content": "What about Mars?"},
             ],
         }
-        model, contents, _, gen_config, _ = anthropic_to_cloudcode_request(payload, "test-project")
+        model, contents, _, gen_config, _, _ = anthropic_to_cloudcode_request(payload, "test-project")
         self.assertEqual(model, "claude-sonnet-5-5")
         self.assertIsNotNone(gen_config)
         self.assertEqual(gen_config["thinkingConfig"], {"thinkingLevel": "HIGH"})
@@ -524,7 +538,7 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
                 },
             ],
         }
-        model, contents, _, _, _ = anthropic_to_cloudcode_request(payload, "test-project")
+        model, contents, _, _, _, _ = anthropic_to_cloudcode_request(payload, "test-project")
         self.assertEqual(model, "claude-sonnet-5-5")
         self.assertEqual(len(contents), 3)
         model_turn = contents[1]
@@ -545,6 +559,85 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
                 "functionCall": {"name": "get_weather", "args": {"city": "Paris"}},
             },
         )
+
+    def test_anthropic_tool_choice_auto_and_none(self):
+        for choice, expected_mode in (
+            ("auto", "AUTO"),
+            ({"type": "auto"}, "AUTO"),
+            ("none", "NONE"),
+            ({"type": "none"}, "NONE"),
+        ):
+            with self.subTest(choice=choice):
+                payload = {
+                    "model": "claude-sonnet-5-5",
+                    "messages": [{"role": "user", "content": "Hi"}],
+                    "tool_choice": choice,
+                }
+                _, _, _, _, _, tool_config = anthropic_to_cloudcode_request(payload, "test-project")
+                self.assertIsNotNone(tool_config)
+                self.assertEqual(tool_config, {"functionCallingConfig": {"mode": expected_mode}})
+
+    def test_anthropic_tool_choice_claude_5_5_rejects_any_and_tool(self):
+        for model in ("claude-sonnet-5-5", "claude-opus-5-5", "claude-haiku-5-5"):
+            for choice in ("any", {"type": "any"}):
+                with self.subTest(model=model, choice=choice):
+                    payload = {
+                        "model": model,
+                        "messages": [{"role": "user", "content": "Hi"}],
+                        "tool_choice": choice,
+                    }
+                    with self.assertRaises(ValueError) as cm:
+                        anthropic_to_cloudcode_request(payload, "test-project")
+                    self.assertIn("not supported for Claude 5.5", str(cm.exception))
+
+            with self.subTest(model=model, choice="tool"):
+                payload = {
+                    "model": model,
+                    "messages": [{"role": "user", "content": "Hi"}],
+                    "tool_choice": {"type": "tool", "name": "foo"},
+                }
+                with self.assertRaises(ValueError) as cm:
+                    anthropic_to_cloudcode_request(payload, "test-project")
+                self.assertIn("not supported for Claude 5.5", str(cm.exception))
+
+    def test_anthropic_tool_choice_gemini_allows_any_and_tool(self):
+        payload_any = {
+            "model": "gemini-2.5-pro",
+            "messages": [{"role": "user", "content": "Hi"}],
+            "tool_choice": {"type": "any"},
+        }
+        _, _, _, _, _, tc_any = anthropic_to_cloudcode_request(payload_any, "test-project")
+        self.assertEqual(tc_any, {"functionCallingConfig": {"mode": "ANY"}})
+
+        payload_tool = {
+            "model": "gemini-2.5-pro",
+            "messages": [{"role": "user", "content": "Hi"}],
+            "tool_choice": {"type": "tool", "name": "my_calc"},
+        }
+        _, _, _, _, _, tc_tool = anthropic_to_cloudcode_request(payload_tool, "test-project")
+        self.assertEqual(tc_tool, {"functionCallingConfig": {"mode": "ANY", "allowedFunctionNames": ["my_calc"]}})
+
+    def test_anthropic_tool_choice_invalid_raises_value_error(self):
+        with self.assertRaises(ValueError):
+            anthropic_to_cloudcode_request({
+                "model": "gemini-2.5-pro",
+                "messages": [{"role": "user", "content": "Hi"}],
+                "tool_choice": {"type": "tool"},
+            }, "p")
+
+        with self.assertRaises(ValueError):
+            anthropic_to_cloudcode_request({
+                "model": "gemini-2.5-pro",
+                "messages": [{"role": "user", "content": "Hi"}],
+                "tool_choice": {"type": "unsupported_type"},
+            }, "p")
+
+        with self.assertRaises(ValueError):
+            anthropic_to_cloudcode_request({
+                "model": "gemini-2.5-pro",
+                "messages": [{"role": "user", "content": "Hi"}],
+                "tool_choice": 12345,
+            }, "p")
 
 
 class TestAnthropicResponseBuilder(unittest.TestCase):

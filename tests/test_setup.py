@@ -3,6 +3,7 @@ import os
 import re
 import stat
 import subprocess
+import sys
 import tempfile
 import unittest
 import unittest.mock
@@ -1545,7 +1546,7 @@ class TestUpdateInstallation(unittest.TestCase):
 
         self.assertEqual(result["status"], "updated")
         self.assertTrue(result["restarted_daemon"])
-        self.assertEqual(result["version"], "0.17.1")
+        self.assertEqual(result["version"], "0.18.0")
         mock_run.assert_called_once_with(
             ["git", "-C", str(self.repo_dir), "pull", "--ff-only"],
             capture_output=True,
@@ -1834,7 +1835,7 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main([flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.17.1")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.18.0")
 
     def test_cli_subcommand_version_flags(self):
         from bridge.__main__ import main
@@ -1846,19 +1847,19 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main(["update", flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.17.1")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.18.0")
 
     def test_version_unification(self):
         import bridge
         from pathlib import Path
         import re
 
-        self.assertEqual(bridge.__version__, "0.17.1")
+        self.assertEqual(bridge.__version__, "0.18.0")
         pyproject_path = Path(__file__).resolve().parent.parent / "pyproject.toml"
         pyproject_text = pyproject_path.read_text(encoding="utf-8")
         match = re.search(r'version\s*=\s*"([^"]+)"', pyproject_text)
         self.assertIsNotNone(match)
-        self.assertEqual(match.group(1), "0.17.1")
+        self.assertEqual(match.group(1), "0.18.0")
 
 
 class TestClientConfiguratorRegistry(unittest.TestCase):
@@ -4857,6 +4858,25 @@ class TestUninstallScriptFallback(unittest.TestCase):
             )
             self.assertEqual(res.returncode, 0)
             self.assertIsNone(proc.poll(), "Unrelated process must not be killed by fallback")
+        finally:
+            proc.kill()
+            proc.wait()
+
+    def test_uninstall_fallback_does_not_kill_substring_matching_process(self):
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)", "--fake-bridge-malicious"])
+        try:
+            pid = proc.pid
+            (self.state_dir / "bridge.pid").write_text(str(pid), encoding="utf-8")
+
+            res = subprocess.run(
+                ["bash", str(UNINSTALL_SH)],
+                env=self.env,
+                cwd=str(self.root),
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(res.returncode, 0)
+            self.assertIsNone(proc.poll(), "Substring-matching process must not be killed by fallback")
         finally:
             proc.kill()
             proc.wait()

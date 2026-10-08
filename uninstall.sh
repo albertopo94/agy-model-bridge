@@ -79,7 +79,7 @@ if [ "$UNINSTALL_EXECUTED" = "0" ]; then
         if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
             CMDLINE=$(ps -p "$PID" -o command= 2>/dev/null || true)
             case "$CMDLINE" in
-                *-m\ bridge*|*agy-bridge*|*agy-model-bridge*)
+                *" -m bridge"|*" -m bridge "*|*"/agy-bridge"|*"/agy-bridge "*|*"/agy-model-bridge"|*"/agy-model-bridge "*|"agy-bridge"|"agy-bridge "*|"agy-model-bridge"|"agy-model-bridge "*)
                     if [ "$IS_ES" = "1" ]; then
                         echo -e "Deteniendo el daemon de AGY Model Bridge (PID $PID)..."
                     else
@@ -95,7 +95,7 @@ if [ "$UNINSTALL_EXECUTED" = "0" ]; then
                     if kill -0 "$PID" 2>/dev/null; then
                         CURRENT_CMD="$(ps -p "$PID" -o command= 2>/dev/null || true)"
                         case "$CURRENT_CMD" in
-                            *-m\ bridge*|*agy-bridge*|*agy-model-bridge*)
+                            *" -m bridge"|*" -m bridge "*|*"/agy-bridge"|*"/agy-bridge "*|*"/agy-model-bridge"|*"/agy-model-bridge "*|"agy-bridge"|"agy-bridge "*|"agy-model-bridge"|"agy-model-bridge "*)
                                 kill -9 "$PID" 2>/dev/null || true
                                 ;;
                         esac

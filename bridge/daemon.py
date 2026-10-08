@@ -311,9 +311,10 @@ def start_daemon(
         if no_auth:
             cmd.append("--no-auth")
 
-        if api_key:
+        effective_key = api_key or os.environ.get("AGY_API_KEY")
+        if effective_key:
             import bridge.security
-            bridge.security.write_api_key(api_key, daemon_dir=target_pid_file.parent)
+            bridge.security.write_api_key(effective_key, daemon_dir=target_pid_file.parent)
 
         child_env = os.environ.copy()
         child_env.pop("AGY_API_KEY", None)
