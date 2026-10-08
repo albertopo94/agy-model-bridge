@@ -69,6 +69,13 @@ def get_or_create_api_key(daemon_dir: Path | None = None) -> str:
     return new_key
 
 
+def _safe_compare(provided: str, expected: str) -> bool:
+    try:
+        return hmac.compare_digest(provided.encode("utf-8"), expected.encode("utf-8"))
+    except Exception:
+        return False
+
+
 def validate_api_key(expected_key: str | None, headers: Any) -> bool:
     """Validates the incoming HTTP request against the expected API key.
 
@@ -97,17 +104,17 @@ def validate_api_key(expected_key: str | None, headers: Any) -> bool:
     auth = get_header("Authorization")
     if auth.lower().startswith("bearer "):
         token = auth[7:].strip()
-        if token and hmac.compare_digest(token, expected):
+        if token and _safe_compare(token, expected):
             return True
 
     # Check x-api-key
     x_api_key = get_header("x-api-key")
-    if x_api_key and hmac.compare_digest(x_api_key, expected):
+    if x_api_key and _safe_compare(x_api_key, expected):
         return True
 
     # Check anthropic-auth-token
     anthropic_token = get_header("anthropic-auth-token")
-    if anthropic_token and hmac.compare_digest(anthropic_token, expected):
+    if anthropic_token and _safe_compare(anthropic_token, expected):
         return True
 
     return False

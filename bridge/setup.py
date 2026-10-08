@@ -258,8 +258,8 @@ def restore_backup(config_path: Path, backup_path: Path | None = None) -> Path:
 
     try:
         content = chosen_backup.read_text(encoding="utf-8")
-    except OSError:
-        content = ""
+    except OSError as exc:
+        raise OSError(f"Cannot read backup file {chosen_backup}: {exc}") from exc
 
     if "_zero_state" in content or chosen_backup.name.endswith("-original"):
         if target.exists() and target.is_file():

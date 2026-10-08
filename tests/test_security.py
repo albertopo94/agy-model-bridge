@@ -78,6 +78,32 @@ class TestSecurityModule(unittest.TestCase):
         self.assertEqual(key, "existing-key")
         self.assertEqual(stat.S_IMODE(key_file.stat().st_mode), 0o600)
 
+    def test_validate_api_key_non_ascii_headers_does_not_crash(self):
+        expected = "valid-secret-key"
+        self.assertFalse(validate_api_key(expected, {"x-api-key": "ñ"}))
+        self.assertFalse(validate_api_key(expected, {"Authorization": "Bearer áéíóú"}))
+        self.assertFalse(validate_api_key(expected, {"anthropic-auth-token": "🔑"}))
+
+    def test_create_server_defaults_to_secured(self):
+        from bridge.server import create_server
+        mock_client = mock.MagicMock()
+        with mock.patch("bridge.security.DEFAULT_DAEMON_DIR", self.daemon_dir):
+            server = create_server(host="127.0.0.1", port=0, client=mock_client, project="test-project")
+            try:
+                self.assertIsNotNone(server.api_key)
+                self.assertEqual(len(server.api_key), 48)
+            finally:
+                server.server_close()
+
+    def test_create_server_no_auth_disables_secured_mode(self):
+        from bridge.server import create_server
+        mock_client = mock.MagicMock()
+        server = create_server(host="127.0.0.1", port=0, client=mock_client, project="test-project", no_auth=True)
+        try:
+            self.assertIsNone(server.api_key)
+        finally:
+            server.server_close()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -70,6 +70,7 @@ class TestServerEndpoints(unittest.TestCase):
             port=0,
             client=cls.mock_client,
             project="test-project",
+            no_auth=True,
         )
         cls.port = cls.server.server_address[1]
         cls.base_url = f"http://127.0.0.1:{cls.port}"
@@ -512,6 +513,69 @@ class TestServerEndpoints(unittest.TestCase):
             client_mock.load_code_assist.assert_not_called()
         finally:
             server.server_close()
+
+    def test_create_server_defaults_to_secured(self):
+        with patch("bridge.security.get_or_create_api_key", return_value="auto-gen-key-123") as mock_get_key:
+            server = create_server(
+                host="127.0.0.1",
+                port=0,
+                client=self.mock_client,
+                project="my-override",
+            )
+            try:
+                mock_get_key.assert_called_once()
+                self.assertEqual(server.api_key, "auto-gen-key-123")
+                self.assertEqual(server.RequestHandlerClass.api_key, "auto-gen-key-123")
+            finally:
+                server.server_close()
+
+    def test_create_server_no_auth_disables_authentication(self):
+        with patch("bridge.security.get_or_create_api_key") as mock_get_key:
+            server = create_server(
+                host="127.0.0.1",
+                port=0,
+                client=self.mock_client,
+                project="my-override",
+                no_auth=True,
+            )
+            try:
+                mock_get_key.assert_not_called()
+                self.assertIsNone(server.api_key)
+                self.assertIsNone(server.RequestHandlerClass.api_key)
+            finally:
+                server.server_close()
+
+    def test_create_server_empty_api_key_runs_without_authentication(self):
+        with patch("bridge.security.get_or_create_api_key") as mock_get_key:
+            server = create_server(
+                host="127.0.0.1",
+                port=0,
+                client=self.mock_client,
+                project="my-override",
+                api_key="",
+            )
+            try:
+                mock_get_key.assert_not_called()
+                self.assertIsNone(server.api_key)
+                self.assertIsNone(server.RequestHandlerClass.api_key)
+            finally:
+                server.server_close()
+
+    def test_create_server_explicit_api_key_used(self):
+        with patch("bridge.security.get_or_create_api_key") as mock_get_key:
+            server = create_server(
+                host="127.0.0.1",
+                port=0,
+                client=self.mock_client,
+                project="my-override",
+                api_key="custom-key-xyz",
+            )
+            try:
+                mock_get_key.assert_not_called()
+                self.assertEqual(server.api_key, "custom-key-xyz")
+                self.assertEqual(server.RequestHandlerClass.api_key, "custom-key-xyz")
+            finally:
+                server.server_close()
 
     def test_streaming_broken_pipe_suppressed(self):
         handler = self.server.RequestHandlerClass.__new__(self.server.RequestHandlerClass)

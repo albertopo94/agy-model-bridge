@@ -401,6 +401,18 @@ class TestRestoreBackup(unittest.TestCase):
         self.assertEqual(restored, target)
         self.assertFalse(target.exists())
 
+    def test_restore_backup_unreadable_backup_raises_and_preserves_target(self):
+        target = self.dir_path / "settings.json"
+        target.write_text('{"preserved": "important_content"}', encoding="utf-8")
+        backup = self.dir_path / "settings.json.backup-corrupt"
+        backup.write_text('{"backup": "corrupt"}', encoding="utf-8")
+
+        with unittest.mock.patch.object(Path, "read_text", side_effect=OSError("Disk read error")):
+            with self.assertRaises(OSError):
+                restore_backup(target, backup_path=backup)
+
+        self.assertEqual(target.read_text(encoding="utf-8"), '{"preserved": "important_content"}')
+
 
 class TestSetupClaude(unittest.TestCase):
     def setUp(self):
@@ -1448,7 +1460,7 @@ class TestUpdateInstallation(unittest.TestCase):
 
         self.assertEqual(result["status"], "updated")
         self.assertTrue(result["restarted_daemon"])
-        self.assertEqual(result["version"], "0.15.4")
+        self.assertEqual(result["version"], "0.15.5")
         mock_run.assert_called_once_with(
             ["git", "-C", str(self.repo_dir), "pull", "--ff-only"],
             capture_output=True,
@@ -1661,7 +1673,7 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main([flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.15.4")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.15.5")
 
     def test_cli_subcommand_version_flags(self):
         from bridge.__main__ import main
@@ -1673,19 +1685,19 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main(["update", flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.15.4")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.15.5")
 
     def test_version_unification(self):
         import bridge
         from pathlib import Path
         import re
 
-        self.assertEqual(bridge.__version__, "0.15.4")
+        self.assertEqual(bridge.__version__, "0.15.5")
         pyproject_path = Path(__file__).resolve().parent.parent / "pyproject.toml"
         pyproject_text = pyproject_path.read_text(encoding="utf-8")
         match = re.search(r'version\s*=\s*"([^"]+)"', pyproject_text)
         self.assertIsNotNone(match)
-        self.assertEqual(match.group(1), "0.15.4")
+        self.assertEqual(match.group(1), "0.15.5")
 
 
 class TestClientConfiguratorRegistry(unittest.TestCase):

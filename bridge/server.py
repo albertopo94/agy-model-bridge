@@ -891,8 +891,15 @@ def create_server(
     project: str | None = None,
     base_url: str | None = None,
     api_key: str | None = None,
+    no_auth: bool = False,
 ) -> http.server.ThreadingHTTPServer:
     """Instantiates and configures a ThreadingHTTPServer instance."""
+    if no_auth or api_key == "":
+        api_key = None
+    elif api_key is None:
+        from bridge.security import get_or_create_api_key
+        api_key = get_or_create_api_key()
+
     if client is None:
         token_provider = KeychainTokenProvider()
         kwargs: dict[str, Any] = {"token_provider": token_provider}
@@ -940,11 +947,14 @@ def run_server(
     no_auth: bool = False,
 ) -> None:
     """Starts the ThreadingHTTPServer serving OpenAI-compatible endpoints."""
-    if not no_auth and api_key is None:
-        from bridge.security import get_or_create_api_key
-        api_key = get_or_create_api_key()
-
-    server = create_server(host=host, port=port, project=project, base_url=base_url, api_key=api_key)
+    server = create_server(
+        host=host,
+        port=port,
+        project=project,
+        base_url=base_url,
+        api_key=api_key,
+        no_auth=no_auth,
+    )
     actual_port = server.server_address[1]
     print(f"Antigravity Model Bridge listening on http://{host}:{actual_port}")
     try:
