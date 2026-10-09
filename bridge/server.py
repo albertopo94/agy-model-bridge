@@ -1,5 +1,7 @@
 """OpenAI-compatible HTTP server adapter for Google Cloud Code Assist."""
 
+from collections.abc import Iterator
+from dataclasses import dataclass, field
 import http.server
 import itertools
 import json
@@ -23,13 +25,11 @@ from bridge.errors import (
 )
 from bridge.events import parse_stream_event
 from bridge.transform import (
-    openai_to_cloudcode_request,
     parse_cloudcode_sse_event,
     build_openai_model_list,
     build_openai_error_response,
     check_sse_error,
     cache_thought_signature,
-    build_openai_sse_events,
     OpenAIProtocolAdapter,
     cache_tool_name,
 )
@@ -39,16 +39,22 @@ from bridge.security import validate_api_key, is_loopback_host
 from bridge.anthropic import (
     AnthropicProtocolAdapter,
     _extract_event_thought_signature,
-    anthropic_to_cloudcode_request,
-    build_anthropic_sse_events,
     build_anthropic_error_response,
 )
 from bridge.responses import (
-    responses_to_cloudcode_request,
-    build_responses_completion,
-    build_responses_sse_events,
+    ResponsesProtocolAdapter,
     build_responses_error_response,
 )
+
+
+@dataclass
+class CollectedStreamData:
+    text: str = ""
+    tool_calls: list[dict[str, Any]] = field(default_factory=list)
+    usage: dict[str, int] | None = None
+    finish_reason: str = "stop"
+    thoughts: str = ""
+    thought_signature: str | None = None
 
 
 class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
@@ -397,11 +403,171 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
         code, err_payload = build_anthropic_error_response(status_code, str(exc))
         self._send_json(code, err_payload)
 
+    def _prebuffer_stream(self, stream_gen: Iterator[str]) -> list[str]:
+        """Reads lines from stream_gen until finding the first non-empty, non-comment line.
+
+        Parses via parse_cloudcode_sse_event(line).
+        If parsed is not None: calls check_sse_error(parsed) and returns buffered_lines.
+        If EOF without finding valid event: raises InvalidRequestError("Stream ended without data").
+        """
+        buffered_lines: list[str] = []
+        found_valid_event = False
+        for line in stream_gen:
+            buffered_lines.append(line)
+            stripped = line.decode("utf-8").strip() if isinstance(line, (bytes, bytearray)) else line.strip()
+            if not stripped or stripped.startswith(":"):
+                continue
+            parsed = parse_cloudcode_sse_event(line)
+            if parsed is not None:
+                check_sse_error(parsed)
+                found_valid_event = True
+                break
+        if not found_valid_event:
+            raise InvalidRequestError("Stream ended without data")
+        return buffered_lines
+
+    def _dispatch_stream(
+        self,
+        model: str,
+        contents: list[dict[str, Any]],
+        system_instruction: dict[str, Any] | None,
+        extra_kwargs: dict[str, Any],
+        stream_builder: Any,
+        error_sender: Any,
+        stream_error_formatter: Any = None,
+    ) -> None:
+        stream_gen = None
+        try:
+            try:
+                stream_gen = self.client.stream_generate_content(
+                    self.project, model, contents, system_instruction, **extra_kwargs
+                )
+                buffered_lines = self._prebuffer_stream(stream_gen)
+            except (BrokenPipeError, ConnectionResetError):
+                if stream_gen is not None and hasattr(stream_gen, "close"):
+                    stream_gen.close()
+                return
+            except Exception as exc:
+                if stream_gen is not None and hasattr(stream_gen, "close"):
+                    stream_gen.close()
+                error_sender(exc)
+                return
+
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "close")
+            self.end_headers()
+
+            combined_gen = itertools.chain(buffered_lines, stream_gen)
+            try:
+                for chunk_str in stream_builder(combined_gen):
+                    self.wfile.write(chunk_str.encode("utf-8") if isinstance(chunk_str, str) else chunk_str)
+                    self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            except Exception as exc:
+                sys.stderr.write(f"Error during stream: {exc}\n")
+                sys.stderr.flush()
+                if stream_error_formatter is not None:
+                    try:
+                        err_payload = stream_error_formatter(exc)
+                        if err_payload:
+                            self.wfile.write(
+                                err_payload.encode("utf-8") if isinstance(err_payload, str) else err_payload
+                            )
+                            self.wfile.flush()
+                    except Exception:
+                        pass
+        finally:
+            if stream_gen is not None and hasattr(stream_gen, "close"):
+                stream_gen.close()
+            self.close_connection = True
+
+    def _dispatch_non_streaming(
+        self,
+        model: str,
+        contents: list[dict[str, Any]],
+        system_instruction: dict[str, Any] | None,
+        extra_kwargs: dict[str, Any],
+        response_builder: Any,
+        error_sender: Any = None,
+    ) -> None:
+        if error_sender is None:
+            error_sender = self._send_error
+
+        stream_gen = None
+        try:
+            stream_gen = self.client.stream_generate_content(
+                self.project, model, contents, system_instruction, **extra_kwargs
+            )
+            try:
+                text_parts: list[str] = []
+                thought_parts: list[str] = []
+                collected_tool_calls: list[dict[str, Any]] = []
+                last_usage: dict[str, int] | None = None
+                last_finish_reason: str = "stop"
+                latest_thought_sig: str | None = None
+                event_count = 0
+                has_finish_reason = False
+
+                for line in stream_gen:
+                    parsed = parse_cloudcode_sse_event(line)
+                    if parsed is None:
+                        continue
+                    event = parse_stream_event(parsed, check_error=True)
+                    event_count += 1
+                    sig = event.thought_signature or _extract_event_thought_signature(parsed)
+                    if sig:
+                        latest_thought_sig = sig
+                    if event.usage:
+                        last_usage = event.usage.to_dict()
+                    if event.finish_reason:
+                        has_finish_reason = True
+                        last_finish_reason = event.finish_reason
+                    if event.delta_thought:
+                        thought_parts.append(event.delta_thought)
+                    if event.delta_text:
+                        text_parts.append(event.delta_text)
+                    if event.tool_calls:
+                        collected_tool_calls.extend(tc.to_dict() for tc in event.tool_calls)
+
+                if (
+                    event_count == 0
+                    and not text_parts
+                    and not thought_parts
+                    and not collected_tool_calls
+                    and not has_finish_reason
+                ):
+                    raise BridgeError("Stream ended without data")
+
+                collected_data = CollectedStreamData(
+                    text="".join(text_parts),
+                    tool_calls=collected_tool_calls,
+                    usage=last_usage,
+                    finish_reason=last_finish_reason,
+                    thoughts="".join(thought_parts),
+                    thought_signature=latest_thought_sig,
+                )
+
+                resp_obj = response_builder(collected_data)
+                try:
+                    self._send_json(200, resp_obj)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+            finally:
+                if stream_gen is not None and hasattr(stream_gen, "close"):
+                    stream_gen.close()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        except Exception as exc:
+            error_sender(exc)
+
     def _handle_anthropic_messages(self, payload: dict[str, Any]) -> None:
         try:
             stream = bool(payload.get("stream", False))
-            model, contents, system_instruction, generation_config, tools, tool_config = anthropic_to_cloudcode_request(
-                payload, self.project
+            model, contents, system_instruction, generation_config, tools, tool_config = (
+                AnthropicProtocolAdapter.transform_request(payload, self.project)
             )
         except ValueError as ve:
             code, err = build_anthropic_error_response(400, str(ve))
@@ -420,145 +586,58 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
             extra_kwargs["tool_config"] = tool_config
 
         if stream:
-            try:
-                stream_gen = self.client.stream_generate_content(
-                    self.project, model, contents, system_instruction, **extra_kwargs
-                )
-            except Exception as exc:
-                self._send_anthropic_error(exc)
-                return
+            def anthropic_stream_error(exc: Exception) -> str:
+                err_payload = json.dumps({"type": "error", "error": {"type": "api_error", "message": str(exc)}})
+                return f"event: error\ndata: {err_payload}\n\n"
 
-            buffered_lines: list[str] = []
-            found_valid_event = False
-            try:
-                for line in stream_gen:
-                    buffered_lines.append(line)
-                    stripped = line.strip()
-                    if not stripped or stripped.startswith(":"):
-                        continue
-                    parsed = parse_cloudcode_sse_event(line)
-                    if parsed is not None:
-                        check_sse_error(parsed)
-                        found_valid_event = True
-                        break
-                if not found_valid_event:
-                    raise InvalidRequestError("Stream ended without data")
-            except Exception as exc:
-                if hasattr(stream_gen, "close"):
-                    stream_gen.close()
-                self._send_anthropic_error(exc)
-                return
-
-            self.send_response(200)
-            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
-            self.send_header("Cache-Control", "no-cache")
-            self.send_header("Connection", "close")
-            self.end_headers()
-
-            combined_gen = itertools.chain(buffered_lines, stream_gen)
-
-            try:
-                try:
-                    for event_str in build_anthropic_sse_events(combined_gen, model):
-                        self.wfile.write(event_str.encode("utf-8"))
-                        self.wfile.flush()
-                except (BrokenPipeError, ConnectionResetError):
-                    pass
-                except Exception as exc:
-                    sys.stderr.write(f"Error during Anthropic stream: {exc}\n")
-                    sys.stderr.flush()
-                    try:
-                        err_payload = json.dumps({"type": "error", "error": {"type": "api_error", "message": str(exc)}})
-                        self.wfile.write(f"event: error\ndata: {err_payload}\n\n".encode("utf-8"))
-                        self.wfile.flush()
-                    except Exception:
-                        pass
-            finally:
-                if hasattr(stream_gen, "close"):
-                    stream_gen.close()
-                self.close_connection = True
-            return
-
-        try:
-            stream_gen = self.client.stream_generate_content(
-                self.project, model, contents, system_instruction, **extra_kwargs
+            self._dispatch_stream(
+                model=model,
+                contents=contents,
+                system_instruction=system_instruction,
+                extra_kwargs=extra_kwargs,
+                stream_builder=lambda gen: AnthropicProtocolAdapter.build_stream(gen, model),
+                error_sender=self._send_anthropic_error,
+                stream_error_formatter=anthropic_stream_error,
             )
-            try:
-                collected_text: list[str] = []
-                collected_thoughts: list[str] = []
-                collected_tool_calls: list[dict[str, Any]] = []
-                latest_thought_sig: str | None = None
-                last_usage = None
-                last_finish = "end_turn"
-                event_count = 0
-                has_finish_reason = False
-                for line in stream_gen:
-                    parsed = parse_cloudcode_sse_event(line)
-                    if parsed is not None:
-                        event = parse_stream_event(parsed, check_error=True)
-                        event_count += 1
-                        sig = event.thought_signature or _extract_event_thought_signature(parsed)
-                        if sig:
-                            latest_thought_sig = sig
-                        if event.usage:
-                            last_usage = event.usage.to_dict()
-                        if event.finish_reason:
-                            has_finish_reason = True
-                            if event.finish_reason in ("length", "max_tokens"):
-                                last_finish = "max_tokens"
-                            elif event.finish_reason in ("stop_sequence", "tool_use"):
-                                last_finish = event.finish_reason
-                            else:
-                                last_finish = "end_turn"
-                        if event.delta_thought:
-                            collected_thoughts.append(event.delta_thought)
-                        if event.delta_text:
-                            collected_text.append(event.delta_text)
-                        if event.tool_calls:
-                            collected_tool_calls.extend(tc.to_dict() for tc in event.tool_calls)
-
-                if (
-                    event_count == 0
-                    and not collected_text
-                    and not collected_thoughts
-                    and not collected_tool_calls
-                    and not has_finish_reason
-                ):
-                    raise BridgeError("Stream ended without data")
-
-                if collected_tool_calls:
-                    last_finish = "tool_use"
+        else:
+            def anthropic_response_builder(collected: CollectedStreamData) -> dict[str, Any]:
+                stop_reason = "end_turn"
+                if collected.finish_reason:
+                    if collected.finish_reason in ("length", "max_tokens"):
+                        stop_reason = "max_tokens"
+                    elif collected.finish_reason in ("stop_sequence", "tool_use"):
+                        stop_reason = collected.finish_reason
+                    else:
+                        stop_reason = "end_turn"
+                if collected.tool_calls:
+                    stop_reason = "tool_use"
 
                 msg_id = f"msg_{uuid.uuid4().hex[:16]}"
-                full_text = "".join(collected_text)
-                full_thought = "".join(collected_thoughts) if collected_thoughts else None
-                resp_obj = AnthropicProtocolAdapter.build_response(
+                return AnthropicProtocolAdapter.build_response(
                     message_id=msg_id,
                     model=model,
-                    text=full_text,
-                    usage=last_usage,
-                    stop_reason=last_finish,
-                    tool_calls=collected_tool_calls if collected_tool_calls else None,
-                    thought=full_thought,
-                    thought_signature=latest_thought_sig,
+                    text=collected.text,
+                    usage=collected.usage,
+                    stop_reason=stop_reason,
+                    tool_calls=collected.tool_calls if collected.tool_calls else None,
+                    thought=collected.thoughts if collected.thoughts else None,
+                    thought_signature=collected.thought_signature,
                 )
-                try:
-                    self._send_json(200, resp_obj)
-                except (BrokenPipeError, ConnectionResetError):
-                    pass
-            finally:
-                if hasattr(stream_gen, "close"):
-                    stream_gen.close()
-        except (BrokenPipeError, ConnectionResetError):
-            pass
-        except Exception as exc:
-            self._send_anthropic_error(exc)
+
+            self._dispatch_non_streaming(
+                model=model,
+                contents=contents,
+                system_instruction=system_instruction,
+                extra_kwargs=extra_kwargs,
+                response_builder=anthropic_response_builder,
+                error_sender=self._send_anthropic_error,
+            )
 
     def _handle_responses(self, payload: dict[str, Any]) -> None:
         try:
             stream = bool(payload.get("stream", False))
-            model, contents, system_instruction, generation_config, tools = responses_to_cloudcode_request(
-                payload, self.project
+            model, contents, system_instruction, generation_config, tools = (
+                ResponsesProtocolAdapter.transform_request(payload, self.project)
             )
         except ValueError as ve:
             code, err = build_responses_error_response(400, str(ve))
@@ -575,126 +654,52 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
             extra_kwargs["tools"] = tools
 
         if stream:
-            try:
-                stream_gen = self.client.stream_generate_content(
-                    self.project, model, contents, system_instruction, **extra_kwargs
-                )
-            except Exception as exc:
-                self._send_error(exc)
-                return
-
-            buffered_lines: list[str] = []
-            found_valid_event = False
-            try:
-                for line in stream_gen:
-                    buffered_lines.append(line)
-                    stripped = line.strip()
-                    if not stripped or stripped.startswith(":"):
-                        continue
-                    parsed = parse_cloudcode_sse_event(line)
-                    if parsed is not None:
-                        check_sse_error(parsed)
-                        found_valid_event = True
-                        break
-                if not found_valid_event:
-                    raise InvalidRequestError("Stream ended without data")
-            except Exception as exc:
-                if hasattr(stream_gen, "close"):
-                    stream_gen.close()
-                self._send_error(exc)
-                return
-
-            self.send_response(200)
-            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
-            self.send_header("Cache-Control", "no-cache")
-            self.send_header("Connection", "close")
-            self.end_headers()
-
             response_id = f"resp_{uuid.uuid4().hex[:16]}"
-            combined_gen = itertools.chain(buffered_lines, stream_gen)
 
-            try:
-                try:
-                    for event_str in build_responses_sse_events(combined_gen, model, response_id=response_id):
-                        self.wfile.write(event_str.encode("utf-8"))
-                        self.wfile.flush()
-                except (BrokenPipeError, ConnectionResetError):
-                    pass
-                except Exception as exc:
-                    sys.stderr.write(f"Error during Responses stream: {exc}\n")
-                    sys.stderr.flush()
-                    try:
-                        err_payload = json.dumps({
-                            "type": "response.failed",
-                            "response": {
-                                "id": response_id,
-                                "status": "failed",
-                                "error": {"message": str(exc)},
-                            },
-                        })
-                        self.wfile.write(f"event: response.failed\ndata: {err_payload}\n\n".encode("utf-8"))
-                        self.wfile.flush()
-                    except Exception:
-                        pass
-            finally:
-                if hasattr(stream_gen, "close"):
-                    stream_gen.close()
-                self.close_connection = True
-            return
+            def responses_stream_error(exc: Exception) -> str:
+                err_payload = json.dumps({
+                    "type": "response.failed",
+                    "response": {
+                        "id": response_id,
+                        "status": "failed",
+                        "error": {"message": str(exc)},
+                    },
+                })
+                return f"event: response.failed\ndata: {err_payload}\n\n"
 
-        try:
-            stream_gen = self.client.stream_generate_content(
-                self.project, model, contents, system_instruction, **extra_kwargs
+            self._dispatch_stream(
+                model=model,
+                contents=contents,
+                system_instruction=system_instruction,
+                extra_kwargs=extra_kwargs,
+                stream_builder=lambda gen: ResponsesProtocolAdapter.build_stream(gen, model, response_id=response_id),
+                error_sender=self._send_error,
+                stream_error_formatter=responses_stream_error,
             )
-            try:
-                collected_text: list[str] = []
-                collected_tool_calls: list[dict[str, Any]] = []
-                last_usage = None
-                event_count = 0
-                has_finish_reason = False
-                for line in stream_gen:
-                    parsed = parse_cloudcode_sse_event(line)
-                    if parsed is not None:
-                        event = parse_stream_event(parsed, check_error=True)
-                        event_count += 1
-                        if event.usage:
-                            last_usage = event.usage.to_dict()
-                        if event.finish_reason:
-                            has_finish_reason = True
-                        if event.delta_text:
-                            collected_text.append(event.delta_text)
-                        if event.tool_calls:
-                            collected_tool_calls.extend(tc.to_dict() for tc in event.tool_calls)
-
-                if event_count == 0 and not collected_text and not has_finish_reason and not collected_tool_calls:
-                    raise BridgeError("Stream ended without data")
-
+        else:
+            def responses_response_builder(collected: CollectedStreamData) -> dict[str, Any]:
                 resp_id = f"resp_{uuid.uuid4().hex[:16]}"
-                full_text = "".join(collected_text)
-                resp_obj = build_responses_completion(
+                return ResponsesProtocolAdapter.build_response(
                     response_id=resp_id,
                     model=model,
-                    text=full_text,
-                    usage=last_usage,
-                    tool_calls=collected_tool_calls if collected_tool_calls else None,
+                    text=collected.text,
+                    usage=collected.usage,
+                    tool_calls=collected.tool_calls if collected.tool_calls else None,
                 )
-                try:
-                    self._send_json(200, resp_obj)
-                except (BrokenPipeError, ConnectionResetError):
-                    pass
-            finally:
-                if hasattr(stream_gen, "close"):
-                    stream_gen.close()
-        except (BrokenPipeError, ConnectionResetError):
-            pass
-        except Exception as exc:
-            self._send_error(exc)
+
+            self._dispatch_non_streaming(
+                model=model,
+                contents=contents,
+                system_instruction=system_instruction,
+                extra_kwargs=extra_kwargs,
+                response_builder=responses_response_builder,
+            )
 
     def _handle_chat_completion(self, payload: dict[str, Any]) -> None:
         try:
             stream = bool(payload.get("stream", False))
-            model, contents, system_instruction, generation_config, tools = openai_to_cloudcode_request(
-                payload, self.project
+            model, contents, system_instruction, generation_config, tools = (
+                OpenAIProtocolAdapter.transform_request(payload, self.project)
             )
         except ValueError as ve:
             self._send_json(
@@ -720,141 +725,67 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
             extra_kwargs["tools"] = tools
 
         if stream:
-            try:
-                stream_gen = self.client.stream_generate_content(
-                    self.project, model, contents, system_instruction, **extra_kwargs
-                )
-            except Exception as exc:
-                self._send_error(exc)
-                return
+            def chat_stream_error(exc: Exception) -> str:
+                err_code, err_type = self._get_error_details(exc)
+                err_payload = json.dumps({"error": {"message": str(exc), "type": err_type, "code": err_code}})
+                return f"data: {err_payload}\n\n"
 
-            buffered_lines: list[str] = []
-            found_valid_event = False
-            try:
-                for line in stream_gen:
-                    buffered_lines.append(line)
-                    stripped = line.strip()
-                    if not stripped or stripped.startswith(":"):
-                        continue
-                    parsed = parse_cloudcode_sse_event(line)
-                    if parsed is not None:
-                        check_sse_error(parsed)
-                        found_valid_event = True
-                        break
-                if not found_valid_event:
-                    raise InvalidRequestError("Stream ended without data")
-            except Exception as exc:
-                if hasattr(stream_gen, "close"):
-                    stream_gen.close()
-                self._send_error(exc)
-                return
-
-            self.send_response(200)
-            self.send_header("Content-Type", "text/event-stream")
-            self.send_header("Cache-Control", "no-cache")
-            self.send_header("Connection", "close")
-            self.end_headers()
-
-            combined_gen = itertools.chain(buffered_lines, stream_gen)
-            try:
-                try:
-                    for chunk_str in build_openai_sse_events(combined_gen, model, completion_id=completion_id):
-                        self.wfile.write(chunk_str.encode("utf-8"))
-                        self.wfile.flush()
-                except (BrokenPipeError, ConnectionResetError):
-                    pass
-                except Exception as exc:
-                    print(f"Error during stream: {exc}", file=sys.stderr)
-                    try:
-                        err_code, err_type = self._get_error_details(exc)
-                        err_payload = json.dumps({"error": {"message": str(exc), "type": err_type, "code": err_code}})
-                        self.wfile.write(f"data: {err_payload}\n\n".encode("utf-8"))
-                        self.wfile.flush()
-                    except Exception:
-                        pass
-
-            finally:
-                if hasattr(stream_gen, "close"):
-                    stream_gen.close()
-                self.close_connection = True
+            self._dispatch_stream(
+                model=model,
+                contents=contents,
+                system_instruction=system_instruction,
+                extra_kwargs=extra_kwargs,
+                stream_builder=lambda gen: OpenAIProtocolAdapter.build_stream(gen, model, completion_id=completion_id),
+                error_sender=self._send_error,
+                stream_error_formatter=chat_stream_error,
+            )
         else:
-            try:
-                stream_gen = self.client.stream_generate_content(
-                    self.project, model, contents, system_instruction, **extra_kwargs
+            def chat_response_builder(collected: CollectedStreamData) -> dict[str, Any]:
+                formatted_tool_calls = None
+                finish_reason = collected.finish_reason
+                if collected.tool_calls:
+                    finish_reason = "tool_calls"
+                    formatted_tool_calls = []
+                    for fc in collected.tool_calls:
+                        tc_id = fc.get("id") or f"call_{uuid.uuid4().hex[:12]}"
+                        if tc_id.startswith("toolu_"):
+                            tc_id = f"call_{tc_id[6:]}"
+                        args = fc.get("args", {})
+                        args_str = json.dumps(args) if isinstance(args, (dict, list)) else str(args or "{}")
+                        thought_sig = fc.get("thought_signature") or fc.get("thoughtSignature")
+                        if thought_sig:
+                            cache_thought_signature(call_id=tc_id, signature=thought_sig, name=fc.get("name"), args=args)
+                        if fc.get("name") and tc_id:
+                            cache_tool_name(tc_id, fc.get("name"))
+                        call_dict: dict[str, Any] = {
+                            "id": tc_id,
+                            "type": "function",
+                            "function": {
+                                "name": fc.get("name", ""),
+                                "arguments": args_str,
+                            },
+                        }
+                        if thought_sig:
+                            call_dict["thought_signature"] = thought_sig
+                        formatted_tool_calls.append(call_dict)
+
+                return OpenAIProtocolAdapter.build_response(
+                    completion_id,
+                    model,
+                    collected.text,
+                    usage=collected.usage,
+                    finish_reason=finish_reason,
+                    tool_calls=formatted_tool_calls,
                 )
-                try:
-                    text_parts: list[str] = []
-                    collected_tool_calls: list[dict[str, Any]] = []
-                    last_usage: dict[str, int] | None = None
-                    last_finish_reason: str = "stop"
-                    event_count = 0
-                    has_finish_reason = False
-                    for line in stream_gen:
-                        parsed = parse_cloudcode_sse_event(line)
-                        if not parsed:
-                            continue
-                        event = parse_stream_event(parsed, check_error=True)
-                        event_count += 1
-                        if event.delta_text:
-                            text_parts.append(event.delta_text)
-                        if event.finish_reason:
-                            has_finish_reason = True
-                            last_finish_reason = event.finish_reason
-                        if event.usage:
-                            last_usage = event.usage.to_dict()
-                        if event.tool_calls:
-                            collected_tool_calls.extend(tc.to_dict() for tc in event.tool_calls)
 
-                    if event_count == 0 and not text_parts and not has_finish_reason and not collected_tool_calls:
-                        raise BridgeError("Stream ended without data")
+            self._dispatch_non_streaming(
+                model=model,
+                contents=contents,
+                system_instruction=system_instruction,
+                extra_kwargs=extra_kwargs,
+                response_builder=chat_response_builder,
+            )
 
-                    formatted_tool_calls = None
-                    if collected_tool_calls:
-                        last_finish_reason = "tool_calls"
-                        formatted_tool_calls = []
-                        for fc in collected_tool_calls:
-                            tc_id = fc.get("id") or f"call_{uuid.uuid4().hex[:12]}"
-                            if tc_id.startswith("toolu_"):
-                                tc_id = f"call_{tc_id[6:]}"
-                            args = fc.get("args", {})
-                            args_str = json.dumps(args) if isinstance(args, (dict, list)) else str(args or "{}")
-                            thought_sig = fc.get("thought_signature") or fc.get("thoughtSignature")
-                            if thought_sig:
-                                cache_thought_signature(call_id=tc_id, signature=thought_sig, name=fc.get("name"), args=args)
-                            if fc.get("name") and tc_id:
-                                cache_tool_name(tc_id, fc.get("name"))
-                            call_dict: dict[str, Any] = {
-                                "id": tc_id,
-                                "type": "function",
-                                "function": {
-                                    "name": fc.get("name", ""),
-                                    "arguments": args_str,
-                                },
-                            }
-                            if thought_sig:
-                                call_dict["thought_signature"] = thought_sig
-                            formatted_tool_calls.append(call_dict)
-
-                    full_text = "".join(text_parts)
-                    completion_obj = OpenAIProtocolAdapter.build_response(
-                        completion_id,
-                        model,
-                        full_text,
-                        usage=last_usage,
-                        finish_reason=last_finish_reason,
-                        tool_calls=formatted_tool_calls,
-                    )
-                    try:
-                        self._send_json(200, completion_obj)
-                    except (BrokenPipeError, ConnectionResetError):
-                        pass
-                finally:
-                    if hasattr(stream_gen, "close"):
-                        stream_gen.close()
-            except (BrokenPipeError, ConnectionResetError):
-                pass
-            except Exception as exc:
-                self._send_error(exc)
 
 
 def create_server(

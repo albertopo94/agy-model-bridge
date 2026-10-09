@@ -1703,6 +1703,209 @@ class TestNoAuthSecurityGuards(unittest.TestCase):
         server.server_close()
 
 
+
+class TestUnifiedDispatchers(unittest.TestCase):
+    def test_collected_stream_data_defaults(self):
+        from bridge.server import CollectedStreamData
+        data = CollectedStreamData()
+        self.assertEqual(data.text, "")
+        self.assertEqual(data.tool_calls, [])
+        self.assertIsNone(data.usage)
+        self.assertEqual(data.finish_reason, "stop")
+        self.assertEqual(data.thoughts, "")
+        self.assertIsNone(data.thought_signature)
+
+    def test_collected_stream_data_custom(self):
+        from bridge.server import CollectedStreamData
+        data = CollectedStreamData(
+            text="hello",
+            tool_calls=[{"id": "call_1"}],
+            usage={"total_tokens": 10},
+            finish_reason="tool_calls",
+            thoughts="pondering",
+            thought_signature="sig123",
+        )
+        self.assertEqual(data.text, "hello")
+        self.assertEqual(data.tool_calls, [{"id": "call_1"}])
+        self.assertEqual(data.usage, {"total_tokens": 10})
+        self.assertEqual(data.finish_reason, "tool_calls")
+        self.assertEqual(data.thoughts, "pondering")
+        self.assertEqual(data.thought_signature, "sig123")
+
+    def test_prebuffer_stream_skips_comments_and_buffers(self):
+        handler = OpenAIRequestHandler.__new__(OpenAIRequestHandler)
+        lines = [
+            ": heartbeat\n",
+            "\n",
+            'data: {"candidates": [{"content": {"parts": [{"text": "Hi"}]}}]}\n',
+            'data: {"candidates": [{"finishReason": "STOP"}]}\n',
+        ]
+        buffered = handler._prebuffer_stream(iter(lines))
+        self.assertEqual(len(buffered), 3)
+        self.assertEqual(buffered[0], ": heartbeat\n")
+        self.assertEqual(buffered[1], "\n")
+        self.assertIn('"Hi"', buffered[2])
+
+    def test_prebuffer_stream_eof_without_data_raises_invalid_request_error(self):
+        from bridge.errors import InvalidRequestError
+        handler = OpenAIRequestHandler.__new__(OpenAIRequestHandler)
+        lines = [": heartbeat\n", "\n"]
+        with self.assertRaises(InvalidRequestError) as ctx:
+            handler._prebuffer_stream(iter(lines))
+        self.assertIn("Stream ended without data", str(ctx.exception))
+
+    def test_prebuffer_stream_propagates_sse_error(self):
+        from bridge.errors import RateLimitError
+        handler = OpenAIRequestHandler.__new__(OpenAIRequestHandler)
+        lines = ['data: {"error": {"code": 429, "message": "Resource exhausted"}}\n']
+        with self.assertRaises(RateLimitError):
+            handler._prebuffer_stream(iter(lines))
+
+    def test_dispatch_stream_success(self):
+        handler = OpenAIRequestHandler.__new__(OpenAIRequestHandler)
+        handler.project = "test-proj"
+        mock_client = MagicMock()
+        mock_client.stream_generate_content.return_value = iter([
+            'data: {"candidates": [{"content": {"parts": [{"text": "Hi"}]}}]}\n',
+        ])
+        handler.client = mock_client
+        handler.wfile = MagicMock()
+        handler.send_response = MagicMock()
+        handler.send_header = MagicMock()
+        handler.end_headers = MagicMock()
+        handler.close_connection = False
+
+        error_sender = MagicMock()
+        handler._dispatch_stream(
+            model="gemini-2.5-pro",
+            contents=[],
+            system_instruction=None,
+            extra_kwargs={},
+            stream_builder=lambda gen: [f"chunk: {x}" for x in gen],
+            error_sender=error_sender,
+        )
+
+        handler.send_response.assert_called_with(200)
+        self.assertTrue(handler.close_connection)
+        self.assertEqual(error_sender.call_count, 0)
+        self.assertTrue(handler.wfile.write.called)
+
+    def test_dispatch_stream_prebuffer_error_calls_error_sender(self):
+        from bridge.errors import InvalidRequestError
+        handler = OpenAIRequestHandler.__new__(OpenAIRequestHandler)
+        handler.project = "test-proj"
+        mock_client = MagicMock()
+        # Empty stream triggers InvalidRequestError in _prebuffer_stream
+        mock_client.stream_generate_content.return_value = iter([])
+        handler.client = mock_client
+        handler.wfile = MagicMock()
+        handler.send_response = MagicMock()
+        handler.send_header = MagicMock()
+        handler.end_headers = MagicMock()
+
+        error_sender = MagicMock()
+        handler._dispatch_stream(
+            model="gemini-2.5-pro",
+            contents=[],
+            system_instruction=None,
+            extra_kwargs={},
+            stream_builder=lambda gen: gen,
+            error_sender=error_sender,
+        )
+
+        self.assertEqual(error_sender.call_count, 1)
+        self.assertIsInstance(error_sender.call_args[0][0], InvalidRequestError)
+        self.assertFalse(handler.send_response.called)
+
+    def test_dispatch_stream_mid_stream_error_formats_and_writes_payload(self):
+        def failing_gen():
+            yield 'data: {"candidates": [{"content": {"parts": [{"text": "Part 1"}]}}]}\n'
+            raise RuntimeError("Mid-stream explosion")
+
+        handler = OpenAIRequestHandler.__new__(OpenAIRequestHandler)
+        handler.project = "test-proj"
+        mock_client = MagicMock()
+        mock_client.stream_generate_content.return_value = failing_gen()
+        handler.client = mock_client
+        written = []
+        handler.wfile = MagicMock()
+        handler.wfile.write.side_effect = lambda data: written.append(data.decode("utf-8") if isinstance(data, bytes) else data)
+        handler.send_response = MagicMock()
+        handler.send_header = MagicMock()
+        handler.end_headers = MagicMock()
+
+        with patch("sys.stderr", new_callable=io.StringIO) as mock_stderr:
+            handler._dispatch_stream(
+                model="gemini-2.5-pro",
+                contents=[],
+                system_instruction=None,
+                extra_kwargs={},
+                stream_builder=lambda gen: (line for line in gen),
+                error_sender=MagicMock(),
+                stream_error_formatter=lambda exc: f"event: error\ndata: {str(exc)}\n\n",
+            )
+            self.assertIn("Error during stream: Mid-stream explosion", mock_stderr.getvalue())
+
+        self.assertTrue(any("event: error" in w and "Mid-stream explosion" in w for w in written))
+        self.assertTrue(handler.close_connection)
+
+    def test_dispatch_non_streaming_success(self):
+        handler = OpenAIRequestHandler.__new__(OpenAIRequestHandler)
+        handler.project = "test-proj"
+        mock_client = MagicMock()
+        mock_client.stream_generate_content.return_value = iter([
+            'data: {"candidates": [{"content": {"parts": [{"thought": true, "text": "ponder"}]}}]}\n',
+            'data: {"candidates": [{"content": {"parts": [{"text": "Hello world"}]}}], "usageMetadata": {"promptTokenCount": 2, "candidatesTokenCount": 3, "totalTokenCount": 5}}\n',
+            'data: {"candidates": [{"finishReason": "STOP"}]}\n',
+        ])
+        handler.client = mock_client
+        handler._send_json = MagicMock()
+
+        builder_called_with = []
+
+        def my_builder(collected):
+            builder_called_with.append(collected)
+            return {"built": True, "text": collected.text}
+
+        handler._dispatch_non_streaming(
+            model="gemini-2.5-pro",
+            contents=[],
+            system_instruction=None,
+            extra_kwargs={},
+            response_builder=my_builder,
+        )
+
+        self.assertEqual(len(builder_called_with), 1)
+        collected = builder_called_with[0]
+        self.assertEqual(collected.text, "Hello world")
+        self.assertEqual(collected.thoughts, "ponder")
+        self.assertEqual(collected.finish_reason, "stop")
+        self.assertEqual(collected.usage, {"prompt_tokens": 2, "completion_tokens": 3, "total_tokens": 5})
+        handler._send_json.assert_called_with(200, {"built": True, "text": "Hello world"})
+
+    def test_dispatch_non_streaming_empty_stream_calls_error_sender(self):
+        handler = OpenAIRequestHandler.__new__(OpenAIRequestHandler)
+        handler.project = "test-proj"
+        mock_client = MagicMock()
+        mock_client.stream_generate_content.return_value = iter([])
+        handler.client = mock_client
+        handler._send_json = MagicMock()
+        error_sender = MagicMock()
+
+        handler._dispatch_non_streaming(
+            model="gemini-2.5-pro",
+            contents=[],
+            system_instruction=None,
+            extra_kwargs={},
+            response_builder=lambda c: {},
+            error_sender=error_sender,
+        )
+
+        self.assertEqual(error_sender.call_count, 1)
+        self.assertIsInstance(error_sender.call_args[0][0], BridgeError)
+        self.assertIn("Stream ended without data", str(error_sender.call_args[0][0]))
+
+
 if __name__ == "__main__":
     unittest.main()
 
