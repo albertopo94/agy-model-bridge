@@ -9,7 +9,9 @@ import shutil
 import subprocess
 import threading
 import time
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
+
+from bridge.errors import AuthenticationError
 
 
 def get_security_binary() -> str:
@@ -22,10 +24,19 @@ def get_security_binary() -> str:
 SECURITY_PATH: str = get_security_binary()
 
 
-class AuthenticationError(Exception):
-    """Raised when Keychain reading or token decoding fails."""
+@runtime_checkable
+class TokenProvider(Protocol):
+    """Defines interface for authentication token providers."""
 
-    pass
+    def get_token(self, force_refresh: bool = False) -> str:
+        ...
+
+    @property
+    def expiry(self) -> float:
+        ...
+
+    def invalidate(self) -> None:
+        ...
 
 
 class KeychainTokenProvider:
@@ -43,6 +54,12 @@ class KeychainTokenProvider:
         self._lock = threading.Lock()
         self._cached_token: str | None = None
         self._cached_expiry: float = 0.0
+
+    @property
+    def expiry(self) -> float:
+        """Returns the cached expiration epoch timestamp or 0.0."""
+        with self._lock:
+            return self._cached_expiry
 
     def get_token(self, force_refresh: bool = False) -> str:
         """Retrieves a valid access token from cache or Keychain."""

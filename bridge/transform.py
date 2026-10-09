@@ -7,6 +7,16 @@ import time
 from typing import Any
 import uuid
 
+from bridge.errors import (
+    AuthenticationError,
+    BridgeError,
+    CapacityExhaustedError,
+    ForbiddenError,
+    InvalidRequestError,
+    ModelNotFoundError,
+    RateLimitError,
+)
+
 DUMMY_THOUGHT_SIGNATURE: str = "context_engineering_is_the_way_to_go"
 _THOUGHT_SIG_CACHE: dict[str, str] = {}
 _THOUGHT_SIG_LOCK = threading.Lock()
@@ -95,16 +105,6 @@ def get_tool_name(call_id: str) -> str | None:
     with _TOOL_NAME_LOCK:
         return _TOOL_NAME_CACHE.get(call_id)
 
-
-from bridge.client import (
-    AuthenticationError,
-    BridgeError,
-    CapacityExhaustedError,
-    ForbiddenError,
-    InvalidRequestError,
-    ModelNotFoundError,
-    RateLimitError,
-)
 
 UNSUPPORTED_SCHEMA_KEYS = frozenset({
     "$schema",

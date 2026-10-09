@@ -9,6 +9,7 @@ import threading
 
 from bridge.auth import (
     KeychainTokenProvider,
+    TokenProvider,
     AuthenticationError,
     SECURITY_PATH,
     get_security_binary,
@@ -351,5 +352,27 @@ class TestSecurityBinaryResolution(unittest.TestCase):
         )
 
 
+class TestTokenProviderProtocol(unittest.TestCase):
+    def test_keychain_token_provider_implements_protocol(self):
+        provider = KeychainTokenProvider()
+        self.assertTrue(isinstance(provider, TokenProvider))
+
+    def test_keychain_token_provider_expiry_property(self):
+        provider = KeychainTokenProvider()
+        self.assertEqual(provider.expiry, 0.0)
+        provider._cached_expiry = 1234567.89
+        self.assertEqual(provider.expiry, 1234567.89)
+
+    def test_invalidate_resets_expiry_and_cached_token(self):
+        provider = KeychainTokenProvider()
+        provider._cached_token = "some-token"
+        provider._cached_expiry = 9999999.0
+        provider.invalidate()
+        self.assertIsNone(provider._cached_token)
+        self.assertEqual(provider.expiry, 0.0)
+        self.assertEqual(provider._cached_expiry, 0.0)
+
+
 if __name__ == "__main__":
     unittest.main()
+

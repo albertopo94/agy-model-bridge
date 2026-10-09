@@ -9,52 +9,30 @@ import urllib.error
 import urllib.request
 
 
-class BridgeError(Exception):
-    """Base exception for bridge operations."""
+from bridge.errors import (
+    AuthenticationError,
+    BridgeError,
+    CapacityExhaustedError,
+    ForbiddenError,
+    InvalidRequestError,
+    ModelNotFoundError,
+    RateLimitError,
+    UpstreamError,
+    UpstreamTimeoutError,
+)
 
-    pass
-
-
-class AuthenticationError(BridgeError):
-    """Raised on 401 authentication failures."""
-
-    pass
-
-
-class ForbiddenError(BridgeError):
-    """Raised on 403 Forbidden / permission denied."""
-
-    pass
-
-
-class InvalidRequestError(BridgeError):
-    """Raised on 400 Bad Request."""
-
-    pass
-
-
-class ModelNotFoundError(BridgeError):
-    """Raised on 404 Not Found."""
-
-    pass
-
-
-class RateLimitError(BridgeError):
-    """Raised on 429 Too Many Requests."""
-
-    pass
-
-
-class CapacityExhaustedError(BridgeError):
-    """Raised on 503 Service Unavailable."""
-
-    pass
-
-
-class UpstreamTimeoutError(BridgeError):
-    """Raised on upstream connection or read timeouts."""
-
-    pass
+__all__ = [
+    "AuthenticationError",
+    "BridgeError",
+    "CapacityExhaustedError",
+    "CloudCodeClient",
+    "ForbiddenError",
+    "InvalidRequestError",
+    "ModelNotFoundError",
+    "RateLimitError",
+    "UpstreamError",
+    "UpstreamTimeoutError",
+]
 
 
 class CloudCodeClient:

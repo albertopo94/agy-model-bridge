@@ -9,16 +9,16 @@ import uuid
 from typing import Any
 
 from bridge import __version__
-from bridge.auth import KeychainTokenProvider, AuthenticationError as AuthAuthenticationError
-from bridge.client import (
-    CloudCodeClient,
+from bridge.auth import KeychainTokenProvider
+from bridge.client import CloudCodeClient
+from bridge.errors import (
+    AuthenticationError,
     BridgeError,
-    AuthenticationError as ClientAuthenticationError,
+    CapacityExhaustedError,
     ForbiddenError,
     InvalidRequestError,
     ModelNotFoundError,
     RateLimitError,
-    CapacityExhaustedError,
     UpstreamTimeoutError,
 )
 from bridge.transform import (
@@ -149,7 +149,7 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
     def _get_error_details(self, exc: Exception) -> tuple[int, str]:
         if isinstance(exc, (InvalidRequestError, ValueError)):
             return 400, "invalid_request_error"
-        if isinstance(exc, (ClientAuthenticationError, AuthAuthenticationError)) or exc.__class__.__name__ == "AuthenticationError":
+        if isinstance(exc, AuthenticationError):
             return 401, "authentication_error"
         if isinstance(exc, ForbiddenError):
             return 403, "permission_denied"

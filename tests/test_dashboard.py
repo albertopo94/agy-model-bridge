@@ -507,6 +507,45 @@ class TestDashboardStatusData(unittest.TestCase):
         self.assertEqual(data["auth"]["status"], "Expired")
         self.assertIn("Open Antigravity to refresh", data["auth"]["message"])
 
+    def test_get_status_data_with_expiry_property_marks_expired(self):
+        import time
+
+        class PropertyTokenProvider:
+            def __init__(self, exp: float):
+                self._exp = exp
+
+            def get_token(self) -> str:
+                return "prop-token"
+
+            @property
+            def expiry(self) -> float:
+                return self._exp
+
+        provider = PropertyTokenProvider(exp=time.time() - 100.0)
+        client = MockClient(token_provider=provider)
+        data = get_status_data(client, "test-project", "127.0.0.1", 24980)
+        self.assertEqual(data["auth"]["status"], "Expired")
+        self.assertIn("Open Antigravity to refresh", data["auth"]["message"])
+
+    def test_get_status_data_with_callable_expiry_marks_expired(self):
+        import time
+
+        class CallableExpiryTokenProvider:
+            def __init__(self, exp: float):
+                self._exp = exp
+
+            def get_token(self) -> str:
+                return "callable-token"
+
+            def expiry(self) -> float:
+                return self._exp
+
+        provider = CallableExpiryTokenProvider(exp=time.time() - 100.0)
+        client = MockClient(token_provider=provider)
+        data = get_status_data(client, "test-project", "127.0.0.1", 24980)
+        self.assertEqual(data["auth"]["status"], "Expired")
+        self.assertIn("Open Antigravity to refresh", data["auth"]["message"])
+
     def test_get_status_data_expired_token(self):
         provider = MockTokenProvider(fail_with=Exception("Token expired 300s ago"))
         client = MockClient(token_provider=provider)
