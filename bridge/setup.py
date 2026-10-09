@@ -2454,11 +2454,55 @@ def uninstall(
     daemon_dir_removed = False
     if resolved_daemon_dir.exists():
         try:
-            if resolved_daemon_dir.is_dir():
-                shutil.rmtree(resolved_daemon_dir)
-            else:
-                resolved_daemon_dir.unlink()
-            daemon_dir_removed = True
+            real_daemon = resolved_daemon_dir.resolve()
+            real_home = Path.home().resolve()
+            real_cwd = Path.cwd().resolve()
+            real_root = Path("/").resolve()
+
+            if (
+                real_daemon != real_home
+                and real_daemon != real_cwd
+                and real_daemon != real_root
+            ):
+                if resolved_daemon_dir.is_dir():
+                    # Surgically remove only known bridge artifacts
+                    known_bridge_files = {
+                        "bridge.pid",
+                        "bridge.lock",
+                        "bridge.log",
+                        "bridge.json",
+                        "api_key",
+                        ".core_dir",
+                    }
+                    for item_name in known_bridge_files:
+                        target_file = resolved_daemon_dir / item_name
+                        if target_file.is_file() or target_file.is_symlink():
+                            try:
+                                target_file.unlink()
+                            except OSError:
+                                pass
+
+                    # Remove internal core directory if signature matches
+                    core_sub = resolved_daemon_dir / "core"
+                    if core_sub.is_dir():
+                        try:
+                            if (
+                                (core_sub / "bridge" / "__init__.py").is_file()
+                                or (core_sub / ".agy-bridge-installed").is_file()
+                            ):
+                                shutil.rmtree(core_sub)
+                        except OSError:
+                            pass
+
+                    # Attempt to remove state dir only if it is completely empty
+                    try:
+                        resolved_daemon_dir.rmdir()
+                        daemon_dir_removed = True
+                    except OSError:
+                        daemon_dir_removed = False
+                else:
+                    resolved_daemon_dir.unlink()
+                    daemon_dir_removed = True
         except OSError:
             daemon_dir_removed = False
 

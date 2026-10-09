@@ -1389,6 +1389,96 @@ class TestUninstall(unittest.TestCase):
         # Path.cwd() must still exist
         self.assertTrue(Path.cwd().exists())
 
+    def test_uninstall_preserves_user_files_in_daemon_dir(self):
+        user_file = self.daemon_dir / "my_document.txt"
+        user_file.write_text("important user notes", encoding="utf-8")
+        (self.daemon_dir / "bridge.log").write_text("bridge log", encoding="utf-8")
+        (self.daemon_dir / "api_key").write_text("secret", encoding="utf-8")
+
+        result = uninstall(
+            daemon_dir=self.daemon_dir,
+            bin_dir=self.bin_dir,
+            claude_settings_path=self.claude_settings,
+            codex_config_path=self.codex_config,
+            hermes_config_path=self.hermes_config,
+        )
+
+        # Bridge files are cleaned
+        self.assertFalse((self.daemon_dir / "bridge.log").exists())
+        self.assertFalse((self.daemon_dir / "api_key").exists())
+        # User file and directory are preserved
+        self.assertTrue(user_file.exists())
+        self.assertEqual(user_file.read_text(encoding="utf-8"), "important user notes")
+        self.assertTrue(self.daemon_dir.exists())
+        self.assertFalse(result["daemon_dir_removed"])
+
+    def test_uninstall_preserves_subdirectories_with_user_files(self):
+        docs_dir = self.daemon_dir / "Documents"
+        docs_dir.mkdir(parents=True, exist_ok=True)
+        thesis = docs_dir / "tesis.txt"
+        thesis.write_text("mi tesis", encoding="utf-8")
+        (self.daemon_dir / "bridge.pid").write_text("12345", encoding="utf-8")
+
+        with unittest.mock.patch("bridge.daemon.stop_daemon", return_value={"status": "not_running"}):
+            result = uninstall(
+                daemon_dir=self.daemon_dir,
+                bin_dir=self.bin_dir,
+                claude_settings_path=self.claude_settings,
+                codex_config_path=self.codex_config,
+                hermes_config_path=self.hermes_config,
+            )
+
+        self.assertFalse((self.daemon_dir / "bridge.pid").exists())
+        self.assertTrue(thesis.exists())
+        self.assertTrue(self.daemon_dir.exists())
+        self.assertFalse(result["daemon_dir_removed"])
+
+    def test_uninstall_refuses_to_remove_home_or_cwd_or_root_daemon_dir(self):
+        with unittest.mock.patch("bridge.daemon.stop_daemon", return_value={"status": "not_running"}):
+            result_home = uninstall(
+                daemon_dir=Path.home(),
+                bin_dir=self.bin_dir,
+                claude_settings_path=self.claude_settings,
+                codex_config_path=self.codex_config,
+                hermes_config_path=self.hermes_config,
+            )
+            self.assertFalse(result_home["daemon_dir_removed"])
+            self.assertTrue(Path.home().exists())
+
+            result_cwd = uninstall(
+                daemon_dir=Path.cwd(),
+                bin_dir=self.bin_dir,
+                claude_settings_path=self.claude_settings,
+                codex_config_path=self.codex_config,
+                hermes_config_path=self.hermes_config,
+            )
+            self.assertFalse(result_cwd["daemon_dir_removed"])
+            self.assertTrue(Path.cwd().exists())
+
+    def test_uninstall_removes_daemon_dir_when_only_bridge_artifacts_present(self):
+        (self.daemon_dir / "bridge.pid").write_text("11111", encoding="utf-8")
+        (self.daemon_dir / "bridge.lock").write_text("", encoding="utf-8")
+        (self.daemon_dir / "bridge.log").write_text("log content", encoding="utf-8")
+        (self.daemon_dir / "bridge.json").write_text("{}", encoding="utf-8")
+        (self.daemon_dir / "api_key").write_text("secret", encoding="utf-8")
+        (self.daemon_dir / ".core_dir").write_text("/some/path", encoding="utf-8")
+        core_dir = self.daemon_dir / "core"
+        core_dir.mkdir(parents=True, exist_ok=True)
+        (core_dir / "bridge").mkdir(parents=True, exist_ok=True)
+        (core_dir / "bridge" / "__init__.py").write_text("# core\n", encoding="utf-8")
+
+        with unittest.mock.patch("bridge.daemon.stop_daemon", return_value={"status": "not_running"}):
+            result = uninstall(
+                daemon_dir=self.daemon_dir,
+                bin_dir=self.bin_dir,
+                claude_settings_path=self.claude_settings,
+                codex_config_path=self.codex_config,
+                hermes_config_path=self.hermes_config,
+            )
+
+        self.assertTrue(result["daemon_dir_removed"])
+        self.assertFalse(self.daemon_dir.exists())
+
 
 class TestCLIUninstall(unittest.TestCase):
     def setUp(self):
@@ -1546,7 +1636,7 @@ class TestUpdateInstallation(unittest.TestCase):
 
         self.assertEqual(result["status"], "updated")
         self.assertTrue(result["restarted_daemon"])
-        self.assertEqual(result["version"], "0.18.0")
+        self.assertEqual(result["version"], "0.18.1")
         mock_run.assert_called_once_with(
             ["git", "-C", str(self.repo_dir), "pull", "--ff-only"],
             capture_output=True,
@@ -1835,7 +1925,7 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main([flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.18.0")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.18.1")
 
     def test_cli_subcommand_version_flags(self):
         from bridge.__main__ import main
@@ -1847,19 +1937,19 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main(["update", flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.18.0")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.18.1")
 
     def test_version_unification(self):
         import bridge
         from pathlib import Path
         import re
 
-        self.assertEqual(bridge.__version__, "0.18.0")
+        self.assertEqual(bridge.__version__, "0.18.1")
         pyproject_path = Path(__file__).resolve().parent.parent / "pyproject.toml"
         pyproject_text = pyproject_path.read_text(encoding="utf-8")
         match = re.search(r'version\s*=\s*"([^"]+)"', pyproject_text)
         self.assertIsNotNone(match)
-        self.assertEqual(match.group(1), "0.18.0")
+        self.assertEqual(match.group(1), "0.18.1")
 
 
 class TestClientConfiguratorRegistry(unittest.TestCase):
@@ -4880,6 +4970,25 @@ class TestUninstallScriptFallback(unittest.TestCase):
         finally:
             proc.kill()
             proc.wait()
+
+    def test_uninstall_fallback_preserves_user_files_in_state_dir(self):
+        user_file = self.state_dir / "tesis.txt"
+        user_file.write_text("mi tesis", encoding="utf-8")
+        (self.state_dir / "bridge.log").write_text("log", encoding="utf-8")
+        (self.state_dir / "api_key").write_text("secret", encoding="utf-8")
+
+        res = subprocess.run(
+            ["bash", str(UNINSTALL_SH)],
+            env=self.env,
+            cwd=str(self.root),
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(res.returncode, 0, f"uninstall.sh failed: {res.stderr}")
+        self.assertFalse((self.state_dir / "bridge.log").exists())
+        self.assertFalse((self.state_dir / "api_key").exists())
+        self.assertTrue(user_file.exists(), "User file in state dir must be preserved by fallback")
+        self.assertTrue(self.state_dir.exists())
 
 
 if __name__ == "__main__":
