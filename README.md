@@ -16,6 +16,7 @@ Zero-dependency, pure Python 3 local AI gateway that bridges the Google Cloud Co
 - **Built-in Setup CLI**: Native subcommands (`setup-claude`, `setup-codex`, `setup-hermes`, `setup-opencode`, `setup-openclaw`, `setup-cursor`, `setup-pi`, `setup-gentle-shell`) that surgically configure client environments with atomic writes, file permissions `0o600`, and automatic timestamped backups.
 - **Automatic Local API Key Security**: Automatically generates a persistent random API key stored at `~/.agy-bridge/api_key` (`0600` permissions) to protect `/v1/*` gateway endpoints against cross-origin access.
 - **macOS Keychain OAuth Integration**: Seamlessly extracts Google OAuth credentials stored by Antigravity in Keychain (`service="gemini"`, `account="antigravity"`) with thread-safe TTL caching and automatic 401 re-read.
+- **Antigravity Model Quota Tracking**: Real-time quota monitoring on the dashboard and `GET /api/quota` JSON endpoint. Queries the local Antigravity CLI (`agy -p /usage --output-format json`) with zero token spend, 60-second TTL cache, single-flight locking, stale-on-error resilience, and visual usage bars for Gemini and 3P pools (requires `agy >= 1.1.11`).
 - **Adaptive Thinking & Model Aliasing**: Intelligently resolves `gemini-3.8-flash-high` / `auto` to upstream `gemini-3.8-flash-tiered`, automatically configuring reasoning levels (`HIGH`, `MEDIUM`, `LOW`) and token budgets.
 
 ---
@@ -372,7 +373,7 @@ Execute the complete test suite:
 python3 -m unittest discover -s tests -v
 ```
 
-All 912 tests run in ~3-4 seconds locally with zero external dependencies and zero network access.
+All 938 tests run in ~3-4 seconds locally with zero external dependencies and zero network access.
 
 ### End-to-End Smoke Test
 

@@ -51,6 +51,7 @@ from bridge.responses import (
     ResponsesProtocolAdapter,
     build_responses_error_response,
 )
+from bridge.quota import AgyCliQuotaProvider, QuotaProvider
 
 SAFE_REQUEST_ID_REGEX = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 
@@ -78,6 +79,7 @@ class ServerContext:
     concurrency_timeout: float = 5.0
     max_retries: int = 3
     initial_retry_delay: float = 0.5
+    quota_provider: QuotaProvider | None = None
 
 
 @dataclass
@@ -90,6 +92,9 @@ class CollectedStreamData:
     thought_signature: str | None = None
 
 
+_default_quota_provider: QuotaProvider | None = None
+
+
 class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
     """Handles OpenAI REST endpoints and delegates to CloudCodeClient."""
 
@@ -98,6 +103,7 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
     client: CloudCodeClient = None  # type: ignore[assignment]
     project: str = ""
     api_key: str | None = None
+    quota_provider: QuotaProvider | None = None
     server: Any = None
     request_id: str = ""
     command: str = ""
@@ -140,6 +146,21 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
             if hasattr(self.server, "concurrency_semaphore"):
                 return self.server.concurrency_semaphore
         return None
+
+    def _get_quota_provider(self) -> QuotaProvider:
+        if self.quota_provider is not None:
+            return self.quota_provider
+        if self.context is not None and self.context.quota_provider is not None:
+            return self.context.quota_provider
+        if self.server is not None:
+            if hasattr(self.server, "context") and getattr(self.server.context, "quota_provider", None) is not None:
+                return self.server.context.quota_provider
+            if hasattr(self.server, "quota_provider") and self.server.quota_provider is not None:
+                return self.server.quota_provider
+        global _default_quota_provider
+        if _default_quota_provider is None:
+            _default_quota_provider = AgyCliQuotaProvider()
+        return _default_quota_provider
 
     @contextlib.contextmanager
     def _acquire_concurrency(self) -> Iterator[bool]:
@@ -248,7 +269,7 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
             return
 
         parsed_path = urllib.parse.urlparse(self.path).path
-        if parsed_path.startswith("/v1/") or parsed_path in ("/", "/api/status"):
+        if parsed_path.startswith("/v1/") or parsed_path in ("/", "/api/status", "/api/quota"):
             # Inference and admin endpoints forbid browser cross-origin preflight requests
             self.send_response(403)
             self.send_header("X-Request-ID", self.request_id)
@@ -279,7 +300,7 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json")
         self.send_header("X-Request-ID", self.request_id)
         req_path = urllib.parse.urlparse(self.path).path
-        if not req_path.startswith("/v1/") and req_path not in ("/", "/api/status"):
+        if not req_path.startswith("/v1/") and req_path not in ("/", "/api/status", "/api/quota"):
             self.send_header("Access-Control-Allow-Origin", "*")
         sent_connection = False
         if headers:
@@ -398,6 +419,14 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
             port = server_addr[1] if server_addr else 24980
             status_data = get_status_data(self.client, self.project, str(host), port)
             self._send_json(200, status_data)
+            return
+
+        if path == "/api/quota":
+            query_params = urllib.parse.parse_qs(parsed.query)
+            force_refresh = "refresh" in query_params and query_params["refresh"][0].lower() in ("1", "true")
+            provider = self._get_quota_provider()
+            snapshot = provider.fetch(force=force_refresh)
+            self._send_json(200, snapshot.to_dict())
             return
 
         if path == "/healthz":
@@ -1009,6 +1038,7 @@ def create_server(
     max_concurrency: int = 16,
     max_retries: int = 3,
     initial_retry_delay: float = 0.5,
+    quota_provider: QuotaProvider | None = None,
 ) -> http.server.ThreadingHTTPServer:
     """Instantiates and configures a ThreadingHTTPServer instance."""
     if no_auth and not is_loopback_host(host):
@@ -1048,6 +1078,9 @@ def create_server(
                 )
             project = discovered
 
+    if quota_provider is None:
+        quota_provider = AgyCliQuotaProvider()
+
     concurrency_semaphore = threading.Semaphore(max_concurrency)
 
     context = ServerContext(
@@ -1059,6 +1092,7 @@ def create_server(
         concurrency_timeout=5.0,
         max_retries=max_retries,
         initial_retry_delay=initial_retry_delay,
+        quota_provider=quota_provider,
     )
 
     class ConfiguredHandler(OpenAIRequestHandler):
@@ -1071,6 +1105,7 @@ def create_server(
     ConfiguredHandler.concurrency_semaphore = concurrency_semaphore
     ConfiguredHandler.max_retries = max_retries
     ConfiguredHandler.initial_retry_delay = initial_retry_delay
+    ConfiguredHandler.quota_provider = quota_provider
 
     server = http.server.ThreadingHTTPServer((host, port), ConfiguredHandler)
     server.daemon_threads = True
@@ -1080,6 +1115,7 @@ def create_server(
     server.max_concurrency = max_concurrency  # type: ignore[attr-defined]
     server.max_retries = max_retries  # type: ignore[attr-defined]
     server.initial_retry_delay = initial_retry_delay  # type: ignore[attr-defined]
+    server.quota_provider = quota_provider  # type: ignore[attr-defined]
     return server
 
 
@@ -1093,6 +1129,7 @@ def run_server(
     max_concurrency: int = 16,
     max_retries: int = 3,
     initial_retry_delay: float = 0.5,
+    quota_provider: QuotaProvider | None = None,
 ) -> None:
     """Starts the ThreadingHTTPServer serving OpenAI-compatible endpoints."""
     server = create_server(
@@ -1105,6 +1142,7 @@ def run_server(
         max_concurrency=max_concurrency,
         max_retries=max_retries,
         initial_retry_delay=initial_retry_delay,
+        quota_provider=quota_provider,
     )
     actual_port = server.server_address[1]
     print(f"Antigravity Model Bridge listening on http://{host}:{actual_port}")

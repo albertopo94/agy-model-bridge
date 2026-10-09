@@ -688,6 +688,51 @@ class TestDashboardBilingual(unittest.TestCase):
         self.assertIn("api_key_configured", i18n_block)
         self.assertIn("api_key_not_required", i18n_block)
 
+    def test_render_dashboard_contains_quota_panel(self):
+        auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
+        html = render_dashboard("127.0.0.1", 24980, auth_status, models_count=10)
+
+        self.assertIn('<aside class="quota-panel"', html)
+        self.assertIn('id="quota-card"', html)
+        self.assertIn("Antigravity", html)
+        self.assertIn("fetchQuota", html)
+        self.assertIn("/api/quota", html)
+        self.assertIn("1280px", html)
+
+    def test_render_dashboard_quota_i18n_keys(self):
+        auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
+        html = render_dashboard("127.0.0.1", 24980, auth_status, models_count=10)
+
+        required_keys = [
+            "quota_title",
+            "quota_updated_just_now",
+            "quota_updated_minutes",
+            "quota_updated_hours",
+            "quota_used",
+            "quota_resets_in",
+            "quota_resets_now",
+            "quota_refresh",
+            "quota_loading",
+            "quota_unavailable",
+            "quota_error_stale",
+        ]
+        for key in required_keys:
+            with self.subTest(key=key):
+                self.assertIn(f"{key}:", html)
+
+    def test_quota_card_rendering_script_uses_safe_dom_manipulation(self):
+        auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
+        html = render_dashboard("127.0.0.1", 24980, auth_status, models_count=10)
+
+        start = html.find("function renderQuotaCard")
+        self.assertNotEqual(start, -1, "renderQuotaCard function not found in dashboard script")
+        end = html.find("function fetchQuota", start)
+        self.assertNotEqual(end, -1)
+        quota_func_body = html[start:end]
+
+        self.assertNotIn(".innerHTML =", quota_func_body)
+        self.assertIn(".textContent =", quota_func_body)
+
 
 if __name__ == "__main__":
     unittest.main()

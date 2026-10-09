@@ -22,6 +22,36 @@ from bridge.errors import (
     UpstreamTimeoutError,
     UpstreamError,
 )
+from bridge.quota import QuotaBucket, QuotaSnapshot
+
+
+class MockQuotaProvider:
+    def __init__(self, snapshot: QuotaSnapshot | None = None):
+        self.call_count = 0
+        self.last_force: bool | None = None
+        self.snapshot = snapshot or QuotaSnapshot(
+            status="ok",
+            buckets=[
+                QuotaBucket(
+                    id="gemini-weekly",
+                    group="Gemini Models",
+                    name="Weekly Limit Remaining",
+                    label="Gemini Models · Weekly Limit Remaining",
+                    window="weekly",
+                    used_percent=71,
+                    remaining_fraction=0.29,
+                    resets_at=time.time() + 360000,
+                    resets_in="4d 4h",
+                )
+            ],
+            description="Test quota description",
+            updated_at=1700000000.0,
+        )
+
+    def fetch(self, force: bool = False) -> QuotaSnapshot:
+        self.call_count += 1
+        self.last_force = force
+        return self.snapshot
 
 
 class MockCloudCodeClient:
@@ -67,12 +97,14 @@ class TestServerEndpoints(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.mock_client = MockCloudCodeClient()
+        cls.mock_quota_provider = MockQuotaProvider()
         cls.server = create_server(
             host="127.0.0.1",
             port=0,
             client=cls.mock_client,
             project="test-project",
             no_auth=True,
+            quota_provider=cls.mock_quota_provider,
         )
         cls.port = cls.server.server_address[1]
         cls.base_url = f"http://127.0.0.1:{cls.port}"
@@ -421,7 +453,7 @@ class TestServerEndpoints(unittest.TestCase):
         conn.close()
 
         # 2. Inference and admin endpoints explicitly block CORS preflight (403 without wildcard)
-        for blocked_path in ("/v1/chat/completions", "/", "/api/status"):
+        for blocked_path in ("/v1/chat/completions", "/", "/api/status", "/api/quota"):
             conn = http.client.HTTPConnection("127.0.0.1", self.port)
             conn.request("OPTIONS", blocked_path)
             resp = conn.getresponse()
@@ -450,6 +482,10 @@ class TestServerEndpoints(unittest.TestCase):
         self.assertNotIn("Access-Control-Allow-Origin", headers)
 
         status, headers, _ = self._http_get("/api/status")
+        self.assertEqual(status, 200)
+        self.assertNotIn("Access-Control-Allow-Origin", headers)
+
+        status, headers, _ = self._http_get("/api/quota")
         self.assertEqual(status, 200)
         self.assertNotIn("Access-Control-Allow-Origin", headers)
 
@@ -1038,6 +1074,28 @@ class TestServerEndpoints(unittest.TestCase):
         self.assertIn("auth", body)
         self.assertIn("models_count", body)
 
+    def test_api_quota_endpoint(self):
+        status, headers, body = self._http_get("/api/quota")
+        self.assertEqual(status, 200)
+        self.assertEqual(headers.get_content_type(), "application/json")
+        self.assertEqual(body["status"], "ok")
+        self.assertEqual(len(body["buckets"]), 1)
+        self.assertEqual(body["buckets"][0]["id"], "gemini-weekly")
+        self.assertIn("updated_at", body)
+
+    def test_api_quota_refresh_flag(self):
+        status, headers, body = self._http_get("/api/quota?refresh=1")
+        self.assertEqual(status, 200)
+        self.assertEqual(headers.get_content_type(), "application/json")
+        self.assertEqual(body["status"], "ok")
+        self.assertTrue(self.mock_quota_provider.last_force)
+
+    def test_api_status_does_not_call_quota_provider(self):
+        initial_count = self.mock_quota_provider.call_count
+        status, _, _ = self._http_get("/api/status")
+        self.assertEqual(status, 200)
+        self.assertEqual(self.mock_quota_provider.call_count, initial_count)
+
     def test_anthropic_messages_non_streaming(self):
         payload = {
             "model": "gemini-2.5-pro",
@@ -1558,6 +1616,7 @@ class TestServerAuthenticationAndCORS(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.mock_client = MockCloudCodeClient()
+        cls.mock_quota_provider = MockQuotaProvider()
         cls.api_key = "secure-test-token-777"
         cls.server = create_server(
             host="127.0.0.1",
@@ -1565,6 +1624,7 @@ class TestServerAuthenticationAndCORS(unittest.TestCase):
             client=cls.mock_client,
             project="test-project",
             api_key=cls.api_key,
+            quota_provider=cls.mock_quota_provider,
         )
         cls.port = cls.server.server_address[1]
         cls.base_url = f"http://127.0.0.1:{cls.port}"
@@ -1642,6 +1702,10 @@ class TestServerAuthenticationAndCORS(unittest.TestCase):
             self.assertEqual(resp.status, 200)
 
         url = f"{self.base_url}/api/status"
+        with urllib.request.urlopen(url, timeout=5.0) as resp:
+            self.assertEqual(resp.status, 200)
+
+        url = f"{self.base_url}/api/quota"
         with urllib.request.urlopen(url, timeout=5.0) as resp:
             self.assertEqual(resp.status, 200)
 

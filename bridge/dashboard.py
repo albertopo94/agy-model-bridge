@@ -76,6 +76,27 @@ def get_status_data(client: Any, project: str, host: str, port: int) -> dict[str
     }
 
 
+ANTIGRAVITY_ICON_SVG = (
+    '<svg class="card-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" aria-hidden="true">'
+    '<defs>'
+    '<linearGradient id="agy-grad" x1="0%" y1="0%" x2="100%" y2="100%">'
+    '<stop offset="0%" stop-color="#38bdf8"/>'
+    '<stop offset="35%" stop-color="#34d399"/>'
+    '<stop offset="70%" stop-color="#fbbf24"/>'
+    '<stop offset="100%" stop-color="#f87171"/>'
+    '</linearGradient>'
+    '</defs>'
+    '<path d="M12 2L2 20h4.5l2-4h7l2 4H22L12 2zm0 6.5L14.2 13h-4.4L12 8.5z" fill="url(#agy-grad)"/>'
+    '</svg>'
+)
+
+REFRESH_ICON_SVG = (
+    '<svg class="refresh-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+    '<path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>'
+    '</svg>'
+)
+
+
 CLAUDE_ICON_SVG = (
     '<svg class="card-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="24" height="24" aria-hidden="true">'
     '<rect width="3" height="12" x="22.5" y="-4.5" fill="#ffc400" transform="rotate(90 24 1.5)"/>'
@@ -491,7 +512,7 @@ def render_dashboard(
       line-height: 1.5;
     }}
     .container {{
-      max-width: 960px;
+      max-width: 1280px;
       margin: 0 auto;
     }}
     header {{
@@ -616,11 +637,36 @@ def render_dashboard(
       background: rgba(56, 189, 248, 0.1);
       color: var(--accent);
     }}
+    .dashboard-layout {{
+      display: flex;
+      gap: 1.5rem;
+      align-items: flex-start;
+      margin-top: 2rem;
+    }}
+    .quota-panel {{
+      width: 320px;
+      flex-shrink: 0;
+      position: sticky;
+      top: 1.5rem;
+    }}
+    .dashboard-layout .cards-grid {{
+      flex: 1;
+      margin-top: 0;
+    }}
     .cards-grid {{
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 1.5rem;
       margin-top: 2rem;
+    }}
+    @media (max-width: 1024px) {{
+      .dashboard-layout {{
+        flex-direction: column;
+      }}
+      .quota-panel {{
+        width: 100%;
+        position: static;
+      }}
     }}
     @media (max-width: 768px) {{
       .cards-grid {{
@@ -631,6 +677,157 @@ def render_dashboard(
         align-items: flex-start;
         gap: 0.75rem;
       }}
+    }}
+    .quota-card {{
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      padding: 1.25rem 1.25rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }}
+    .quota-header {{
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }}
+    .quota-title-row {{
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+    }}
+    .quota-title-text {{
+      display: flex;
+      flex-direction: column;
+    }}
+    .quota-title {{
+      font-size: 1.05rem;
+      font-weight: 600;
+      color: var(--text-primary);
+      line-height: 1.2;
+    }}
+    .quota-subtitle {{
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+      margin-top: 0.15rem;
+    }}
+    .quota-refresh-btn {{
+      background: #1a1a1a;
+      border: 1px solid #333333;
+      color: var(--text-secondary);
+      border-radius: 8px;
+      width: 28px;
+      height: 28px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+      padding: 0;
+    }}
+    .quota-refresh-btn:hover {{
+      color: var(--text-primary);
+      background: #262626;
+      border-color: #444444;
+    }}
+    .quota-refresh-btn:disabled {{
+      opacity: 0.5;
+      cursor: not-allowed;
+    }}
+    .quota-refresh-btn.spinning svg {{
+      animation: spin 1s linear infinite;
+    }}
+    @keyframes spin {{
+      from {{ transform: rotate(0deg); }}
+      to {{ transform: rotate(360deg); }}
+    }}
+    .quota-divider {{
+      height: 1px;
+      background: var(--card-border);
+      margin: 0.25rem 0;
+    }}
+    .quota-buckets {{
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }}
+    .quota-bucket {{
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }}
+    .bucket-label {{
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: var(--text-primary);
+      line-height: 1.3;
+    }}
+    .bucket-bar {{
+      height: 6px;
+      background: #222222;
+      border-radius: 3px;
+      overflow: hidden;
+      width: 100%;
+    }}
+    .bucket-fill {{
+      height: 100%;
+      border-radius: 3px;
+      transition: width 0.3s ease;
+    }}
+    .fill-low {{
+      background: rgba(255, 255, 255, 0.35);
+    }}
+    .fill-medium {{
+      background: var(--amber);
+    }}
+    .fill-high {{
+      background: var(--red);
+    }}
+    .bucket-meta {{
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+    }}
+    .bucket-pct {{
+      font-variant-numeric: tabular-nums;
+    }}
+    .bucket-reset {{
+      font-variant-numeric: tabular-nums;
+    }}
+    .quota-notice {{
+      font-size: 0.75rem;
+      color: var(--amber);
+      background: var(--amber-bg);
+      border: 1px solid rgba(245, 158, 11, 0.3);
+      border-radius: 6px;
+      padding: 0.35rem 0.5rem;
+      margin-top: 0.25rem;
+    }}
+    .quota-footnote {{
+      font-size: 0.72rem;
+      color: var(--text-secondary);
+      line-height: 1.4;
+      margin-top: 0.25rem;
+      opacity: 0.8;
+    }}
+    .quota-skeleton {{
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      padding: 0.5rem 0;
+    }}
+    .skeleton-line {{
+      height: 10px;
+      background: #1a1a1a;
+      border-radius: 4px;
+      animation: pulse 1.5s ease-in-out infinite;
+    }}
+    @keyframes pulse {{
+      0%, 100% {{ opacity: 0.4; }}
+      50% {{ opacity: 0.8; }}
     }}
     .card {{
       background: var(--card-bg);
@@ -775,9 +972,38 @@ def render_dashboard(
       </div>
     </header>
 
-    <main class="cards-grid">
+    <div class="dashboard-layout">
+      <aside class="quota-panel" aria-label="Antigravity Quota">
+        <div id="quota-card" class="quota-card">
+          <div class="quota-header">
+            <div class="quota-title-row">
+              {ANTIGRAVITY_ICON_SVG}
+              <div class="quota-title-text">
+                <span class="quota-title" data-i18n="quota_title">Antigravity</span>
+                <span id="quota-subtitle" class="quota-subtitle" data-i18n="quota_loading">Loading quota...</span>
+              </div>
+            </div>
+            <button type="button" id="quota-refresh-btn" class="quota-refresh-btn" aria-label="Refresh quota" onclick="refreshQuota()" title="Refresh quota">
+              {REFRESH_ICON_SVG}
+            </button>
+          </div>
+          <div class="quota-divider"></div>
+          <div id="quota-buckets" class="quota-buckets">
+            <div class="quota-skeleton">
+              <div class="skeleton-line" style="width: 70%;"></div>
+              <div class="skeleton-line" style="width: 100%; height: 6px;"></div>
+              <div class="skeleton-line" style="width: 45%;"></div>
+            </div>
+          </div>
+          <div id="quota-notice" style="display: none;"></div>
+          <div id="quota-footnote" class="quota-footnote" style="display: none;"></div>
+        </div>
+      </aside>
+
+      <main class="cards-grid">
 {cards_html}
-    </main>
+      </main>
+    </div>
 
     <footer>
       <p data-i18n="footer">{footer_text}</p>
@@ -813,7 +1039,18 @@ def render_dashboard(
         desc_gentle_shell: "An isolated terminal companion for Pi with focused subagents, review mode, and ODD harness.",
         "desc_gentle-shell": "An isolated terminal companion for Pi with focused subagents, review mode, and ODD harness.",
         desc_freellmapi: "Custom Provider & Aider integration (Base URL with /v1)",
-        footer: "AGY Model Bridge &bull; v{__version__} &bull; Local Gateway"
+        footer: "AGY Model Bridge &bull; v{__version__} &bull; Local Gateway",
+        quota_title: "Antigravity",
+        quota_updated_just_now: "Updated just now",
+        quota_updated_minutes: "Updated {{m}}m ago",
+        quota_updated_hours: "Updated {{h}}h ago",
+        quota_used: "{{pct}}% used",
+        quota_resets_in: "Resets in {{time}}",
+        quota_resets_now: "Resets now",
+        quota_refresh: "Refresh quota",
+        quota_loading: "Loading quota...",
+        quota_unavailable: "Quota unavailable",
+        quota_error_stale: "Showing cached quota (refresh failed)"
       }},
       es: {{
         subtitle: "Gateway multiprotocolo sin dependencias para Google Cloud Code Assist",
@@ -840,7 +1077,18 @@ def render_dashboard(
         desc_gentle_shell: "Un entorno de terminal aislado para Pi con subagentes enfocados, modo review y arn\u00e9s ODD.",
         "desc_gentle-shell": "Un entorno de terminal aislado para Pi con subagentes enfocados, modo review y arn\u00e9s ODD.",
         desc_freellmapi: "Integraci\u00f3n para Custom Provider y Aider (URL base con /v1)",
-        footer: "AGY Model Bridge &bull; v{__version__} &bull; Gateway local"
+        footer: "AGY Model Bridge &bull; v{__version__} &bull; Gateway local",
+        quota_title: "Antigravity",
+        quota_updated_just_now: "Actualizado recién",
+        quota_updated_minutes: "Actualizado hace {{m}}m",
+        quota_updated_hours: "Actualizado hace {{h}}h",
+        quota_used: "{{pct}}% usado",
+        quota_resets_in: "Reinicia en {{time}}",
+        quota_resets_now: "Reinicia ahora",
+        quota_refresh: "Actualizar cuota",
+        quota_loading: "Cargando cuota...",
+        quota_unavailable: "Cuota no disponible",
+        quota_error_stale: "Mostrando cuota en caché (falló la actualización)"
       }}
     }};
 
@@ -899,6 +1147,221 @@ def render_dashboard(
           el.innerHTML = dict[key];
         }}
       }}
+
+      if (currentQuotaSnapshot) {{
+        renderQuotaCard(currentQuotaSnapshot);
+      }}
+    }}
+
+    var currentQuotaSnapshot = null;
+    var isFetchingQuota = false;
+
+    function formatRelativeTime(updatedAtEpoch) {{
+      if (!updatedAtEpoch || updatedAtEpoch <= 0) return "";
+      var elapsedSec = Math.max(0, Math.floor((Date.now() / 1000) - updatedAtEpoch));
+      var dict = I18N[currentLang] || I18N.en;
+      if (elapsedSec < 60) {{
+        return dict.quota_updated_just_now || "Updated just now";
+      }}
+      var elapsedMin = Math.floor(elapsedSec / 60);
+      if (elapsedMin < 60) {{
+        var tplM = dict.quota_updated_minutes || "Updated {{m}}m ago";
+        return tplM.replace("{{m}}", elapsedMin);
+      }}
+      var elapsedHours = Math.floor(elapsedMin / 60);
+      var tplH = dict.quota_updated_hours || "Updated {{h}}h ago";
+      return tplH.replace("{{h}}", elapsedHours);
+    }}
+
+    function formatCountdown(bucket) {{
+      var dict = I18N[currentLang] || I18N.en;
+      if (bucket.resets_in) {{
+        var timeStr = bucket.resets_in;
+        if (timeStr === "now" || timeStr === "0m") {{
+          return dict.quota_resets_now || "Resets now";
+        }}
+        var tpl = dict.quota_resets_in || "Resets in {{time}}";
+        return tpl.replace("{{time}}", timeStr);
+      }}
+      if (bucket.resets_at) {{
+        var diff = Math.max(0, Math.floor(bucket.resets_at - (Date.now() / 1000)));
+        if (diff <= 0) return dict.quota_resets_now || "Resets now";
+        var days = Math.floor(diff / 86400);
+        var hours = Math.floor((diff % 86400) / 3600);
+        var minutes = Math.floor((diff % 3600) / 60);
+        var formatted = "";
+        if (days > 0) formatted = days + "d " + hours + "h";
+        else if (hours > 0) formatted = hours + "h " + minutes + "m";
+        else formatted = minutes + "m";
+        var tpl2 = dict.quota_resets_in || "Resets in {{time}}";
+        return tpl2.replace("{{time}}", formatted);
+      }}
+      return "";
+    }}
+
+    function renderQuotaCard(snapshot) {{
+      if (!snapshot) return;
+      currentQuotaSnapshot = snapshot;
+      var dict = I18N[currentLang] || I18N.en;
+
+      var subtitleEl = document.getElementById("quota-subtitle");
+      var bucketsEl = document.getElementById("quota-buckets");
+      var noticeEl = document.getElementById("quota-notice");
+      var footnoteEl = document.getElementById("quota-footnote");
+
+      if (subtitleEl) {{
+        if (snapshot.status === "ok" && snapshot.updated_at) {{
+          subtitleEl.textContent = formatRelativeTime(snapshot.updated_at);
+        }} else if (snapshot.status === "unavailable") {{
+          subtitleEl.textContent = dict.quota_unavailable || "Quota unavailable";
+        }} else if (snapshot.status === "error" && (!snapshot.buckets || snapshot.buckets.length === 0)) {{
+          subtitleEl.textContent = snapshot.error || "Error";
+        }}
+      }}
+
+      if (noticeEl) {{
+        if (snapshot.error && snapshot.buckets && snapshot.buckets.length > 0) {{
+          noticeEl.textContent = dict.quota_error_stale || "Showing cached quota (refresh failed)";
+          noticeEl.className = "quota-notice";
+          noticeEl.style.display = "block";
+        }} else {{
+          noticeEl.style.display = "none";
+          noticeEl.textContent = "";
+        }}
+      }}
+
+      if (footnoteEl) {{
+        if (snapshot.description) {{
+          footnoteEl.textContent = snapshot.description;
+          footnoteEl.title = snapshot.description;
+          footnoteEl.style.display = "block";
+        }} else {{
+          footnoteEl.style.display = "none";
+          footnoteEl.textContent = "";
+        }}
+      }}
+
+      if (!bucketsEl) return;
+      while (bucketsEl.firstChild) {{
+        bucketsEl.removeChild(bucketsEl.firstChild);
+      }}
+
+      if (snapshot.status === "unavailable") {{
+        var unavailBox = document.createElement("div");
+        unavailBox.className = "quota-notice";
+        unavailBox.style.color = "var(--text-secondary)";
+        unavailBox.style.background = "#1a1a1a";
+        unavailBox.style.borderColor = "#333";
+        unavailBox.textContent = snapshot.error || (dict.quota_unavailable || "Quota unavailable");
+        bucketsEl.appendChild(unavailBox);
+        return;
+      }}
+
+      if (snapshot.status === "error" && (!snapshot.buckets || snapshot.buckets.length === 0)) {{
+        var errBox = document.createElement("div");
+        errBox.className = "quota-notice";
+        errBox.style.color = "var(--red)";
+        errBox.style.background = "var(--red-bg)";
+        errBox.style.borderColor = "rgba(239, 68, 68, 0.3)";
+        errBox.textContent = snapshot.error || "Error loading quota";
+        bucketsEl.appendChild(errBox);
+        return;
+      }}
+
+      if (!snapshot.buckets || snapshot.buckets.length === 0) {{
+        var emptyBox = document.createElement("div");
+        emptyBox.className = "quota-notice";
+        emptyBox.textContent = dict.quota_unavailable || "Quota unavailable";
+        bucketsEl.appendChild(emptyBox);
+        return;
+      }}
+
+      for (var i = 0; i < snapshot.buckets.length; i++) {{
+        var b = snapshot.buckets[i];
+        var bucketRow = document.createElement("div");
+        bucketRow.className = "quota-bucket";
+
+        var labelEl = document.createElement("div");
+        labelEl.className = "bucket-label";
+        labelEl.textContent = b.label || b.name;
+        bucketRow.appendChild(labelEl);
+
+        var barEl = document.createElement("div");
+        barEl.className = "bucket-bar";
+        var fillEl = document.createElement("div");
+        fillEl.className = "bucket-fill";
+        var pct = typeof b.used_percent === "number" ? b.used_percent : 0;
+        fillEl.style.width = Math.min(100, Math.max(0, pct)) + "%";
+        if (pct < 60) {{
+          fillEl.classList.add("fill-low");
+        }} else if (pct < 85) {{
+          fillEl.classList.add("fill-medium");
+        }} else {{
+          fillEl.classList.add("fill-high");
+        }}
+        barEl.appendChild(fillEl);
+        bucketRow.appendChild(barEl);
+
+        var metaEl = document.createElement("div");
+        metaEl.className = "bucket-meta";
+
+        var pctEl = document.createElement("span");
+        pctEl.className = "bucket-pct";
+        var usedTpl = dict.quota_used || "{{pct}}% used";
+        pctEl.textContent = usedTpl.replace("{{pct}}", pct);
+        metaEl.appendChild(pctEl);
+
+        var resetEl = document.createElement("span");
+        resetEl.className = "bucket-reset";
+        resetEl.textContent = formatCountdown(b);
+        metaEl.appendChild(resetEl);
+
+        bucketRow.appendChild(metaEl);
+        bucketsEl.appendChild(bucketRow);
+      }}
+    }}
+
+    function fetchQuota(force) {{
+      if (isFetchingQuota) return;
+      isFetchingQuota = true;
+      var refreshBtn = document.getElementById("quota-refresh-btn");
+      if (refreshBtn) {{
+        refreshBtn.disabled = true;
+        refreshBtn.classList.add("spinning");
+      }}
+
+      var url = "/api/quota" + (force ? "?refresh=1" : "");
+      fetch(url)
+        .then(function(res) {{
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          return res.json();
+        }})
+        .then(function(data) {{
+          renderQuotaCard(data);
+        }})
+        .catch(function(err) {{
+          if (currentQuotaSnapshot) {{
+            currentQuotaSnapshot.error = String(err);
+            renderQuotaCard(currentQuotaSnapshot);
+          }} else {{
+            renderQuotaCard({{
+              status: "error",
+              error: String(err),
+              buckets: []
+            }});
+          }}
+        }})
+        .finally(function() {{
+          isFetchingQuota = false;
+          if (refreshBtn) {{
+            refreshBtn.disabled = false;
+            refreshBtn.classList.remove("spinning");
+          }}
+        }});
+    }}
+
+    function refreshQuota() {{
+      fetchQuota(true);
     }}
 
     (function initLang() {{
@@ -909,7 +1372,19 @@ def render_dashboard(
       if (saved === "es" || saved === "en") {{
         setLanguage(saved);
       }}
+      fetchQuota(false);
     }})();
+
+    setInterval(function() {{
+      if (currentQuotaSnapshot && currentQuotaSnapshot.status === "ok") {{
+        var sub = document.getElementById("quota-subtitle");
+        if (sub) sub.textContent = formatRelativeTime(currentQuotaSnapshot.updated_at);
+      }}
+    }}, 30000);
+
+    setInterval(function() {{
+      fetchQuota(false);
+    }}, 300000);
 
     function copySnippet(btn, elementId) {{
       var el = document.getElementById(elementId);
