@@ -139,7 +139,7 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
         if server_host and server_host not in ("0.0.0.0", "::"):
             allowed.add(server_host.lower())
 
-        return hostname in allowed or hostname.startswith("127.")
+        return hostname in allowed or is_loopback_host(hostname)
 
     def _is_authenticated(self) -> bool:
         expected = getattr(self.server, "api_key", None)

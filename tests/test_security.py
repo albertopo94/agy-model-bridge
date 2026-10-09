@@ -9,6 +9,7 @@ from unittest import mock
 
 from bridge.security import (
     get_or_create_api_key,
+    is_loopback_host,
     validate_api_key,
     write_api_key,
 )
@@ -112,6 +113,39 @@ class TestSecurityModule(unittest.TestCase):
             self.assertIsNone(server.api_key)
         finally:
             server.server_close()
+
+
+class TestLoopbackHost(unittest.TestCase):
+    def test_loopback_valid_addresses(self):
+        valid_loopbacks = (
+            "127.0.0.1",
+            "127.0.0.2",
+            "127.255.255.254",
+            "localhost",
+            "::1",
+            "[::1]",
+        )
+        for host in valid_loopbacks:
+            with self.subTest(host=host):
+                self.assertTrue(is_loopback_host(host))
+
+    def test_loopback_invalid_addresses_and_domains(self):
+        invalid_hosts = (
+            None,
+            "",
+            "127.evil.com",
+            "127.0.0.1.evil.com",
+            "127.0.0.1.attacker.example.org",
+            "evil.com",
+            "0.0.0.0",
+            "::",
+            "192.168.1.1",
+            "10.0.0.1",
+            "8.8.8.8",
+        )
+        for host in invalid_hosts:
+            with self.subTest(host=host):
+                self.assertFalse(is_loopback_host(host))
 
 
 if __name__ == "__main__":

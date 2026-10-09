@@ -7,6 +7,7 @@ Pure Python 3 standard library: secrets, hmac, hashlib, os, pathlib.
 from __future__ import annotations
 
 import hmac
+import ipaddress
 import os
 from pathlib import Path
 import secrets
@@ -154,4 +155,11 @@ def is_loopback_host(host: str | None) -> bool:
     if not host:
         return False
     h = host.strip().lower()
-    return h in ("127.0.0.1", "localhost", "::1", "[::1]") or h.startswith("127.")
+    if h.startswith("[") and h.endswith("]"):
+        h = h[1:-1]
+    if h == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(h).is_loopback
+    except ValueError:
+        return False

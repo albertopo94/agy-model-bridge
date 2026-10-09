@@ -69,7 +69,7 @@ fi
 
 # 3. Clone or update repository
 mkdir -p "$(dirname "$INSTALL_DIR")"
-PINNED_VERSION="v0.19.1"
+PINNED_VERSION="v0.19.2"
 TARGET_REF="${AGY_BRIDGE_VERSION:-$PINNED_VERSION}"
 
 if [ -d "$INSTALL_DIR/.git" ]; then
@@ -79,7 +79,16 @@ if [ -d "$INSTALL_DIR/.git" ]; then
         echo -e "Updating existing repository in ${INSTALL_DIR}..."
     fi
     git -C "$INSTALL_DIR" fetch --tags --quiet 2>/dev/null || true
-    if ! git -C "$INSTALL_DIR" checkout "$TARGET_REF" --quiet 2>/dev/null; then
+    if [ -n "$TARGET_REF" ]; then
+        if ! git -C "$INSTALL_DIR" checkout "$TARGET_REF" --quiet 2>/dev/null; then
+            if [ "$IS_ES" = "1" ]; then
+                echo -e "${RED}Error: No se pudo hacer checkout de la versión ${TARGET_REF} en ${INSTALL_DIR}.${RESET}"
+            else
+                echo -e "${RED}Error: Failed to checkout version ${TARGET_REF} in ${INSTALL_DIR}.${RESET}"
+            fi
+            exit 1
+        fi
+    else
         if ! git -C "$INSTALL_DIR" pull --quiet; then
             if [ "$IS_ES" = "1" ]; then
                 echo -e "${RED}Error: Falló la actualización del repositorio en ${INSTALL_DIR}.${RESET}"
@@ -104,7 +113,14 @@ else
         exit 1
     fi
     if [ -n "$TARGET_REF" ]; then
-        git -C "$INSTALL_DIR" checkout "$TARGET_REF" --quiet 2>/dev/null || true
+        if ! git -C "$INSTALL_DIR" checkout "$TARGET_REF" --quiet 2>/dev/null; then
+            if [ "$IS_ES" = "1" ]; then
+                echo -e "${RED}Error: No se pudo hacer checkout de la versión ${TARGET_REF} en ${INSTALL_DIR}.${RESET}"
+            else
+                echo -e "${RED}Error: Failed to checkout version ${TARGET_REF} in ${INSTALL_DIR}.${RESET}"
+            fi
+            exit 1
+        fi
     fi
 fi
 

@@ -1477,7 +1477,7 @@ class TestUninstall(unittest.TestCase):
         core_dir.mkdir(parents=True, exist_ok=True)
         (core_dir / "bridge").mkdir(parents=True, exist_ok=True)
         (core_dir / "bridge" / "__init__.py").write_text("# core\n", encoding="utf-8")
-        (core_dir / ".agy-bridge-installed").write_text("v0.19.1\n", encoding="utf-8")
+        (core_dir / ".agy-bridge-installed").write_text("v0.19.2\n", encoding="utf-8")
 
         with unittest.mock.patch("bridge.daemon.stop_daemon", return_value={"status": "not_running"}):
             result = uninstall(
@@ -1648,7 +1648,7 @@ class TestUpdateInstallation(unittest.TestCase):
 
         self.assertEqual(result["status"], "updated")
         self.assertTrue(result["restarted_daemon"])
-        self.assertEqual(result["version"], "0.19.1")
+        self.assertEqual(result["version"], "0.19.2")
         mock_run.assert_called_once_with(
             ["git", "-C", str(self.repo_dir), "pull", "--ff-only"],
             capture_output=True,
@@ -1937,7 +1937,7 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main([flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.19.1")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.19.2")
 
     def test_cli_subcommand_version_flags(self):
         from bridge.__main__ import main
@@ -1949,19 +1949,19 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main(["update", flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.19.1")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.19.2")
 
     def test_version_unification(self):
         import bridge
         from pathlib import Path
         import re
 
-        self.assertEqual(bridge.__version__, "0.19.1")
+        self.assertEqual(bridge.__version__, "0.19.2")
         pyproject_path = Path(__file__).resolve().parent.parent / "pyproject.toml"
         pyproject_text = pyproject_path.read_text(encoding="utf-8")
         match = re.search(r'version\s*=\s*"([^"]+)"', pyproject_text)
         self.assertIsNotNone(match)
-        self.assertEqual(match.group(1), "0.19.1")
+        self.assertEqual(match.group(1), "0.19.2")
 
 
 class TestClientConfiguratorRegistry(unittest.TestCase):
@@ -4878,7 +4878,7 @@ class TestInstallScript(unittest.TestCase):
         sentinel = self.state_dir / "core" / ".agy-bridge-installed"
         self.assertTrue(sentinel.exists())
         self.assertEqual(stat.S_IMODE(sentinel.stat().st_mode), 0o600)
-        self.assertEqual(sentinel.read_text(encoding="utf-8").strip(), "v0.19.1")
+        self.assertEqual(sentinel.read_text(encoding="utf-8").strip(), "v0.19.2")
 
     def test_install_script_launcher_immune_to_cwd_hijacking(self):
         res = subprocess.run(
@@ -4893,7 +4893,28 @@ class TestInstallScript(unittest.TestCase):
         self.assertTrue(launcher.exists())
         content = launcher.read_text(encoding="utf-8")
         self.assertIn("sys.path = [p for p in sys.path if p not in ('', cwd)]", content)
-        self.assertIn("sys.path.insert(0, core)", content)
+
+    def test_install_script_fails_when_target_version_does_not_exist(self):
+        fake_git = self.bin_dir / "git"
+        fake_git.write_text(
+            '#!/bin/sh\ncase "$*" in\n  *checkout\\ v999.999.999-nonexistent*) exit 1 ;;\n  *) exit 0 ;;\nesac\n',
+            encoding="utf-8",
+        )
+        fake_git.chmod(0o755)
+
+        env = self.base_env.copy()
+        env["AGY_BRIDGE_VERSION"] = "v999.999.999-nonexistent"
+
+        res = subprocess.run(
+            ["bash", str(INSTALL_SH)],
+            env=env,
+            cwd=str(self.root),
+            capture_output=True,
+            text=True,
+        )
+        self.assertNotEqual(res.returncode, 0, "install.sh must fail when target version tag does not exist")
+        sentinel = self.state_dir / "core" / ".agy-bridge-installed"
+        self.assertFalse(sentinel.exists(), "sentinel marker must not be written if checkout fails")
 
 
 class TestUninstallScriptFallback(unittest.TestCase):

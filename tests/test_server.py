@@ -1642,7 +1642,17 @@ class TestHostHeaderValidation(unittest.TestCase):
                 self.assertEqual(resp.status, 200)
 
     def test_invalid_host_header_rejected_with_421(self):
-        for evil_host in ("evil.example", f"evil.example:{self.port}", "attacker.com", "192.168.1.100"):
+        evil_hosts = (
+            "evil.example",
+            f"evil.example:{self.port}",
+            "attacker.com",
+            "192.168.1.100",
+            "127.evil.com",
+            "127.0.0.1.evil.com",
+            f"127.evil.com:{self.port}",
+            f"127.0.0.1.evil.com:{self.port}",
+        )
+        for evil_host in evil_hosts:
             req = urllib.request.Request(f"{self.base_url}/healthz", headers={"Host": evil_host})
             with self.assertRaises(urllib.error.HTTPError) as ctx:
                 urllib.request.urlopen(req, timeout=5.0)
