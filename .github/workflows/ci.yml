@@ -52,7 +52,7 @@ jobs:
 
       - name: Verify syntax compilation
         run: |
-          python3 -m py_compile scripts/*.py bridge/*.py tests/*.py
+          python3 -m compileall -q bridge scripts tests
 
       - name: Run unit and integration tests
         run: |
