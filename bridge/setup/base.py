@@ -1,13 +1,19 @@
 """Base classes and registry for client configurators."""
 
 from abc import ABC, abstractmethod
-from pathlib import Path
-from typing import Any
+import os
+from pathlib import Path, PosixPath, WindowsPath
+from typing import TYPE_CHECKING, Any
 
 from bridge.setup.common import list_backups
 
+if TYPE_CHECKING:
+    _PathBase = Path
+else:
+    _PathBase = WindowsPath if os.name == "nt" else PosixPath
 
-class ConfigPath(Path):
+
+class ConfigPath(_PathBase):
     """Path subclass that carries an optional backup_path attribute."""
     backup_path: Path | None = None
 
