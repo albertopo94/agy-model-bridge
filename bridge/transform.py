@@ -4,6 +4,8 @@ import hashlib
 import json
 import threading
 import time
+import uuid
+from collections.abc import Iterator
 from typing import Any
 from bridge.events import (
     StreamEvent as StreamEvent,
@@ -927,3 +929,141 @@ def build_openai_error_response(
             }
         },
     )
+
+
+def build_openai_sse_events(
+    lines_gen: Iterator[Any],
+    model: str,
+    completion_id: str | None = None,
+) -> Iterator[str]:
+    """Generates OpenAI-compatible SSE chunk events from an upstream stream."""
+    if not completion_id:
+        completion_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
+
+    last_finish_reason: str = "stop"
+    last_usage: dict[str, int] | None = None
+    is_first_chunk: bool = True
+    tool_calls_emitted: bool = False
+    tc_index: int = 0
+    cached_stream_thought_sig: str | None = None
+
+    for item in lines_gen:
+        if isinstance(item, StreamEvent):
+            event = item
+        elif isinstance(item, dict):
+            event = parse_stream_event(item, check_error=True)
+        elif isinstance(item, str):
+            parsed = parse_cloudcode_sse_event(item)
+            if not parsed:
+                continue
+            event = parse_stream_event(parsed, check_error=True)
+        else:
+            continue
+
+        if event.usage:
+            last_usage = event.usage.to_dict()
+        if event.thought_signature:
+            cached_stream_thought_sig = event.thought_signature
+        if event.finish_reason:
+            last_finish_reason = event.finish_reason
+
+        delta_text = event.delta_text
+        delta_tool_calls: list[dict[str, Any]] | None = None
+
+        if event.tool_calls:
+            tool_calls_emitted = True
+            delta_tool_calls = []
+            for tc in event.tool_calls:
+                if isinstance(tc, ToolCallDelta):
+                    tc_id = tc.id
+                    tc_name = tc.name
+                    tc_args = tc.args
+                    tc_sig = tc.thought_signature
+                elif isinstance(tc, dict):
+                    tc_id = tc.get("id")
+                    tc_name = tc.get("name")
+                    tc_args = tc.get("args", {})
+                    tc_sig = tc.get("thought_signature") or tc.get("thoughtSignature")
+                else:
+                    continue
+
+                if not tc_id:
+                    tc_id = f"call_{uuid.uuid4().hex[:12]}"
+                elif tc_id.startswith("toolu_"):
+                    tc_id = f"call_{tc_id[6:]}"
+
+                sig = tc_sig or event.thought_signature or cached_stream_thought_sig
+                if sig:
+                    cache_thought_signature(call_id=tc_id, signature=sig, name=tc_name, args=tc_args)
+                if tc_name and tc_id:
+                    cache_tool_name(tc_id, tc_name)
+
+                args_str = json.dumps(tc_args) if isinstance(tc_args, (dict, list)) else str(tc_args or "{}")
+                call_dict: dict[str, Any] = {
+                    "index": tc_index,
+                    "id": tc_id,
+                    "type": "function",
+                    "function": {
+                        "name": tc_name or "",
+                        "arguments": args_str,
+                    },
+                }
+                if sig:
+                    call_dict["thought_signature"] = sig
+                delta_tool_calls.append(call_dict)
+                tc_index += 1
+
+        if delta_text or delta_tool_calls:
+            chunk = build_openai_chunk(
+                completion_id,
+                model,
+                delta_text=delta_text,
+                role="assistant" if is_first_chunk else None,
+                delta_tool_calls=delta_tool_calls,
+            )
+            is_first_chunk = False
+            yield chunk
+
+    if tool_calls_emitted:
+        last_finish_reason = "tool_calls"
+
+    stop_chunk = build_openai_chunk(
+        completion_id,
+        model,
+        finish_reason=last_finish_reason,
+        usage=last_usage,
+    )
+    yield stop_chunk
+    yield "data: [DONE]\n\n"
+
+
+class OpenAIProtocolAdapter:
+    """Protocol adapter for OpenAI Chat Completions API."""
+
+    @staticmethod
+    def transform_request(
+        payload: dict[str, Any], project: str = ""
+    ) -> tuple[str, list[dict[str, Any]], dict[str, Any] | None, dict[str, Any] | None, list[dict[str, Any]] | None]:
+        return openai_to_cloudcode_request(payload, project)
+
+    @staticmethod
+    def build_response(
+        completion_id: str,
+        model: str,
+        text: str,
+        usage: dict[str, int] | None = None,
+        finish_reason: str = "stop",
+        tool_calls: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        return build_openai_completion(
+            completion_id, model, text, usage=usage, finish_reason=finish_reason, tool_calls=tool_calls
+        )
+
+    @staticmethod
+    def build_stream(
+        lines_gen: Iterator[Any],
+        model: str,
+        completion_id: str | None = None,
+    ) -> Iterator[str]:
+        return build_openai_sse_events(lines_gen, model, completion_id=completion_id)
+

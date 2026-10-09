@@ -30,12 +30,13 @@ from bridge.transform import (
     extract_function_calls,
     extract_finish_reason,
     extract_usage,
-    build_openai_chunk,
-    build_openai_completion,
     build_openai_model_list,
     build_openai_error_response,
     check_sse_error,
     cache_thought_signature,
+    build_openai_sse_events,
+    OpenAIProtocolAdapter,
+    cache_tool_name,
 )
 from bridge.dashboard import render_dashboard, get_status_data
 from bridge.i18n import parse_accept_language
@@ -764,86 +765,12 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
             self.send_header("Connection", "close")
             self.end_headers()
 
-            last_finish_reason: str = "stop"
-            last_usage: dict[str, int] | None = None
-            is_first_chunk: bool = True
-            tool_calls_emitted: bool = False
-            tc_index: int = 0
-
-            def process_line(line: str) -> None:
-                nonlocal last_finish_reason, last_usage, is_first_chunk, tool_calls_emitted, tc_index
-                parsed = parse_cloudcode_sse_event(line)
-                if not parsed:
-                    return
-                check_sse_error(parsed)
-                delta_text = extract_text_delta(parsed)
-                reason = extract_finish_reason(parsed)
-                if reason:
-                    last_finish_reason = reason
-                usage = extract_usage(parsed)
-                if usage:
-                    last_usage = usage
-
-                fcs = extract_function_calls(parsed)
-                delta_tool_calls = None
-                if fcs:
-                    tool_calls_emitted = True
-                    delta_tool_calls = []
-                    for fc in fcs:
-                        tc_id = fc.get("id") or f"call_{uuid.uuid4().hex[:12]}"
-                        if tc_id.startswith("toolu_"):
-                            tc_id = f"call_{tc_id[6:]}"
-                        args = fc.get("args", {})
-                        args_str = json.dumps(args) if isinstance(args, (dict, list)) else str(args or "{}")
-                        thought_sig = fc.get("thought_signature") or fc.get("thoughtSignature")
-                        if thought_sig:
-                            cache_thought_signature(call_id=tc_id, signature=thought_sig, name=fc.get("name"), args=args)
-                        call_dict: dict[str, Any] = {
-                            "index": tc_index,
-                            "id": tc_id,
-                            "type": "function",
-                            "function": {
-                                "name": fc.get("name", ""),
-                                "arguments": args_str,
-                            },
-                        }
-                        if thought_sig:
-                            call_dict["thought_signature"] = thought_sig
-                        delta_tool_calls.append(call_dict)
-                        tc_index += 1
-
-                if delta_text or delta_tool_calls:
-                    chunk = build_openai_chunk(
-                        completion_id,
-                        model,
-                        delta_text=delta_text,
-                        role="assistant" if is_first_chunk else None,
-                        delta_tool_calls=delta_tool_calls,
-                    )
-                    is_first_chunk = False
-                    self.wfile.write(chunk.encode("utf-8"))
-                    self.wfile.flush()
-
+            combined_gen = itertools.chain(buffered_lines, stream_gen)
             try:
                 try:
-                    for line in buffered_lines:
-                        process_line(line)
-
-                    for line in stream_gen:
-                        process_line(line)
-
-                    if tool_calls_emitted:
-                        last_finish_reason = "tool_calls"
-
-                    stop_chunk = build_openai_chunk(
-                        completion_id,
-                        model,
-                        finish_reason=last_finish_reason,
-                        usage=last_usage,
-                    )
-                    self.wfile.write(stop_chunk.encode("utf-8"))
-                    self.wfile.write(b"data: [DONE]\n\n")
-                    self.wfile.flush()
+                    for chunk_str in build_openai_sse_events(combined_gen, model, completion_id=completion_id):
+                        self.wfile.write(chunk_str.encode("utf-8"))
+                        self.wfile.flush()
                 except (BrokenPipeError, ConnectionResetError):
                     pass
                 except Exception as exc:
@@ -876,21 +803,17 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                         parsed = parse_cloudcode_sse_event(line)
                         if not parsed:
                             continue
+                        event = parse_stream_event(parsed, check_error=True)
                         event_count += 1
-                        check_sse_error(parsed)
-                        delta = extract_text_delta(parsed)
-                        if delta:
-                            text_parts.append(delta)
-                        reason = extract_finish_reason(parsed)
-                        if reason:
+                        if event.delta_text:
+                            text_parts.append(event.delta_text)
+                        if event.finish_reason:
                             has_finish_reason = True
-                            last_finish_reason = reason
-                        usage = extract_usage(parsed)
-                        if usage:
-                            last_usage = usage
-                        fcs = extract_function_calls(parsed)
-                        if fcs:
-                            collected_tool_calls.extend(fcs)
+                            last_finish_reason = event.finish_reason
+                        if event.usage:
+                            last_usage = event.usage.to_dict()
+                        if event.tool_calls:
+                            collected_tool_calls.extend(tc.to_dict() for tc in event.tool_calls)
 
                     if event_count == 0 and not text_parts and not has_finish_reason and not collected_tool_calls:
                         raise BridgeError("Stream ended without data")
@@ -908,6 +831,8 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                             thought_sig = fc.get("thought_signature") or fc.get("thoughtSignature")
                             if thought_sig:
                                 cache_thought_signature(call_id=tc_id, signature=thought_sig, name=fc.get("name"), args=args)
+                            if fc.get("name") and tc_id:
+                                cache_tool_name(tc_id, fc.get("name"))
                             call_dict: dict[str, Any] = {
                                 "id": tc_id,
                                 "type": "function",
@@ -921,7 +846,7 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                             formatted_tool_calls.append(call_dict)
 
                     full_text = "".join(text_parts)
-                    completion_obj = build_openai_completion(
+                    completion_obj = OpenAIProtocolAdapter.build_response(
                         completion_id,
                         model,
                         full_text,

@@ -17,7 +17,12 @@ from bridge.transform import (
     build_thinking_config,
     resolve_model_and_thinking,
     sanitize_schema_for_gemini,
+    build_openai_sse_events,
+    OpenAIProtocolAdapter,
+    get_thought_signature,
+    get_tool_name,
 )
+from bridge.events import StreamEvent, ToolCallDelta, Usage
 from bridge.client import (
     BridgeError,
     RateLimitError,
@@ -2058,6 +2063,197 @@ class TestThoughtSignatureManagement(unittest.TestCase):
                 "functionCall": {"name": "run", "args": {}},
             },
         )
+
+
+class TestOpenAIProtocolAdapterAndStreaming(unittest.TestCase):
+    def test_build_openai_sse_events_with_stream_events_text(self):
+        stream_events = [
+            StreamEvent(delta_text="Hello "),
+            StreamEvent(
+                delta_text="world!",
+                usage=Usage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+                finish_reason="stop",
+            ),
+        ]
+        events = list(build_openai_sse_events(iter(stream_events), "gemini-2.5-pro", completion_id="chatcmpl-test-123"))
+        parsed_chunks = []
+        for raw in events:
+            raw_stripped = raw.strip()
+            if raw_stripped == "data: [DONE]":
+                parsed_chunks.append("DONE")
+            elif raw_stripped.startswith("data: "):
+                parsed_chunks.append(json.loads(raw_stripped[6:]))
+
+        self.assertEqual(len(parsed_chunks), 4)
+
+        # Chunk 1: first text chunk with role
+        chunk1 = parsed_chunks[0]
+        self.assertEqual(chunk1["id"], "chatcmpl-test-123")
+        self.assertEqual(chunk1["model"], "gemini-2.5-pro")
+        self.assertEqual(chunk1["choices"][0]["delta"]["role"], "assistant")
+        self.assertEqual(chunk1["choices"][0]["delta"]["content"], "Hello ")
+        self.assertIsNone(chunk1["choices"][0]["finish_reason"])
+
+        # Chunk 2: second text chunk without role
+        chunk2 = parsed_chunks[1]
+        self.assertNotIn("role", chunk2["choices"][0]["delta"])
+        self.assertEqual(chunk2["choices"][0]["delta"]["content"], "world!")
+        self.assertIsNone(chunk2["choices"][0]["finish_reason"])
+
+        # Chunk 3: stop chunk with finish_reason and usage
+        chunk3 = parsed_chunks[2]
+        self.assertEqual(chunk3["choices"][0]["finish_reason"], "stop")
+        self.assertEqual(
+            chunk3["usage"],
+            {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+        )
+
+        # Chunk 4: DONE marker
+        self.assertEqual(parsed_chunks[3], "DONE")
+
+    def test_build_openai_sse_events_with_raw_sse_string_lines(self):
+        raw_lines = [
+            'data: {"candidates": [{"content": {"parts": [{"text": "Hello "}]}}]}\n',
+            'data: {"candidates": [{"content": {"parts": [{"text": "streaming!"}]}}], "usageMetadata": {"promptTokenCount": 7, "candidatesTokenCount": 3, "totalTokenCount": 10}}\n',
+            'data: {"candidates": [{"finishReason": "STOP"}]}\n',
+        ]
+        events = list(build_openai_sse_events(iter(raw_lines), "gemini-2.5-flash"))
+        parsed_chunks = [
+            json.loads(r.strip()[6:])
+            for r in events
+            if r.strip().startswith("data: ") and r.strip() != "data: [DONE]"
+        ]
+        self.assertEqual(len(parsed_chunks), 3)
+        self.assertEqual(parsed_chunks[0]["choices"][0]["delta"]["content"], "Hello ")
+        self.assertEqual(parsed_chunks[1]["choices"][0]["delta"]["content"], "streaming!")
+        self.assertEqual(parsed_chunks[2]["choices"][0]["finish_reason"], "stop")
+        self.assertEqual(
+            parsed_chunks[2]["usage"],
+            {"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10},
+        )
+        self.assertEqual(events[-1].strip(), "data: [DONE]")
+
+    def test_build_openai_sse_events_tool_calls_and_caching(self):
+        stream_events = [
+            StreamEvent(
+                tool_calls=[
+                    ToolCallDelta(
+                        id="toolu_calc_999",
+                        name="calculator",
+                        args={"expr": "10 * 5"},
+                        thought_signature="sig_calc_secret",
+                    )
+                ]
+            )
+        ]
+        events = list(build_openai_sse_events(iter(stream_events), "gemini-2.5-pro"))
+        parsed_chunks = [
+            json.loads(r.strip()[6:])
+            for r in events
+            if r.strip().startswith("data: ") and r.strip() != "data: [DONE]"
+        ]
+
+        # Chunk 1 has delta tool call
+        tc_delta = parsed_chunks[0]["choices"][0]["delta"]["tool_calls"][0]
+        self.assertEqual(tc_delta["id"], "call_calc_999")
+        self.assertEqual(tc_delta["index"], 0)
+        self.assertEqual(tc_delta["type"], "function")
+        self.assertEqual(tc_delta["function"]["name"], "calculator")
+        self.assertEqual(tc_delta["function"]["arguments"], '{"expr": "10 * 5"}')
+        self.assertEqual(tc_delta["thought_signature"], "sig_calc_secret")
+
+        # Caching verified
+        self.assertEqual(get_thought_signature("call_calc_999"), "sig_calc_secret")
+        self.assertEqual(get_tool_name("call_calc_999"), "calculator")
+
+        # Chunk 2 finish reason must be tool_calls
+        self.assertEqual(parsed_chunks[1]["choices"][0]["finish_reason"], "tool_calls")
+        self.assertEqual(events[-1].strip(), "data: [DONE]")
+
+    def test_build_openai_sse_events_inherits_stream_thought_signature(self):
+        stream_events = [
+            StreamEvent(thought_signature="sig_stream_scope"),
+            StreamEvent(
+                tool_calls=[
+                    ToolCallDelta(
+                        id="call_fetch_data",
+                        name="fetch",
+                        args={"url": "https://example.com"},
+                    )
+                ]
+            ),
+        ]
+        events = list(build_openai_sse_events(iter(stream_events), "gemini-2.5-pro"))
+        parsed_chunks = [
+            json.loads(r.strip()[6:])
+            for r in events
+            if r.strip().startswith("data: ") and r.strip() != "data: [DONE]"
+        ]
+        tc_delta = parsed_chunks[0]["choices"][0]["delta"]["tool_calls"][0]
+        self.assertEqual(tc_delta["thought_signature"], "sig_stream_scope")
+        self.assertEqual(get_thought_signature("call_fetch_data"), "sig_stream_scope")
+
+    def test_build_openai_sse_events_tool_signature_overrides_stream_signature(self):
+        stream_events = [
+            StreamEvent(
+                thought_signature="sig_stream_scope",
+                tool_calls=[
+                    ToolCallDelta(
+                        id="call_override_me",
+                        name="override_fn",
+                        args={},
+                        thought_signature="sig_override_specific",
+                    )
+                ],
+            )
+        ]
+        events = list(build_openai_sse_events(iter(stream_events), "gemini-2.5-pro"))
+        parsed_chunks = [
+            json.loads(r.strip()[6:])
+            for r in events
+            if r.strip().startswith("data: ") and r.strip() != "data: [DONE]"
+        ]
+        tc_delta = parsed_chunks[0]["choices"][0]["delta"]["tool_calls"][0]
+        self.assertEqual(tc_delta["thought_signature"], "sig_override_specific")
+        self.assertEqual(get_thought_signature("call_override_me"), "sig_override_specific")
+
+    def test_build_openai_sse_events_handles_upstream_error(self):
+        raw_error_lines = [
+            'data: {"error": {"code": 429, "message": "Quota exceeded", "status": "RESOURCE_EXHAUSTED"}}\n'
+        ]
+        with self.assertRaises(RateLimitError):
+            list(build_openai_sse_events(iter(raw_error_lines), "gemini-2.5-pro"))
+
+    def test_openai_protocol_adapter_methods(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [{"role": "user", "content": "Hello"}],
+        }
+        model, contents, sys_inst, gen_cfg, tools = OpenAIProtocolAdapter.transform_request(payload, "proj-test")
+        self.assertEqual(model, "gemini-2.5-pro")
+        self.assertEqual(len(contents), 1)
+
+        resp = OpenAIProtocolAdapter.build_response(
+            "chatcmpl-test",
+            "gemini-2.5-pro",
+            "Hi there!",
+            usage={"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8},
+            finish_reason="stop",
+        )
+        self.assertEqual(resp["id"], "chatcmpl-test")
+        self.assertEqual(resp["object"], "chat.completion")
+        self.assertEqual(resp["choices"][0]["message"]["content"], "Hi there!")
+        self.assertEqual(resp["choices"][0]["finish_reason"], "stop")
+        self.assertEqual(resp["usage"]["total_tokens"], 8)
+
+        stream = OpenAIProtocolAdapter.build_stream(
+            iter([StreamEvent(delta_text="Chunk")]),
+            "gemini-2.5-pro",
+            completion_id="chatcmpl-stream-test",
+        )
+        stream_chunks = list(stream)
+        self.assertTrue(len(stream_chunks) >= 2)
+        self.assertEqual(stream_chunks[-1].strip(), "data: [DONE]")
 
 
 if __name__ == "__main__":
