@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agy-model-bridge"
-version = "0.19.3"
+version = "0.19.4"
 description = "Antigravity Model Bridge - Local AI Gateway for Claude Code, Codex, and OpenAI Clients"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -38,14 +38,22 @@ line-length = 120
 target-version = "py310"
 
 [tool.ruff.lint]
-select = ["E9", "F"]
+select = ["E9", "F", "B", "S"]
+ignore = [
+    "S104",  # Binding or validating 0.0.0.0 is an intentional CLI option
+    "S105",  # False positives on parameter and variable names like 'token' or 'auth_token'
+    "S107",  # False positives on placeholder default argument values
+    "S310",  # urllib urlopen for trusted Google Cloud Code and localhost daemon endpoints
+    "S311",  # Pseudo-random generator used exclusively for retry backoff jitter
+    "S603",  # Subprocess call with explicit argument lists and no shell=True
+    "S607",  # Partial executable path (sys.executable, git, security)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "S106", "S108"]
 
 [tool.mypy]
 python_version = "3.10"
 warn_unused_configs = true
 warn_redundant_casts = true
 ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
-module = ["bridge.setup", "bridge.__main__"]
-ignore_errors = true

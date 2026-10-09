@@ -2486,6 +2486,58 @@ class TestServerErrorSanitization(unittest.TestCase):
         self.assertEqual(err_payload["error"]["message"], "Parameter 'temperature' must be a number")
         handler._log_structured.assert_not_called()
 
+    def test_server_context_creation_and_attachment(self):
+        from bridge.server import ServerContext
+        mock_client = MockCloudCodeClient()
+        server = create_server(
+            host="127.0.0.1",
+            port=0,
+            project="test-proj-ctx",
+            client=mock_client,
+            api_key="secret-key-123",
+            max_concurrency=8,
+            max_retries=4,
+            initial_retry_delay=0.25,
+        )
+        try:
+            self.assertTrue(hasattr(server, "context"))
+            ctx = server.context
+            self.assertIsInstance(ctx, ServerContext)
+            self.assertEqual(ctx.project, "test-proj-ctx")
+            self.assertEqual(ctx.api_key, "secret-key-123")
+            self.assertEqual(ctx.max_concurrency, 8)
+            self.assertEqual(ctx.max_retries, 4)
+            self.assertEqual(ctx.initial_retry_delay, 0.25)
+            self.assertIsNotNone(ctx.concurrency_semaphore)
+            self.assertEqual(server.RequestHandlerClass.context, ctx)
+        finally:
+            server.server_close()
+
+    def test_handler_helper_methods_resolve_context(self):
+        from bridge.server import ServerContext
+        handler = OpenAIRequestHandler.__new__(OpenAIRequestHandler)
+        mock_client = MockCloudCodeClient()
+        sem = threading.Semaphore(2)
+        ctx = ServerContext(
+            client=mock_client,
+            project="ctx-proj",
+            api_key="ctx-key",
+            concurrency_semaphore=sem,
+            max_retries=2,
+        )
+        handler.context = ctx
+
+        self.assertEqual(handler._get_expected_api_key(), "ctx-key")
+        self.assertEqual(handler._get_semaphore(), sem)
+
+        with handler._acquire_concurrency() as acquired:
+            self.assertTrue(acquired)
+        # Verify semaphore released back to 2
+        self.assertTrue(sem.acquire(blocking=False))
+        self.assertTrue(sem.acquire(blocking=False))
+        sem.release()
+        sem.release()
+
 
 if __name__ == "__main__":
     unittest.main()

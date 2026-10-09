@@ -229,9 +229,9 @@ class TestCloudCodeClient(unittest.TestCase):
         ]
         for err in network_errors:
             with self.subTest(err=err):
-                def err_gen():
+                def err_gen(e=err):
                     yield b"data: 1\n"
-                    raise err
+                    raise e
 
                 mock_resp = MagicMock()
                 mock_resp.__iter__.return_value = err_gen()

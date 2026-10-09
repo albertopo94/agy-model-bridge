@@ -13,7 +13,8 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
-from typing import Any
+import sys
+from typing import Any, cast
 
 from bridge import __version__
 import bridge.daemon
@@ -251,7 +252,7 @@ def restore_backup(config_path: Path, backup_path: Path | None = None) -> Path:
     return chosen_backup
 
 
-class ConfigPath(type(Path())):
+class ConfigPath(Path):
     """Path subclass that carries an optional backup_path attribute."""
     backup_path: Path | None = None
 
@@ -2111,14 +2112,17 @@ def setup_claude(
     port: int | None = None,
     model: str = "gemini-3.8-flash-high",
     auth_token: str | None = None,
-) -> Path:
+) -> ConfigPath:
     """Configures Claude Code settings.json with agy-model-bridge environment variables."""
-    return get_configurator("claude").setup(
-        base_url=base_url,
-        model=model,
-        config_path=settings_path,
-        port=port,
-        auth_token=auth_token,
+    return cast(
+        ConfigPath,
+        get_configurator("claude").setup(
+            base_url=base_url,
+            model=model,
+            config_path=settings_path,
+            port=port,
+            auth_token=auth_token,
+        ),
     )
 
 
@@ -2128,14 +2132,17 @@ def setup_codex(
     port: int | None = None,
     model: str = "gemini-3.8-flash-high",
     auth_token: str | None = None,
-) -> Path:
+) -> ConfigPath:
     """Configures Codex CLI config.toml with delimited agy configuration block."""
-    return get_configurator("codex").setup(
-        base_url=base_url,
-        model=model,
-        config_path=config_path,
-        port=port,
-        auth_token=auth_token,
+    return cast(
+        ConfigPath,
+        get_configurator("codex").setup(
+            base_url=base_url,
+            model=model,
+            config_path=config_path,
+            port=port,
+            auth_token=auth_token,
+        ),
     )
 
 
@@ -2167,14 +2174,17 @@ def setup_hermes(
     port: int | None = None,
     model: str = "gemini-3.8-flash-high",
     auth_token: str | None = None,
-) -> Path:
+) -> ConfigPath:
     """Configures Hermes Agent config.yaml with delimited agy configuration block."""
-    return get_configurator("hermes").setup(
-        base_url=base_url,
-        model=model,
-        config_path=config_path,
-        port=port,
-        auth_token=auth_token,
+    return cast(
+        ConfigPath,
+        get_configurator("hermes").setup(
+            base_url=base_url,
+            model=model,
+            config_path=config_path,
+            port=port,
+            auth_token=auth_token,
+        ),
     )
 
 
@@ -2195,14 +2205,17 @@ def setup_opencode(
     port: int | None = None,
     model: str = "gemini-3.8-flash-high",
     auth_token: str | None = None,
-) -> Path:
+) -> ConfigPath:
     """Configures OpenCode config.json with agy provider and model."""
-    return get_configurator("opencode").setup(
-        base_url=base_url,
-        model=model,
-        config_path=config_path,
-        port=port,
-        auth_token=auth_token,
+    return cast(
+        ConfigPath,
+        get_configurator("opencode").setup(
+            base_url=base_url,
+            model=model,
+            config_path=config_path,
+            port=port,
+            auth_token=auth_token,
+        ),
     )
 
 
@@ -2223,14 +2236,17 @@ def setup_openclaw(
     port: int | None = None,
     model: str = "gemini-3.8-flash-high",
     auth_token: str | None = None,
-) -> Path:
+) -> ConfigPath:
     """Configures OpenClaw openclaw.json for agy-model-bridge gateway."""
-    return get_configurator("openclaw").setup(
-        base_url=base_url,
-        model=model,
-        config_path=config_path,
-        port=port,
-        auth_token=auth_token,
+    return cast(
+        ConfigPath,
+        get_configurator("openclaw").setup(
+            base_url=base_url,
+            model=model,
+            config_path=config_path,
+            port=port,
+            auth_token=auth_token,
+        ),
     )
 
 
@@ -2253,12 +2269,15 @@ def setup_cursor(
     auth_token: str | None = None,
 ) -> dict[str, Any]:
     """Returns setup guide parameters for Cursor."""
-    return get_configurator("cursor").setup(
-        base_url=base_url,
-        port=port,
-        model=model,
-        lang=lang,
-        auth_token=auth_token,
+    return cast(
+        dict[str, Any],
+        get_configurator("cursor").setup(
+            base_url=base_url,
+            port=port,
+            model=model,
+            lang=lang,
+            auth_token=auth_token,
+        ),
     )
 
 
@@ -2269,15 +2288,18 @@ def setup_pi(
     model: str = "gemini-3.8-flash-high",
     auth_token: str | None = None,
     set_default: bool = False,
-) -> Path:
+) -> ConfigPath:
     """Configures Pi models.json for agy-model-bridge gateway."""
-    return get_configurator("pi").setup(
-        base_url=base_url,
-        model=model,
-        config_path=config_path,
-        port=port,
-        auth_token=auth_token,
-        set_default=set_default,
+    return cast(
+        ConfigPath,
+        get_configurator("pi").setup(
+            base_url=base_url,
+            model=model,
+            config_path=config_path,
+            port=port,
+            auth_token=auth_token,
+            set_default=set_default,
+        ),
     )
 
 
@@ -2299,15 +2321,18 @@ def setup_gentle_shell(
     model: str = "gemini-3.8-flash-high",
     auth_token: str | None = None,
     set_default: bool = False,
-) -> Path:
+) -> ConfigPath:
     """Configures Gentle Shell models.json for agy-model-bridge gateway."""
-    return get_configurator("gentle-shell").setup(
-        base_url=base_url,
-        model=model,
-        config_path=config_path,
-        port=port,
-        auth_token=auth_token,
-        set_default=set_default,
+    return cast(
+        ConfigPath,
+        get_configurator("gentle-shell").setup(
+            base_url=base_url,
+            model=model,
+            config_path=config_path,
+            port=port,
+            auth_token=auth_token,
+            set_default=set_default,
+        ),
     )
 
 
@@ -2561,6 +2586,7 @@ def update_installation(
             "version": str,
         }
     """
+    target_dir: Path | None = None
     if core_dir is not None:
         target_dir = Path(core_dir)
     elif os.environ.get("AGY_BRIDGE_CORE_DIR"):
@@ -2591,12 +2617,12 @@ def update_installation(
                 else:
                     target_dir = default_dir
 
-    if not target_dir.exists() or not (target_dir / ".git").exists():
+    if target_dir is None or not target_dir.exists() or not (target_dir / ".git").exists():
         return {
             "status": "error",
-            "message": t("update_not_git_repo", target_dir=target_dir),
+            "message": t("update_not_git_repo", target_dir=target_dir or Path("")),
             "restarted_daemon": False,
-            "version": _get_installed_version(target_dir),
+            "version": _get_installed_version(target_dir) if target_dir is not None else "",
         }
 
     cmd = ["git", "-C", str(target_dir), "pull", "--ff-only"]
@@ -2641,8 +2667,8 @@ def update_installation(
         try:
             from bridge.security import write_secret_file
             write_secret_file(installed_marker, f"{new_ver}\n", mode=0o600)
-        except Exception:
-            pass
+        except OSError as err:
+            sys.stderr.write(f"Warning: could not update marker file: {err}\n")
 
     restarted_daemon = False
     if restart_daemon_if_running:

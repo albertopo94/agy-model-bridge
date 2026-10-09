@@ -458,8 +458,8 @@ def build_anthropic_message(
             elif isinstance(call_args, str):
                 try:
                     call_args = json.loads(call_args)
-                except Exception:
-                    pass
+                except (json.JSONDecodeError, ValueError):
+                    call_args = {}
             if call_id and call_name:
                 cache_tool_name(call_id, call_name)
             thought_sig = call.get("thought_signature") or call.get("thoughtSignature")

@@ -1,6 +1,7 @@
 """OpenAI-compatible HTTP server adapter for Google Cloud Code Assist."""
 
 from collections.abc import Iterator
+import contextlib
 from dataclasses import dataclass, field
 import http.server
 import itertools
@@ -65,6 +66,20 @@ def sanitize_request_id(request_id: str | None) -> str:
     return f"req_{uuid.uuid4().hex[:12]}"
 
 
+@dataclass(slots=True)
+class ServerContext:
+    """Encapsulates server configuration and shared runtime state."""
+
+    client: CloudCodeClient
+    project: str
+    api_key: str | None = None
+    concurrency_semaphore: threading.Semaphore | None = None
+    max_concurrency: int = 16
+    concurrency_timeout: float = 5.0
+    max_retries: int = 3
+    initial_retry_delay: float = 0.5
+
+
 @dataclass
 class CollectedStreamData:
     text: str = ""
@@ -79,17 +94,80 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
     """Handles OpenAI REST endpoints and delegates to CloudCodeClient."""
 
     timeout = 60.0
-    client: CloudCodeClient
-    project: str
+    context: ServerContext | None = None
+    client: CloudCodeClient = None  # type: ignore[assignment]
+    project: str = ""
     api_key: str | None = None
+    server: Any = None
     request_id: str = ""
     command: str = ""
     path: str = ""
     start_time: float = 0.0
+    close_connection: bool = False
     concurrency_semaphore: threading.Semaphore | None = None
     concurrency_timeout: float = 5.0
     max_retries: int = 3
     initial_retry_delay: float = 0.5
+    headers: Any = None
+
+    def _get_server_address(self) -> tuple[str, int] | None:
+        if self.server is not None and hasattr(self.server, "server_address"):
+            addr = self.server.server_address
+            if isinstance(addr, tuple) and len(addr) >= 2:
+                return (str(addr[0]), int(addr[1]))
+        return None
+
+    def _get_expected_api_key(self) -> str | None:
+        if self.api_key is not None:
+            return self.api_key
+        if self.context is not None and self.context.api_key is not None:
+            return self.context.api_key
+        if self.server is not None:
+            if hasattr(self.server, "context") and self.server.context.api_key is not None:
+                return self.server.context.api_key
+            if hasattr(self.server, "api_key"):
+                return self.server.api_key
+        return None
+
+    def _get_semaphore(self) -> threading.Semaphore | None:
+        if self.concurrency_semaphore is not None:
+            return self.concurrency_semaphore
+        if self.context is not None and self.context.concurrency_semaphore is not None:
+            return self.context.concurrency_semaphore
+        if self.server is not None:
+            if hasattr(self.server, "context") and self.server.context.concurrency_semaphore is not None:
+                return self.server.context.concurrency_semaphore
+            if hasattr(self.server, "concurrency_semaphore"):
+                return self.server.concurrency_semaphore
+        return None
+
+    @contextlib.contextmanager
+    def _acquire_concurrency(self) -> Iterator[bool]:
+        sem = self._get_semaphore()
+        if sem is None:
+            yield True
+            return
+        acquired = sem.acquire(blocking=True, timeout=self.concurrency_timeout)
+        if not acquired:
+            self.send_response(429)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Retry-After", "1")
+            self.send_header("X-Request-ID", self.request_id)
+            self.end_headers()
+            err = {
+                "error": {
+                    "message": "Server concurrency limit reached, please retry later",
+                    "type": "concurrency_limit_error",
+                    "code": 429,
+                }
+            }
+            self.wfile.write(json.dumps(err).encode("utf-8"))
+            yield False
+            return
+        try:
+            yield True
+        finally:
+            sem.release()
 
     def parse_request(self) -> bool:
         if not super().parse_request():
@@ -100,9 +178,8 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
         return True
 
     def _ensure_request_id(self) -> str:
-        if not getattr(self, "request_id", ""):
-            headers = getattr(self, "headers", None)
-            hdr_val = headers.get("X-Request-ID") if headers else None
+        if not self.request_id:
+            hdr_val = self.headers.get("X-Request-ID") if self.headers else None
             self.request_id = sanitize_request_id(hdr_val)
         return self.request_id
 
@@ -115,11 +192,10 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
         error: str | None = None,
     ) -> None:
         self._ensure_request_id()
-        start_t = getattr(self, "start_time", None)
-        if latency_ms == 0 and start_t:
-            latency_ms = int((time.monotonic() - float(start_t)) * 1000)
-        command = getattr(self, "command", "") or "HTTP"
-        path = getattr(self, "path", "") or "/"
+        if latency_ms == 0 and self.start_time:
+            latency_ms = int((time.monotonic() - self.start_time) * 1000)
+        command = self.command or "HTTP"
+        path = self.path or "/"
         parts = [f"[{self.request_id}]", command, path, f"-> {status}", f"({latency_ms}ms)"]
         if model:
             parts.append(f"model={model}")
@@ -137,7 +213,7 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
 
     def _is_valid_host(self) -> bool:
         """Validates incoming Host header against allowed loopback/bound hosts to prevent DNS rebinding."""
-        host_header = self.headers.get("Host", "").strip()
+        host_header = self.headers.get("Host", "").strip() if self.headers else ""
         if not host_header:
             return False
 
@@ -150,16 +226,15 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
             hostname = host_header.split(":")[0].strip().lower()
 
         allowed = {"127.0.0.1", "localhost", "::1", "[::1]", "0.0.0.0"}
-        server_host = getattr(self.server, "server_address", [None])[0]
+        server_addr = self._get_server_address()
+        server_host = server_addr[0] if server_addr else None
         if server_host and server_host not in ("0.0.0.0", "::"):
             allowed.add(server_host.lower())
 
         return hostname in allowed or is_loopback_host(hostname)
 
     def _is_authenticated(self) -> bool:
-        expected = getattr(self.server, "api_key", None)
-        if expected is None:
-            expected = getattr(self, "api_key", None)
+        expected = self._get_expected_api_key()
         return validate_api_key(expected, self.headers)
 
     def do_OPTIONS(self) -> None:
@@ -203,7 +278,7 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
         self.send_response(status_code)
         self.send_header("Content-Type", "application/json")
         self.send_header("X-Request-ID", self.request_id)
-        req_path = urllib.parse.urlparse(getattr(self, "path", "")).path
+        req_path = urllib.parse.urlparse(self.path).path
         if not req_path.startswith("/v1/") and req_path not in ("/", "/api/status"):
             self.send_header("Access-Control-Allow-Origin", "*")
         sent_connection = False
@@ -212,7 +287,7 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                 if k.lower() == "connection":
                     sent_connection = True
                 self.send_header(k, v)
-        if getattr(self, "close_connection", False) and not sent_connection:
+        if self.close_connection and not sent_connection:
             self.send_header("Connection", "close")
         self.send_header("Content-Length", str(len(encoded)))
         self.end_headers()
@@ -249,8 +324,8 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
             if hasattr(self, "client") and hasattr(self.client, "token_provider") and hasattr(self.client.token_provider, "invalidate"):
                 try:
                     self.client.token_provider.invalidate()
-                except Exception:
-                    pass
+                except Exception as inv_err:
+                    sys.stderr.write(f"Warning: token invalidation failed: {inv_err}\n")
 
         if error_type == "internal_server_error":
             self._log_structured(status=500, error=str(exc))
@@ -261,7 +336,9 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
         code, err_payload = build_openai_error_response(status_code, client_msg, error_type)
         headers: dict[str, str] = {}
         if status_code == 429:
-            retry_after = getattr(exc, "retry_after", None) or 5
+            retry_after = 5
+            if isinstance(exc, RateLimitError) and exc.retry_after is not None:
+                retry_after = exc.retry_after
             headers["Retry-After"] = str(retry_after)
         self._send_json(code, err_payload, headers=headers)
 
@@ -290,12 +367,12 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                 param_lang = query_params["lang"][0].strip().lower()
                 client_lang = "es" if param_lang.startswith("es") else "en"
             else:
-                accept_lang = self.headers.get("Accept-Language", "")
+                accept_lang = self.headers.get("Accept-Language", "") if self.headers else ""
                 client_lang = parse_accept_language(accept_lang)
 
-            server_addr = getattr(self.server, "server_address", None)
-            host = server_addr[0] if isinstance(server_addr, tuple) and len(server_addr) > 0 else "127.0.0.1"
-            port = int(server_addr[1]) if isinstance(server_addr, tuple) and len(server_addr) > 1 else 24980
+            server_addr = self._get_server_address()
+            host = server_addr[0] if server_addr else "127.0.0.1"
+            port = server_addr[1] if server_addr else 24980
             status_data = get_status_data(self.client, self.project, str(host), port)
             html_content = render_dashboard(
                 host=status_data["host"],
@@ -303,7 +380,7 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                 auth_status=status_data["auth"],
                 models_count=status_data["models_count"],
                 lang=client_lang,
-                api_key="configured" if getattr(self.server, "api_key", None) else None,
+                api_key="configured" if self._get_expected_api_key() else None,
             )
             encoded = html_content.encode("utf-8")
             self._ensure_request_id()
@@ -316,9 +393,9 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
             return
 
         if path == "/api/status":
-            server_addr = getattr(self.server, "server_address", None)
-            host = server_addr[0] if isinstance(server_addr, tuple) and len(server_addr) > 0 else "127.0.0.1"
-            port = int(server_addr[1]) if isinstance(server_addr, tuple) and len(server_addr) > 1 else 24980
+            server_addr = self._get_server_address()
+            host = server_addr[0] if server_addr else "127.0.0.1"
+            port = server_addr[1] if server_addr else 24980
             status_data = get_status_data(self.client, self.project, str(host), port)
             self._send_json(200, status_data)
             return
@@ -490,8 +567,8 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
             if hasattr(self, "client") and hasattr(self.client, "token_provider") and hasattr(self.client.token_provider, "invalidate"):
                 try:
                     self.client.token_provider.invalidate()
-                except Exception:
-                    pass
+                except Exception as inv_err:
+                    sys.stderr.write(f"Warning: token invalidation failed: {inv_err}\n")
         if error_type == "internal_server_error":
             self._log_structured(status=500, error=str(exc))
             client_msg = f"Internal server error [{self.request_id}]"
@@ -500,7 +577,9 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
         code, err_payload = build_anthropic_error_response(status_code, client_msg)
         headers: dict[str, str] = {}
         if status_code == 429:
-            retry_after = getattr(exc, "retry_after", None) or 5
+            retry_after = 5
+            if isinstance(exc, RateLimitError) and exc.retry_after is not None:
+                retry_after = exc.retry_after
             headers["Retry-After"] = str(retry_after)
         self._send_json(code, err_payload, headers=headers)
 
@@ -535,8 +614,8 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
         extra_kwargs: dict[str, Any] | None = None,
     ) -> tuple[Any, list[str]]:
         kwargs = extra_kwargs if extra_kwargs is not None else {}
-        max_retries = getattr(self, "max_retries", 3)
-        initial_delay = getattr(self, "initial_retry_delay", 0.5)
+        max_retries = self.max_retries if self.context is None else self.context.max_retries
+        initial_delay = self.initial_retry_delay if self.context is None else self.context.initial_retry_delay
 
         for attempt in range(max_retries + 1):
             stream_gen = None
@@ -571,76 +650,58 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
         stream_error_formatter: Any = None,
     ) -> None:
         self._ensure_request_id()
-        sem = getattr(self, "concurrency_semaphore", None)
-        if sem is None and hasattr(self, "server"):
-            sem = getattr(self.server, "concurrency_semaphore", None)
-        acquired = True
-        if sem is not None:
-            acquired = sem.acquire(blocking=True, timeout=getattr(self, "concurrency_timeout", 5.0))
+        with self._acquire_concurrency() as acquired:
             if not acquired:
-                self.send_response(429)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Retry-After", "1")
+                return
+
+            stream_gen = None
+            try:
+                try:
+                    stream_gen, buffered_lines = self._execute_upstream_call(
+                        model=model,
+                        contents=contents,
+                        system_instruction=system_instruction,
+                        extra_kwargs=extra_kwargs,
+                    )
+                except (BrokenPipeError, ConnectionResetError):
+                    return
+                except Exception as exc:
+                    error_sender(exc)
+                    return
+
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("Connection", "close")
                 self.send_header("X-Request-ID", self.request_id)
                 self.end_headers()
-                err = {
-                    "error": {
-                        "message": "Server concurrency limit reached, please retry later",
-                        "type": "concurrency_limit_error",
-                        "code": 429,
-                    }
-                }
-                self.wfile.write(json.dumps(err).encode("utf-8"))
-                return
 
-        stream_gen = None
-        try:
-            try:
-                stream_gen, buffered_lines = self._execute_upstream_call(
-                    model=model,
-                    contents=contents,
-                    system_instruction=system_instruction,
-                    extra_kwargs=extra_kwargs,
-                )
-            except (BrokenPipeError, ConnectionResetError):
-                return
-            except Exception as exc:
-                error_sender(exc)
-                return
-
-            self.send_response(200)
-            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
-            self.send_header("Cache-Control", "no-cache")
-            self.send_header("Connection", "close")
-            self.send_header("X-Request-ID", self.request_id)
-            self.end_headers()
-
-            combined_gen = itertools.chain(buffered_lines, stream_gen)
-            try:
-                for chunk_str in stream_builder(combined_gen):
-                    self.wfile.write(chunk_str.encode("utf-8") if isinstance(chunk_str, str) else chunk_str)
-                    self.wfile.flush()
-            except (BrokenPipeError, ConnectionResetError):
-                pass
-            except Exception as exc:
-                sys.stderr.write(f"Error during stream: {exc}\n")
-                sys.stderr.flush()
-                if stream_error_formatter is not None:
-                    try:
-                        err_payload = stream_error_formatter(exc)
-                        if err_payload:
-                            self.wfile.write(
-                                err_payload.encode("utf-8") if isinstance(err_payload, str) else err_payload
-                            )
-                            self.wfile.flush()
-                    except Exception:
-                        pass
-        finally:
-            if stream_gen is not None and hasattr(stream_gen, "close"):
-                stream_gen.close()
-            self.close_connection = True
-            if sem is not None and acquired:
-                sem.release()
+                combined_gen = itertools.chain(buffered_lines, stream_gen)
+                try:
+                    for chunk_str in stream_builder(combined_gen):
+                        self.wfile.write(chunk_str.encode("utf-8") if isinstance(chunk_str, str) else chunk_str)
+                        self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+                except Exception as exc:
+                    sys.stderr.write(f"Error during stream: {exc}\n")
+                    sys.stderr.flush()
+                    if stream_error_formatter is not None:
+                        try:
+                            err_payload = stream_error_formatter(exc)
+                            if err_payload:
+                                self.wfile.write(
+                                    err_payload.encode("utf-8") if isinstance(err_payload, str) else err_payload
+                                )
+                                self.wfile.flush()
+                        except (BrokenPipeError, ConnectionResetError):
+                            pass
+                        except Exception as fmt_err:
+                            sys.stderr.write(f"Warning: error formatting failed: {fmt_err}\n")
+            finally:
+                if stream_gen is not None and hasattr(stream_gen, "close"):
+                    stream_gen.close()
+                self.close_connection = True
 
     def _dispatch_non_streaming(
         self,
@@ -655,108 +716,87 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
             error_sender = self._send_error
 
         self._ensure_request_id()
-        sem = getattr(self, "concurrency_semaphore", None)
-        if sem is None and hasattr(self, "server"):
-            sem = getattr(self.server, "concurrency_semaphore", None)
-        acquired = True
-        if sem is not None:
-            acquired = sem.acquire(blocking=True, timeout=getattr(self, "concurrency_timeout", 5.0))
+        with self._acquire_concurrency() as acquired:
             if not acquired:
-                self.send_response(429)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Retry-After", "1")
-                self.send_header("X-Request-ID", self.request_id)
-                self.end_headers()
-                err = {
-                    "error": {
-                        "message": "Server concurrency limit reached, please retry later",
-                        "type": "concurrency_limit_error",
-                        "code": 429,
-                    }
-                }
-                self.wfile.write(json.dumps(err).encode("utf-8"))
                 return
 
-        stream_gen = None
-        try:
+            stream_gen = None
             try:
-                stream_gen, buffered_lines = self._execute_upstream_call(
-                    model=model,
-                    contents=contents,
-                    system_instruction=system_instruction,
-                    extra_kwargs=extra_kwargs,
-                )
+                try:
+                    stream_gen, buffered_lines = self._execute_upstream_call(
+                        model=model,
+                        contents=contents,
+                        system_instruction=system_instruction,
+                        extra_kwargs=extra_kwargs,
+                    )
+                except (BrokenPipeError, ConnectionResetError):
+                    return
+                except Exception as exc:
+                    error_sender(exc)
+                    return
+
+                try:
+                    text_parts: list[str] = []
+                    thought_parts: list[str] = []
+                    collected_tool_calls: list[dict[str, Any]] = []
+                    last_usage: dict[str, int] | None = None
+                    last_finish_reason: str = "stop"
+                    latest_thought_sig: str | None = None
+                    event_count = 0
+                    has_finish_reason = False
+
+                    combined_gen = itertools.chain(buffered_lines, stream_gen)
+                    for line in combined_gen:
+                        parsed = parse_cloudcode_sse_event(line)
+                        if parsed is None:
+                            continue
+                        event = parse_stream_event(parsed, check_error=True)
+                        event_count += 1
+                        sig = event.thought_signature or _extract_event_thought_signature(parsed)
+                        if sig:
+                            latest_thought_sig = sig
+                        if event.usage:
+                            last_usage = event.usage.to_dict()
+                        if event.finish_reason:
+                            has_finish_reason = True
+                            last_finish_reason = event.finish_reason
+                        if event.delta_thought:
+                            thought_parts.append(event.delta_thought)
+                        if event.delta_text:
+                            text_parts.append(event.delta_text)
+                        if event.tool_calls:
+                            collected_tool_calls.extend(tc.to_dict() for tc in event.tool_calls)
+
+                    if (
+                        event_count == 0
+                        and not text_parts
+                        and not thought_parts
+                        and not collected_tool_calls
+                        and not has_finish_reason
+                    ):
+                        raise BridgeError("Stream ended without data")
+
+                    collected_data = CollectedStreamData(
+                        text="".join(text_parts),
+                        tool_calls=collected_tool_calls,
+                        usage=last_usage,
+                        finish_reason=last_finish_reason,
+                        thoughts="".join(thought_parts),
+                        thought_signature=latest_thought_sig,
+                    )
+
+                    resp_obj = response_builder(collected_data)
+                    try:
+                        self._send_json(200, resp_obj)
+                    except (BrokenPipeError, ConnectionResetError):
+                        pass
+                finally:
+                    if stream_gen is not None and hasattr(stream_gen, "close"):
+                        stream_gen.close()
             except (BrokenPipeError, ConnectionResetError):
-                return
+                pass
             except Exception as exc:
                 error_sender(exc)
-                return
-
-            try:
-                text_parts: list[str] = []
-                thought_parts: list[str] = []
-                collected_tool_calls: list[dict[str, Any]] = []
-                last_usage: dict[str, int] | None = None
-                last_finish_reason: str = "stop"
-                latest_thought_sig: str | None = None
-                event_count = 0
-                has_finish_reason = False
-
-                combined_gen = itertools.chain(buffered_lines, stream_gen)
-                for line in combined_gen:
-                    parsed = parse_cloudcode_sse_event(line)
-                    if parsed is None:
-                        continue
-                    event = parse_stream_event(parsed, check_error=True)
-                    event_count += 1
-                    sig = event.thought_signature or _extract_event_thought_signature(parsed)
-                    if sig:
-                        latest_thought_sig = sig
-                    if event.usage:
-                        last_usage = event.usage.to_dict()
-                    if event.finish_reason:
-                        has_finish_reason = True
-                        last_finish_reason = event.finish_reason
-                    if event.delta_thought:
-                        thought_parts.append(event.delta_thought)
-                    if event.delta_text:
-                        text_parts.append(event.delta_text)
-                    if event.tool_calls:
-                        collected_tool_calls.extend(tc.to_dict() for tc in event.tool_calls)
-
-                if (
-                    event_count == 0
-                    and not text_parts
-                    and not thought_parts
-                    and not collected_tool_calls
-                    and not has_finish_reason
-                ):
-                    raise BridgeError("Stream ended without data")
-
-                collected_data = CollectedStreamData(
-                    text="".join(text_parts),
-                    tool_calls=collected_tool_calls,
-                    usage=last_usage,
-                    finish_reason=last_finish_reason,
-                    thoughts="".join(thought_parts),
-                    thought_signature=latest_thought_sig,
-                )
-
-                resp_obj = response_builder(collected_data)
-                try:
-                    self._send_json(200, resp_obj)
-                except (BrokenPipeError, ConnectionResetError):
-                    pass
-            finally:
-                if stream_gen is not None and hasattr(stream_gen, "close"):
-                    stream_gen.close()
-        except (BrokenPipeError, ConnectionResetError):
-            pass
-        except Exception as exc:
-            error_sender(exc)
-        finally:
-            if sem is not None and acquired:
-                sem.release()
 
     def _handle_anthropic_messages(self, payload: dict[str, Any]) -> None:
         try:
@@ -1033,11 +1073,23 @@ def create_server(
                 )
             project = discovered
 
+    concurrency_semaphore = threading.Semaphore(max_concurrency)
+
+    context = ServerContext(
+        client=client,
+        project=project,
+        api_key=api_key,
+        concurrency_semaphore=concurrency_semaphore,
+        max_concurrency=max_concurrency,
+        concurrency_timeout=5.0,
+        max_retries=max_retries,
+        initial_retry_delay=initial_retry_delay,
+    )
+
     class ConfiguredHandler(OpenAIRequestHandler):
         pass
 
-    concurrency_semaphore = threading.Semaphore(max_concurrency)
-
+    ConfiguredHandler.context = context
     ConfiguredHandler.client = client
     ConfiguredHandler.project = project
     ConfiguredHandler.api_key = api_key
@@ -1047,11 +1099,12 @@ def create_server(
 
     server = http.server.ThreadingHTTPServer((host, port), ConfiguredHandler)
     server.daemon_threads = True
-    setattr(server, "api_key", api_key)
-    setattr(server, "concurrency_semaphore", concurrency_semaphore)
-    setattr(server, "max_concurrency", max_concurrency)
-    setattr(server, "max_retries", max_retries)
-    setattr(server, "initial_retry_delay", initial_retry_delay)
+    server.context = context  # type: ignore[attr-defined]
+    server.api_key = api_key  # type: ignore[attr-defined]
+    server.concurrency_semaphore = concurrency_semaphore  # type: ignore[attr-defined]
+    server.max_concurrency = max_concurrency  # type: ignore[attr-defined]
+    server.max_retries = max_retries  # type: ignore[attr-defined]
+    server.initial_retry_delay = initial_retry_delay  # type: ignore[attr-defined]
     return server
 
 
