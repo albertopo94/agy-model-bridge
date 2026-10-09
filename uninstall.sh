@@ -122,15 +122,15 @@ if [ "$UNINSTALL_EXECUTED" = "0" ]; then
     if [ -n "$STATE_DIR" ] && [ -d "$STATE_DIR" ] && [ "$STATE_DIR" != "/" ] && [ "$STATE_DIR" != "$HOME" ] && [ "$STATE_DIR" != "$(pwd)" ]; then
         rm -f "$STATE_DIR/bridge.pid" "$STATE_DIR/bridge.lock" "$STATE_DIR/bridge.log" "$STATE_DIR/bridge.json" "$STATE_DIR/api_key" "$STATE_DIR/.core_dir"
         if [ -d "$STATE_DIR/core" ]; then
-            if [ -f "$STATE_DIR/core/bridge/__init__.py" ] || [ -f "$STATE_DIR/core/.agy-bridge-installed" ]; then
+            if [ -f "$STATE_DIR/core/.agy-bridge-installed" ]; then
                 rm -rf "$STATE_DIR/core"
             fi
         fi
         rmdir "$STATE_DIR" 2>/dev/null || true
     fi
-    # Remove core directory only if distinct, not current dir, not home, and contains bridge signature
+    # Remove core directory only if distinct, not current dir, not home, and contains bridge installed marker
     if [ -d "$CORE_DIR" ] && [ "$CORE_DIR" != "$STATE_DIR" ] && [ "$CORE_DIR" != "$(pwd)" ] && [ "$CORE_DIR" != "$HOME" ]; then
-        if [ -f "$CORE_DIR/bridge/__init__.py" ] || [ -f "$CORE_DIR/.agy-bridge-installed" ]; then
+        if [ -f "$CORE_DIR/.agy-bridge-installed" ]; then
             rm -rf "$CORE_DIR"
         fi
     fi

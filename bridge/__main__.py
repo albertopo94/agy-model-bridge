@@ -1,8 +1,16 @@
 """CLI runner for Antigravity Model Bridge."""
 
 import argparse
+import os
 import sys
 from pathlib import Path
+
+# Neutralize CWD hijacking: ensure sys.path does not search cwd if it collides with bridge
+if sys.path and (sys.path[0] == "" or sys.path[0] == os.getcwd()):
+    cwd_path = sys.path[0] or os.getcwd()
+    pkg_dir = os.path.dirname(os.path.dirname(__file__))
+    if cwd_path != pkg_dir and os.path.isdir(os.path.join(cwd_path, "bridge")):
+        sys.path.pop(0)
 
 from bridge import __version__
 from bridge.daemon import (

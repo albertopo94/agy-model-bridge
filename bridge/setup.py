@@ -32,26 +32,8 @@ def atomic_write_file(path: Path, content: str, mode: int = 0o600) -> None:
         content: String content to write (UTF-8).
         mode: Octal file permissions (default 0o600).
     """
-    path = Path(path)
-    parent = path.parent
-    if not parent.exists():
-        parent.mkdir(parents=True, exist_ok=True)
-        os.chmod(parent, 0o700)
-
-    tmp_path = parent / f"{path.name}.tmp.{uuid.uuid4().hex}"
-    try:
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            f.write(content)
-            f.flush()
-            os.fsync(f.fileno())
-        os.chmod(tmp_path, mode)
-        os.replace(tmp_path, path)
-    finally:
-        if tmp_path.exists():
-            try:
-                tmp_path.unlink()
-            except OSError:
-                pass
+    from bridge.security import write_secret_file
+    write_secret_file(path, content, mode=mode, encoding="utf-8")
 
 
 def _strip_json_comments(text: str) -> str:
@@ -2482,14 +2464,11 @@ def uninstall(
                             except OSError:
                                 pass
 
-                    # Remove internal core directory if signature matches
+                    # Remove internal core directory only if it has the installed marker
                     core_sub = resolved_daemon_dir / "core"
                     if core_sub.is_dir():
                         try:
-                            if (
-                                (core_sub / "bridge" / "__init__.py").is_file()
-                                or (core_sub / ".agy-bridge-installed").is_file()
-                            ):
+                            if (core_sub / ".agy-bridge-installed").is_file():
                                 shutil.rmtree(core_sub)
                         except OSError:
                             pass
@@ -2520,10 +2499,9 @@ def uninstall(
                 and real_core != real_root
             ):
                 if resolved_core_dir.is_dir():
-                    if (
-                        (resolved_core_dir / "bridge" / "__init__.py").is_file()
-                        or (resolved_core_dir / ".agy-bridge-installed").is_file()
-                    ):
+                    # Only delete core dir if it was explicitly marked as installed by agy-bridge
+                    # Never delete active dev repositories with bridge/__init__.py!
+                    if (resolved_core_dir / ".agy-bridge-installed").is_file():
                         shutil.rmtree(resolved_core_dir)
                 else:
                     resolved_core_dir.unlink()
@@ -2657,6 +2635,15 @@ def update_installation(
             "restarted_daemon": False,
             "version": _get_installed_version(target_dir),
         }
+
+    installed_marker = target_dir / ".agy-bridge-installed"
+    if installed_marker.is_file():
+        new_ver = _get_installed_version(target_dir)
+        try:
+            from bridge.security import write_secret_file
+            write_secret_file(installed_marker, f"{new_ver}\n", mode=0o600)
+        except Exception:
+            pass
 
     restarted_daemon = False
     if restart_daemon_if_running:

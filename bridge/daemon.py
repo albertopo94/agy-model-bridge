@@ -325,6 +325,7 @@ def start_daemon(
                 stdout=out,
                 stderr=out,
                 env=child_env,
+                cwd=str(target_pid_file.parent),
                 start_new_session=True,
             )
 

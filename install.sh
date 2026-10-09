@@ -69,19 +69,25 @@ fi
 
 # 3. Clone or update repository
 mkdir -p "$(dirname "$INSTALL_DIR")"
+PINNED_VERSION="v0.18.2"
+TARGET_REF="${AGY_BRIDGE_VERSION:-$PINNED_VERSION}"
+
 if [ -d "$INSTALL_DIR/.git" ]; then
     if [ "$IS_ES" = "1" ]; then
         echo -e "Actualizando repositorio existente en ${INSTALL_DIR}..."
     else
         echo -e "Updating existing repository in ${INSTALL_DIR}..."
     fi
-    if ! git -C "$INSTALL_DIR" pull --quiet; then
-        if [ "$IS_ES" = "1" ]; then
-            echo -e "${RED}Error: Falló la actualización del repositorio en ${INSTALL_DIR}.${RESET}"
-        else
-            echo -e "${RED}Error: Failed to update existing repository in ${INSTALL_DIR}.${RESET}"
+    git -C "$INSTALL_DIR" fetch --tags --quiet 2>/dev/null || true
+    if ! git -C "$INSTALL_DIR" checkout "$TARGET_REF" --quiet 2>/dev/null; then
+        if ! git -C "$INSTALL_DIR" pull --quiet; then
+            if [ "$IS_ES" = "1" ]; then
+                echo -e "${RED}Error: Falló la actualización del repositorio en ${INSTALL_DIR}.${RESET}"
+            else
+                echo -e "${RED}Error: Failed to update existing repository in ${INSTALL_DIR}.${RESET}"
+            fi
+            exit 1
         fi
-        exit 1
     fi
 else
     if [ "$IS_ES" = "1" ]; then
@@ -97,7 +103,15 @@ else
         fi
         exit 1
     fi
+    if [ -n "$TARGET_REF" ]; then
+        git -C "$INSTALL_DIR" checkout "$TARGET_REF" --quiet 2>/dev/null || true
+    fi
 fi
+
+# Write .agy-bridge-installed sentinel marker to authorize safe uninstallation
+mkdir -p "$INSTALL_DIR"
+printf "%s\n" "$TARGET_REF" > "$INSTALL_DIR/.agy-bridge-installed"
+chmod 600 "$INSTALL_DIR/.agy-bridge-installed"
 
 # 4. Create binary launcher wrapper in ~/.local/bin
 mkdir -p "$STATE_DIR"
@@ -120,7 +134,7 @@ if [ -z "$AGY_BRIDGE_CORE_DIR" ] && [ -f "$STATE_DIR/.core_dir" ]; then
 fi
 CORE_DIR="${AGY_BRIDGE_CORE_DIR:-${AGY_BRIDGE_DIR:-$STATE_DIR/core}}"
 export PYTHONPATH="$CORE_DIR:$PYTHONPATH"
-exec python3 -u -m bridge "$@"
+exec python3 -u -c "import sys, os; core = sys.argv.pop(1); cwd = os.getcwd(); sys.path = [p for p in sys.path if p not in ('', cwd)]; sys.path.insert(0, core); from bridge.__main__ import main; sys.exit(main())" "$CORE_DIR" "$@"
 EOF
 
 chmod 755 "$LAUNCHER"

@@ -106,6 +106,18 @@ class TestAtomicWriteFile(unittest.TestCase):
         temp_files = list(self.dir_path.glob("fail.txt.tmp.*"))
         self.assertEqual(len(temp_files), 0)
 
+    def test_write_secret_file_creates_file_with_restrictive_mode_and_bytes(self):
+        from bridge.security import write_secret_file
+        target_str = self.dir_path / "secret_str.txt"
+        write_secret_file(target_str, "secret data", mode=0o600)
+        self.assertEqual(target_str.read_text(encoding="utf-8"), "secret data")
+        self.assertEqual(stat.S_IMODE(target_str.stat().st_mode), 0o600)
+
+        target_bytes = self.dir_path / "secret_bytes.bin"
+        write_secret_file(target_bytes, b"binary secret", mode=0o600)
+        self.assertEqual(target_bytes.read_bytes(), b"binary secret")
+        self.assertEqual(stat.S_IMODE(target_bytes.stat().st_mode), 0o600)
+
 
 class TestCreateBackup(unittest.TestCase):
     def setUp(self):
@@ -1344,7 +1356,7 @@ class TestUninstall(unittest.TestCase):
         # Unsigned directory must NOT be deleted
         self.assertTrue(custom_core.exists())
 
-    def test_uninstall_removes_custom_core_dir_with_bridge_init_signature(self):
+    def test_uninstall_preserves_custom_core_dir_with_bridge_init_without_installed_sentinel(self):
         custom_core = self.root / "custom_core_bridge"
         (custom_core / "bridge").mkdir(parents=True, exist_ok=True)
         (custom_core / "bridge" / "__init__.py").write_text("# bridge\n", encoding="utf-8")
@@ -1358,7 +1370,8 @@ class TestUninstall(unittest.TestCase):
                 hermes_config_path=self.hermes_config,
             )
 
-        self.assertFalse(custom_core.exists())
+        # A dev checkout has bridge/__init__.py but lacks .agy-bridge-installed, so it must NOT be deleted!
+        self.assertTrue(custom_core.exists(), "Dev repo with bridge/__init__.py must be preserved without sentinel")
 
     def test_uninstall_removes_custom_core_dir_with_installed_sentinel_signature(self):
         custom_core = self.root / "custom_core_installed"
@@ -1466,6 +1479,7 @@ class TestUninstall(unittest.TestCase):
         core_dir.mkdir(parents=True, exist_ok=True)
         (core_dir / "bridge").mkdir(parents=True, exist_ok=True)
         (core_dir / "bridge" / "__init__.py").write_text("# core\n", encoding="utf-8")
+        (core_dir / ".agy-bridge-installed").write_text("v0.18.2\n", encoding="utf-8")
 
         with unittest.mock.patch("bridge.daemon.stop_daemon", return_value={"status": "not_running"}):
             result = uninstall(
@@ -1636,7 +1650,7 @@ class TestUpdateInstallation(unittest.TestCase):
 
         self.assertEqual(result["status"], "updated")
         self.assertTrue(result["restarted_daemon"])
-        self.assertEqual(result["version"], "0.18.1")
+        self.assertEqual(result["version"], "0.18.2")
         mock_run.assert_called_once_with(
             ["git", "-C", str(self.repo_dir), "pull", "--ff-only"],
             capture_output=True,
@@ -1925,7 +1939,7 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main([flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.18.1")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.18.2")
 
     def test_cli_subcommand_version_flags(self):
         from bridge.__main__ import main
@@ -1937,19 +1951,19 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main(["update", flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.18.1")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.18.2")
 
     def test_version_unification(self):
         import bridge
         from pathlib import Path
         import re
 
-        self.assertEqual(bridge.__version__, "0.18.1")
+        self.assertEqual(bridge.__version__, "0.18.2")
         pyproject_path = Path(__file__).resolve().parent.parent / "pyproject.toml"
         pyproject_text = pyproject_path.read_text(encoding="utf-8")
         match = re.search(r'version\s*=\s*"([^"]+)"', pyproject_text)
         self.assertIsNotNone(match)
-        self.assertEqual(match.group(1), "0.18.1")
+        self.assertEqual(match.group(1), "0.18.2")
 
 
 class TestClientConfiguratorRegistry(unittest.TestCase):
@@ -4854,6 +4868,35 @@ class TestInstallScript(unittest.TestCase):
         self.assertEqual(res2.returncode, 0)
         self.assertFalse(core_file.exists(), ".core_dir must be removed after switching back to default")
 
+    def test_install_script_creates_installed_sentinel_marker(self):
+        res = subprocess.run(
+            ["bash", str(INSTALL_SH)],
+            env=self.base_env,
+            cwd=str(self.root),
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(res.returncode, 0, f"install.sh failed: {res.stderr}")
+        sentinel = self.state_dir / "core" / ".agy-bridge-installed"
+        self.assertTrue(sentinel.exists())
+        self.assertEqual(stat.S_IMODE(sentinel.stat().st_mode), 0o600)
+        self.assertEqual(sentinel.read_text(encoding="utf-8").strip(), "v0.18.2")
+
+    def test_install_script_launcher_immune_to_cwd_hijacking(self):
+        res = subprocess.run(
+            ["bash", str(INSTALL_SH)],
+            env=self.base_env,
+            cwd=str(self.root),
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(res.returncode, 0, f"install.sh failed: {res.stderr}")
+        launcher = self.bin_dir / "agy-bridge"
+        self.assertTrue(launcher.exists())
+        content = launcher.read_text(encoding="utf-8")
+        self.assertIn("sys.path = [p for p in sys.path if p not in ('', cwd)]", content)
+        self.assertIn("sys.path.insert(0, core)", content)
+
 
 class TestUninstallScriptFallback(unittest.TestCase):
     def setUp(self):
@@ -4897,7 +4940,7 @@ class TestUninstallScriptFallback(unittest.TestCase):
         self.assertTrue(custom_core.exists(), "Unsigned core directory must be preserved by fallback")
         self.assertTrue((custom_core / "user_data.txt").exists())
 
-    def test_uninstall_fallback_removes_custom_core_dir_with_bridge_init(self):
+    def test_uninstall_fallback_preserves_custom_core_dir_with_bridge_init_without_sentinel(self):
         custom_core = self.root / "core_with_bridge"
         (custom_core / "bridge").mkdir(parents=True, exist_ok=True)
         (custom_core / "bridge" / "__init__.py").write_text("# bridge\n", encoding="utf-8")
@@ -4913,7 +4956,7 @@ class TestUninstallScriptFallback(unittest.TestCase):
             text=True,
         )
         self.assertEqual(res.returncode, 0, f"uninstall.sh failed: {res.stderr}")
-        self.assertFalse(custom_core.exists(), "Core directory with bridge/__init__.py must be removed")
+        self.assertTrue(custom_core.exists(), "Core directory without .agy-bridge-installed must be preserved")
 
     def test_uninstall_fallback_removes_custom_core_dir_with_installed_sentinel(self):
         custom_core = self.root / "core_with_sentinel"
