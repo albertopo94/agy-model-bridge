@@ -8,10 +8,16 @@ import uuid
 from collections.abc import Iterator
 from typing import Any
 from bridge.events import (
+    ChatRequest as ChatRequest,
+    OpenAIChatRequest as OpenAIChatRequest,
     StreamEvent as StreamEvent,
     ToolCallDelta as ToolCallDelta,
     Usage as Usage,
+    append_or_merge_turn as append_or_merge_turn,
+    build_system_instruction as build_system_instruction,
+    build_tool_declarations as build_tool_declarations,
     check_sse_error as check_sse_error,
+    normalize_turn_boundaries as normalize_turn_boundaries,
     parse_stream_event as parse_stream_event,
 )
 from bridge.errors import InvalidRequestError
@@ -575,13 +581,7 @@ def _extract_text_and_parts_from_content(raw_content: Any) -> str:
 
 def openai_to_cloudcode_request(
     openai_payload: dict[str, Any], project: str
-) -> tuple[
-    str,
-    list[dict[str, Any]],
-    dict[str, Any] | None,
-    dict[str, Any] | None,
-    list[dict[str, Any]] | None,
-]:
+) -> OpenAIChatRequest:
     """Validates OpenAI payload, extracts model, builds Cloud Code contents, systemInstruction, generationConfig, and tools.
 
     Args:
@@ -589,7 +589,7 @@ def openai_to_cloudcode_request(
         project: Upstream project identifier.
 
     Returns:
-        tuple of (model_name, contents_list, system_instruction_dict_or_None, generation_config_dict_or_None, tools_list_or_None)
+        OpenAIChatRequest containing validated request parameters (unpackable as 5-tuple).
 
     Raises:
         ValueError: If model or messages are missing/invalid.
@@ -701,27 +701,15 @@ def openai_to_cloudcode_request(
         else:
             raise ValueError(f"Invalid role: {role}")
 
-        if contents and contents[-1]["role"] == turn_role:
-            contents[-1]["parts"].extend(turn_parts)
-        else:
-            contents.append({"role": turn_role, "parts": turn_parts})
+        append_or_merge_turn(contents, turn_role, turn_parts)
 
     if len(contents) == 0:
         raise ValueError(
             "Missing or empty user/assistant messages: at least one message is required"
         )
 
-    if contents[0]["role"] == "model":
-        contents.insert(0, {"role": "user", "parts": [{"text": "Hello"}]})
-
-    if contents[-1]["role"] == "model":
-        contents.append({"role": "user", "parts": [{"text": "Continue"}]})
-
-    system_instruction: dict[str, Any] | None = None
-    if system_texts:
-        combined_system = "\n".join(system_texts)
-        if combined_system.strip():
-            system_instruction = {"parts": [{"text": combined_system}]}
+    normalize_turn_boundaries(contents)
+    system_instruction = build_system_instruction(system_texts)
 
     gen_config: dict[str, Any] = {}
     if "temperature" in openai_payload and openai_payload["temperature"] is not None:
@@ -792,10 +780,15 @@ def openai_to_cloudcode_request(
             else:
                 decl["parameters"] = {"type": "object", "properties": {}}
             function_declarations.append(decl)
-        if function_declarations:
-            tools = [{"functionDeclarations": function_declarations}]
+        tools = build_tool_declarations(function_declarations)
 
-    return model, contents, system_instruction, generation_config, tools
+    return OpenAIChatRequest(
+        model=model,
+        contents=contents,
+        system_instruction=system_instruction,
+        generation_config=generation_config,
+        tools=tools,
+    )
 
 
 def parse_cloudcode_sse_event(raw_line: str) -> dict[str, Any] | None:
@@ -1087,7 +1080,7 @@ class OpenAIProtocolAdapter:
     @staticmethod
     def transform_request(
         payload: dict[str, Any], project: str = ""
-    ) -> tuple[str, list[dict[str, Any]], dict[str, Any] | None, dict[str, Any] | None, list[dict[str, Any]] | None]:
+    ) -> OpenAIChatRequest:
         return openai_to_cloudcode_request(payload, project)
 
     @staticmethod

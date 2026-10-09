@@ -11,9 +11,15 @@ import uuid
 from typing import Any, Iterator
 
 from bridge.events import (
+    ChatRequest as ChatRequest,
+    ResponsesChatRequest as ResponsesChatRequest,
     StreamEvent,
     ToolCallDelta as ToolCallDelta,
     Usage as Usage,
+    append_or_merge_turn as append_or_merge_turn,
+    build_system_instruction as build_system_instruction,
+    build_tool_declarations as build_tool_declarations,
+    normalize_turn_boundaries as normalize_turn_boundaries,
     parse_stream_event,
 )
 from bridge.transform import (
@@ -55,7 +61,7 @@ def _parse_arguments_to_dict(args: Any) -> dict[str, Any]:
 
 def responses_to_cloudcode_request(
     payload: dict[str, Any], project: str = ""
-) -> tuple[str, list[dict[str, Any]], dict[str, Any] | None, dict[str, Any] | None, list[dict[str, Any]] | None]:
+) -> ResponsesChatRequest:
     """Validates OpenAI Responses payload and transforms to Cloud Code parameters.
 
     Args:
@@ -63,7 +69,7 @@ def responses_to_cloudcode_request(
         project: Upstream project identifier.
 
     Returns:
-        tuple of (model_name, contents_list, system_instruction_dict_or_None, generation_config_dict_or_None, tools_or_None)
+        ResponsesChatRequest containing validated request parameters (unpackable as 5-tuple).
 
     Raises:
         ValueError: If model or input are missing or invalid.
@@ -286,10 +292,7 @@ def responses_to_cloudcode_request(
             turn_role = "user"
             turn_parts = [{"text": str(item)}]
 
-        if contents and contents[-1]["role"] == turn_role:
-            contents[-1]["parts"].extend(turn_parts)
-        else:
-            contents.append({"role": turn_role, "parts": list(turn_parts)})
+        append_or_merge_turn(contents, turn_role, turn_parts)
 
     if len(contents) == 0:
         raise ValueError(
@@ -297,16 +300,8 @@ def responses_to_cloudcode_request(
         )
 
     # Alternation & turn order enforcement
-    if contents and contents[0]["role"] == "model":
-        contents.insert(0, {"role": "user", "parts": [{"text": "Hello"}]})
-    if contents and contents[-1]["role"] == "model":
-        contents.append({"role": "user", "parts": [{"text": "Continue"}]})
-
-    system_instruction: dict[str, Any] | None = None
-    if system_texts:
-        combined_system = "\n".join(system_texts)
-        if combined_system.strip():
-            system_instruction = {"parts": [{"text": combined_system}]}
+    normalize_turn_boundaries(contents)
+    system_instruction = build_system_instruction(system_texts)
 
     # Generation config
     gen_config: dict[str, Any] = {}
@@ -365,10 +360,15 @@ def responses_to_cloudcode_request(
             if parameters and isinstance(parameters, dict):
                 decl["parameters"] = sanitize_schema_for_gemini(parameters)
             function_declarations.append(decl)
-        if function_declarations:
-            tools = [{"functionDeclarations": function_declarations}]
+        tools = build_tool_declarations(function_declarations)
 
-    return model, contents, system_instruction, generation_config, tools
+    return ResponsesChatRequest(
+        model=model,
+        contents=contents,
+        system_instruction=system_instruction,
+        generation_config=generation_config,
+        tools=tools,
+    )
 
 
 def build_responses_completion(
@@ -780,7 +780,7 @@ class ResponsesProtocolAdapter:
     @staticmethod
     def transform_request(
         payload: dict[str, Any], project: str = ""
-    ) -> tuple[str, list[dict[str, Any]], dict[str, Any] | None, dict[str, Any] | None, list[dict[str, Any]] | None]:
+    ) -> ResponsesChatRequest:
         return responses_to_cloudcode_request(payload, project)
 
     @staticmethod

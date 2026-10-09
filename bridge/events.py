@@ -1,5 +1,4 @@
-"""Intermediate representation and single-pass parser for streaming events."""
-
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 import json
 from typing import Any
@@ -14,6 +13,172 @@ from bridge.errors import (
     ModelNotFoundError,
     RateLimitError,
 )
+
+
+@dataclass(slots=True)
+class ChatRequest:
+    """Intermediate representation for chat requests across all protocols."""
+
+    model: str
+    contents: list[dict[str, Any]]
+    system_instruction: dict[str, Any] | None = None
+    generation_config: dict[str, Any] | None = None
+    tools: list[dict[str, Any]] | None = None
+    tool_config: dict[str, Any] | None = None
+
+    @property
+    def extra_kwargs(self) -> dict[str, Any]:
+        """Collates generation_config, tools, and tool_config into keyword arguments."""
+        kwargs: dict[str, Any] = {}
+        if self.generation_config is not None:
+            kwargs["generation_config"] = self.generation_config
+        if self.tools is not None:
+            kwargs["tools"] = self.tools
+        if self.tool_config is not None:
+            kwargs["tool_config"] = self.tool_config
+        return kwargs
+
+    def to_legacy_tuple(
+        self,
+    ) -> tuple[
+        str,
+        list[dict[str, Any]],
+        dict[str, Any] | None,
+        dict[str, Any] | None,
+        list[dict[str, Any]] | None,
+    ]:
+        """Returns the 5-element tuple (model, contents, system_instruction, generation_config, tools)."""
+        return (
+            self.model,
+            self.contents,
+            self.system_instruction,
+            self.generation_config,
+            self.tools,
+        )
+
+    def to_anthropic_tuple(
+        self,
+    ) -> tuple[
+        str,
+        list[dict[str, Any]],
+        dict[str, Any] | None,
+        dict[str, Any] | None,
+        list[dict[str, Any]] | None,
+        dict[str, Any] | None,
+    ]:
+        """Returns the 6-element tuple (model, contents, system_instruction, generation_config, tools, tool_config)."""
+        return (
+            self.model,
+            self.contents,
+            self.system_instruction,
+            self.generation_config,
+            self.tools,
+            self.tool_config,
+        )
+
+    def _to_tuple(self) -> tuple[Any, ...]:
+        return (
+            self.model,
+            self.contents,
+            self.system_instruction,
+            self.generation_config,
+            self.tools,
+        )
+
+    def __iter__(self) -> Iterator[Any]:
+        return iter(self._to_tuple())
+
+    def __getitem__(self, index: int | slice) -> Any:
+        return self._to_tuple()[index]
+
+    def __len__(self) -> int:
+        return len(self._to_tuple())
+
+
+@dataclass(slots=True)
+class OpenAIChatRequest(ChatRequest):
+    """Chat request originating from OpenAI Chat Completions API."""
+
+    def _to_tuple(self) -> tuple[Any, ...]:
+        return (
+            self.model,
+            self.contents,
+            self.system_instruction,
+            self.generation_config,
+            self.tools,
+        )
+
+
+@dataclass(slots=True)
+class ResponsesChatRequest(ChatRequest):
+    """Chat request originating from OpenAI Responses API."""
+
+    def _to_tuple(self) -> tuple[Any, ...]:
+        return (
+            self.model,
+            self.contents,
+            self.system_instruction,
+            self.generation_config,
+            self.tools,
+        )
+
+
+@dataclass(slots=True)
+class AnthropicChatRequest(ChatRequest):
+    """Chat request originating from Anthropic Messages API."""
+
+    def _to_tuple(self) -> tuple[Any, ...]:
+        return (
+            self.model,
+            self.contents,
+            self.system_instruction,
+            self.generation_config,
+            self.tools,
+            self.tool_config,
+        )
+
+
+def build_system_instruction(system_texts: list[str]) -> dict[str, Any] | None:
+    """Combines non-empty system texts into a Cloud Code systemInstruction dictionary."""
+    if not system_texts:
+        return None
+    cleaned = [t.strip() for t in system_texts if t and t.strip()]
+    if not cleaned:
+        return None
+    combined = "\n".join(cleaned)
+    return {"parts": [{"text": combined}]}
+
+
+def normalize_turn_boundaries(contents: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Enforces alternating conversation boundaries: prepends 'Hello' if starting with model, appends 'Continue' if ending with model."""
+    if not contents:
+        return contents
+    if contents[0].get("role") == "model":
+        contents.insert(0, {"role": "user", "parts": [{"text": "Hello"}]})
+    if contents[-1].get("role") == "model":
+        contents.append({"role": "user", "parts": [{"text": "Continue"}]})
+    return contents
+
+
+def append_or_merge_turn(
+    contents: list[dict[str, Any]], role: str, parts: list[dict[str, Any]]
+) -> None:
+    """Appends a turn to contents or merges parts if previous turn had the same role."""
+    if not parts:
+        return
+    if contents and contents[-1].get("role") == role:
+        contents[-1]["parts"].extend(parts)
+    else:
+        contents.append({"role": role, "parts": list(parts)})
+
+
+def build_tool_declarations(
+    declarations: list[dict[str, Any]],
+) -> list[dict[str, Any]] | None:
+    """Wraps function declarations into Cloud Code tools structure."""
+    if not declarations:
+        return None
+    return [{"functionDeclarations": declarations}]
 
 
 @dataclass(slots=True)

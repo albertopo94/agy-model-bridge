@@ -9,9 +9,15 @@ import uuid
 from typing import Any, Iterator
 
 from bridge.events import (
+    AnthropicChatRequest as AnthropicChatRequest,
+    ChatRequest as ChatRequest,
     StreamEvent,
     ToolCallDelta as ToolCallDelta,
     Usage as Usage,
+    append_or_merge_turn as append_or_merge_turn,
+    build_system_instruction as build_system_instruction,
+    build_tool_declarations as build_tool_declarations,
+    normalize_turn_boundaries as normalize_turn_boundaries,
     parse_stream_event,
 )
 from bridge.transform import (
@@ -66,14 +72,7 @@ def _extract_event_thought_signature(parsed: dict[str, Any]) -> str | None:
 
 def anthropic_to_cloudcode_request(
     payload: dict[str, Any], project: str
-) -> tuple[
-    str,
-    list[dict[str, Any]],
-    dict[str, Any] | None,
-    dict[str, Any] | None,
-    list[dict[str, Any]] | None,
-    dict[str, Any] | None,
-]:
+) -> AnthropicChatRequest:
     """Validates Anthropic Messages payload and transforms to Cloud Code parameters.
 
     Args:
@@ -81,7 +80,7 @@ def anthropic_to_cloudcode_request(
         project: Upstream project identifier.
 
     Returns:
-        tuple of (model_name, contents_list, system_instruction_dict_or_None, generation_config_dict_or_None, tools_list_or_None, tool_config_dict_or_None)
+        AnthropicChatRequest containing validated request parameters (unpackable as 6-tuple).
 
     Raises:
         ValueError: If model or messages are missing or invalid, or if parameters violate model constraints.
@@ -287,17 +286,8 @@ def anthropic_to_cloudcode_request(
             part_role = "model" if role == "assistant" else "user"
             _add_part(part_role, {"text": text_str if text_str.strip() else " "})
 
-    system_instruction: dict[str, Any] | None = None
-    if system_texts:
-        system_instruction = {"parts": [{"text": "\n".join(system_texts)}]}
-
-    # Alternation & turn order enforcement
-    if not contents:
-        contents.append({"role": "user", "parts": [{"text": "Hello"}]})
-    if contents and contents[0]["role"] == "model":
-        contents.insert(0, {"role": "user", "parts": [{"text": "Hello"}]})
-    if contents and contents[-1]["role"] == "model":
-        contents.append({"role": "user", "parts": [{"text": "Continue"}]})
+    system_instruction = build_system_instruction(system_texts)
+    normalize_turn_boundaries(contents)
 
     # Generation config
     gen_config: dict[str, Any] = {}
@@ -349,8 +339,7 @@ def anthropic_to_cloudcode_request(
             else:
                 decl["parameters"] = {"type": "object", "properties": {}}
             function_declarations.append(decl)
-        if function_declarations:
-            tools = [{"functionDeclarations": function_declarations}]
+        tools = build_tool_declarations(function_declarations)
 
     # Tool choice translation
     raw_tool_choice = payload.get("tool_choice")
@@ -401,7 +390,14 @@ def anthropic_to_cloudcode_request(
         else:
             raise ValueError("Invalid 'tool_choice' parameter: must be a dictionary or string")
 
-    return model, contents, system_instruction, generation_config, tools, tool_config
+    return AnthropicChatRequest(
+        model=model,
+        contents=contents,
+        system_instruction=system_instruction,
+        generation_config=generation_config,
+        tools=tools,
+        tool_config=tool_config,
+    )
 
 
 def build_anthropic_message(
@@ -694,14 +690,7 @@ class AnthropicProtocolAdapter:
     @staticmethod
     def transform_request(
         payload: dict[str, Any], project: str = ""
-    ) -> tuple[
-        str,
-        list[dict[str, Any]],
-        dict[str, Any] | None,
-        dict[str, Any] | None,
-        list[dict[str, Any]] | None,
-        dict[str, Any] | None,
-    ]:
+    ) -> AnthropicChatRequest:
         return anthropic_to_cloudcode_request(payload, project)
 
     @staticmethod

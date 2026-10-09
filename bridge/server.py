@@ -801,9 +801,7 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
     def _handle_anthropic_messages(self, payload: dict[str, Any]) -> None:
         try:
             stream = bool(payload.get("stream", False))
-            model, contents, system_instruction, generation_config, tools, tool_config = (
-                AnthropicProtocolAdapter.transform_request(payload, self.project)
-            )
+            req = AnthropicProtocolAdapter.transform_request(payload, self.project)
         except ValueError as ve:
             code, err = build_anthropic_error_response(400, str(ve))
             self._send_json(code, err)
@@ -812,25 +810,17 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
             self._send_anthropic_error(exc)
             return
 
-        extra_kwargs: dict[str, Any] = {}
-        if generation_config is not None:
-            extra_kwargs["generation_config"] = generation_config
-        if tools is not None:
-            extra_kwargs["tools"] = tools
-        if tool_config is not None:
-            extra_kwargs["tool_config"] = tool_config
-
         if stream:
             def anthropic_stream_error(exc: Exception) -> str:
                 err_payload = json.dumps({"type": "error", "error": {"type": "api_error", "message": str(exc)}})
                 return f"event: error\ndata: {err_payload}\n\n"
 
             self._dispatch_stream(
-                model=model,
-                contents=contents,
-                system_instruction=system_instruction,
-                extra_kwargs=extra_kwargs,
-                stream_builder=lambda gen: AnthropicProtocolAdapter.build_stream(gen, model),
+                model=req.model,
+                contents=req.contents,
+                system_instruction=req.system_instruction,
+                extra_kwargs=req.extra_kwargs,
+                stream_builder=lambda gen: AnthropicProtocolAdapter.build_stream(gen, req.model),
                 error_sender=self._send_anthropic_error,
                 stream_error_formatter=anthropic_stream_error,
             )
@@ -850,7 +840,7 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                 msg_id = f"msg_{uuid.uuid4().hex[:16]}"
                 return AnthropicProtocolAdapter.build_response(
                     message_id=msg_id,
-                    model=model,
+                    model=req.model,
                     text=collected.text,
                     usage=collected.usage,
                     stop_reason=stop_reason,
@@ -860,10 +850,10 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                 )
 
             self._dispatch_non_streaming(
-                model=model,
-                contents=contents,
-                system_instruction=system_instruction,
-                extra_kwargs=extra_kwargs,
+                model=req.model,
+                contents=req.contents,
+                system_instruction=req.system_instruction,
+                extra_kwargs=req.extra_kwargs,
                 response_builder=anthropic_response_builder,
                 error_sender=self._send_anthropic_error,
             )
@@ -871,9 +861,7 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
     def _handle_responses(self, payload: dict[str, Any]) -> None:
         try:
             stream = bool(payload.get("stream", False))
-            model, contents, system_instruction, generation_config, tools = (
-                ResponsesProtocolAdapter.transform_request(payload, self.project)
-            )
+            req = ResponsesProtocolAdapter.transform_request(payload, self.project)
         except ValueError as ve:
             code, err = build_responses_error_response(400, str(ve))
             self._send_json(code, err)
@@ -881,12 +869,6 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
         except Exception as exc:
             self._send_error(exc)
             return
-
-        extra_kwargs: dict[str, Any] = {}
-        if generation_config is not None:
-            extra_kwargs["generation_config"] = generation_config
-        if tools is not None:
-            extra_kwargs["tools"] = tools
 
         if stream:
             response_id = f"resp_{uuid.uuid4().hex[:16]}"
@@ -903,11 +885,11 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                 return f"event: response.failed\ndata: {err_payload}\n\n"
 
             self._dispatch_stream(
-                model=model,
-                contents=contents,
-                system_instruction=system_instruction,
-                extra_kwargs=extra_kwargs,
-                stream_builder=lambda gen: ResponsesProtocolAdapter.build_stream(gen, model, response_id=response_id),
+                model=req.model,
+                contents=req.contents,
+                system_instruction=req.system_instruction,
+                extra_kwargs=req.extra_kwargs,
+                stream_builder=lambda gen: ResponsesProtocolAdapter.build_stream(gen, req.model, response_id=response_id),
                 error_sender=self._send_error,
                 stream_error_formatter=responses_stream_error,
             )
@@ -916,26 +898,24 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                 resp_id = f"resp_{uuid.uuid4().hex[:16]}"
                 return ResponsesProtocolAdapter.build_response(
                     response_id=resp_id,
-                    model=model,
+                    model=req.model,
                     text=collected.text,
                     usage=collected.usage,
                     tool_calls=collected.tool_calls if collected.tool_calls else None,
                 )
 
             self._dispatch_non_streaming(
-                model=model,
-                contents=contents,
-                system_instruction=system_instruction,
-                extra_kwargs=extra_kwargs,
+                model=req.model,
+                contents=req.contents,
+                system_instruction=req.system_instruction,
+                extra_kwargs=req.extra_kwargs,
                 response_builder=responses_response_builder,
             )
 
     def _handle_chat_completion(self, payload: dict[str, Any]) -> None:
         try:
             stream = bool(payload.get("stream", False))
-            model, contents, system_instruction, generation_config, tools = (
-                OpenAIProtocolAdapter.transform_request(payload, self.project)
-            )
+            req = OpenAIProtocolAdapter.transform_request(payload, self.project)
         except ValueError as ve:
             self._send_json(
                 400,
@@ -953,11 +933,6 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
             return
 
         completion_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
-        extra_kwargs: dict[str, Any] = {}
-        if generation_config is not None:
-            extra_kwargs["generation_config"] = generation_config
-        if tools is not None:
-            extra_kwargs["tools"] = tools
 
         if stream:
             def chat_stream_error(exc: Exception) -> str:
@@ -966,11 +941,11 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                 return f"data: {err_payload}\n\n"
 
             self._dispatch_stream(
-                model=model,
-                contents=contents,
-                system_instruction=system_instruction,
-                extra_kwargs=extra_kwargs,
-                stream_builder=lambda gen: OpenAIProtocolAdapter.build_stream(gen, model, completion_id=completion_id),
+                model=req.model,
+                contents=req.contents,
+                system_instruction=req.system_instruction,
+                extra_kwargs=req.extra_kwargs,
+                stream_builder=lambda gen: OpenAIProtocolAdapter.build_stream(gen, req.model, completion_id=completion_id),
                 error_sender=self._send_error,
                 stream_error_formatter=chat_stream_error,
             )
@@ -1006,7 +981,7 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
 
                 return OpenAIProtocolAdapter.build_response(
                     completion_id,
-                    model,
+                    req.model,
                     collected.text,
                     usage=collected.usage,
                     finish_reason=finish_reason,
@@ -1014,10 +989,10 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                 )
 
             self._dispatch_non_streaming(
-                model=model,
-                contents=contents,
-                system_instruction=system_instruction,
-                extra_kwargs=extra_kwargs,
+                model=req.model,
+                contents=req.contents,
+                system_instruction=req.system_instruction,
+                extra_kwargs=req.extra_kwargs,
                 response_builder=chat_response_builder,
             )
 

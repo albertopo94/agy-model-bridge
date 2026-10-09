@@ -11,9 +11,17 @@ from bridge.errors import (
     RateLimitError,
 )
 from bridge.events import (
+    AnthropicChatRequest,
+    ChatRequest,
+    OpenAIChatRequest,
+    ResponsesChatRequest,
     StreamEvent,
     ToolCallDelta,
     Usage,
+    append_or_merge_turn,
+    build_system_instruction,
+    build_tool_declarations,
+    normalize_turn_boundaries,
     parse_stream_event,
 )
 
@@ -464,6 +472,190 @@ class TestParseStreamEventErrorHandling(unittest.TestCase):
         ev = parse_stream_event(payload, check_error=False)
         self.assertIsInstance(ev, StreamEvent)
         self.assertEqual(ev.raw, payload)
+
+
+class TestChatRequestIR(unittest.TestCase):
+    """Tests for ChatRequest IR and protocol-specific request specializations."""
+
+    def test_chat_request_attributes_and_extra_kwargs(self):
+        req = ChatRequest(
+            model="gemini-2.5-pro",
+            contents=[{"role": "user", "parts": [{"text": "Hello"}]}],
+            system_instruction={"parts": [{"text": "Be concise"}]},
+            generation_config={"temperature": 0.7, "maxOutputTokens": 100},
+            tools=[{"functionDeclarations": [{"name": "test_tool"}]}],
+            tool_config={"functionCallingConfig": {"mode": "AUTO"}},
+        )
+        self.assertEqual(req.model, "gemini-2.5-pro")
+        self.assertEqual(len(req.contents), 1)
+        self.assertEqual(req.system_instruction, {"parts": [{"text": "Be concise"}]})
+        self.assertEqual(
+            req.extra_kwargs,
+            {
+                "generation_config": {"temperature": 0.7, "maxOutputTokens": 100},
+                "tools": [{"functionDeclarations": [{"name": "test_tool"}]}],
+                "tool_config": {"functionCallingConfig": {"mode": "AUTO"}},
+            },
+        )
+
+    def test_chat_request_extra_kwargs_empty_when_none(self):
+        req = ChatRequest(
+            model="gemini-2.5-flash",
+            contents=[{"role": "user", "parts": [{"text": "Hi"}]}],
+        )
+        self.assertEqual(req.extra_kwargs, {})
+        self.assertIsNone(req.system_instruction)
+        self.assertIsNone(req.generation_config)
+        self.assertIsNone(req.tools)
+        self.assertIsNone(req.tool_config)
+
+    def test_to_legacy_tuple(self):
+        req = ChatRequest(
+            model="gemini-2.5-flash",
+            contents=[{"role": "user", "parts": [{"text": "Hi"}]}],
+            system_instruction={"parts": [{"text": "Sys"}]},
+            generation_config={"temperature": 0.5},
+            tools=[{"functionDeclarations": []}],
+        )
+        tup = req.to_legacy_tuple()
+        self.assertEqual(len(tup), 5)
+        self.assertEqual(tup[0], "gemini-2.5-flash")
+        self.assertEqual(tup[1], [{"role": "user", "parts": [{"text": "Hi"}]}])
+        self.assertEqual(tup[2], {"parts": [{"text": "Sys"}]})
+        self.assertEqual(tup[3], {"temperature": 0.5})
+        self.assertEqual(tup[4], [{"functionDeclarations": []}])
+
+    def test_to_anthropic_tuple(self):
+        req = ChatRequest(
+            model="claude-sonnet-5-5",
+            contents=[{"role": "user", "parts": [{"text": "Hi"}]}],
+            system_instruction=None,
+            generation_config={"temperature": 0.2},
+            tools=None,
+            tool_config={"functionCallingConfig": {"mode": "NONE"}},
+        )
+        tup = req.to_anthropic_tuple()
+        self.assertEqual(len(tup), 6)
+        self.assertEqual(tup[0], "claude-sonnet-5-5")
+        self.assertEqual(tup[5], {"functionCallingConfig": {"mode": "NONE"}})
+
+    def test_openai_chat_request_unpacking_5_tuple(self):
+        req = OpenAIChatRequest(
+            model="gemini-2.5-flash",
+            contents=[{"role": "user", "parts": [{"text": "Hi"}]}],
+            system_instruction={"parts": [{"text": "Sys"}]},
+            generation_config={"temperature": 0.5},
+            tools=[{"functionDeclarations": []}],
+        )
+        self.assertIsInstance(req, ChatRequest)
+        self.assertEqual(len(req), 5)
+        self.assertEqual(req[0], "gemini-2.5-flash")
+        m, c, s, g, t = req
+        self.assertEqual(m, "gemini-2.5-flash")
+        self.assertEqual(c, [{"role": "user", "parts": [{"text": "Hi"}]}])
+        self.assertEqual(s, {"parts": [{"text": "Sys"}]})
+        self.assertEqual(g, {"temperature": 0.5})
+        self.assertEqual(t, [{"functionDeclarations": []}])
+
+    def test_responses_chat_request_unpacking_5_tuple(self):
+        req = ResponsesChatRequest(
+            model="gemini-2.5-pro",
+            contents=[{"role": "user", "parts": [{"text": "Input"}]}],
+            system_instruction=None,
+            generation_config=None,
+            tools=None,
+        )
+        self.assertIsInstance(req, ChatRequest)
+        self.assertEqual(len(req), 5)
+        m, c, s, g, t = req
+        self.assertEqual(m, "gemini-2.5-pro")
+        self.assertEqual(c, [{"role": "user", "parts": [{"text": "Input"}]}])
+        self.assertIsNone(s)
+        self.assertIsNone(g)
+        self.assertIsNone(t)
+
+    def test_anthropic_chat_request_unpacking_6_tuple(self):
+        req = AnthropicChatRequest(
+            model="claude-sonnet-5-5",
+            contents=[{"role": "user", "parts": [{"text": "Claude"}]}],
+            system_instruction={"parts": [{"text": "Be helpful"}]},
+            generation_config={"maxOutputTokens": 2048},
+            tools=[{"functionDeclarations": [{"name": "calculator"}]}],
+            tool_config={"functionCallingConfig": {"mode": "AUTO"}},
+        )
+        self.assertIsInstance(req, ChatRequest)
+        self.assertEqual(len(req), 6)
+        self.assertEqual(req[0], "claude-sonnet-5-5")
+        self.assertEqual(req[5], {"functionCallingConfig": {"mode": "AUTO"}})
+        m, c, s, g, t, tc = req
+        self.assertEqual(m, "claude-sonnet-5-5")
+        self.assertEqual(c, [{"role": "user", "parts": [{"text": "Claude"}]}])
+        self.assertEqual(s, {"parts": [{"text": "Be helpful"}]})
+        self.assertEqual(g, {"maxOutputTokens": 2048})
+        self.assertEqual(t, [{"functionDeclarations": [{"name": "calculator"}]}])
+        self.assertEqual(tc, {"functionCallingConfig": {"mode": "AUTO"}})
+
+
+class TestRequestHelpers(unittest.TestCase):
+    """Tests for shared request normalization helpers."""
+
+    def test_build_system_instruction(self):
+        self.assertIsNone(build_system_instruction([]))
+        self.assertIsNone(build_system_instruction(["   ", ""]))
+        inst = build_system_instruction(["You are an AI.", "Follow user instructions."])
+        self.assertIsNotNone(inst)
+        self.assertEqual(
+            inst,
+            {"parts": [{"text": "You are an AI.\nFollow user instructions."}]},
+        )
+
+    def test_normalize_turn_boundaries_empty(self):
+        self.assertEqual(normalize_turn_boundaries([]), [])
+
+    def test_normalize_turn_boundaries_starting_with_model(self):
+        contents = [{"role": "model", "parts": [{"text": "Hi"}]}]
+        res = normalize_turn_boundaries(contents)
+        self.assertEqual(res[0], {"role": "user", "parts": [{"text": "Hello"}]})
+        self.assertEqual(res[1], {"role": "model", "parts": [{"text": "Hi"}]})
+        self.assertEqual(res[2], {"role": "user", "parts": [{"text": "Continue"}]})
+
+    def test_normalize_turn_boundaries_already_valid(self):
+        contents = [
+            {"role": "user", "parts": [{"text": "Hello"}]},
+            {"role": "model", "parts": [{"text": "Hi"}]},
+            {"role": "user", "parts": [{"text": "How are you?"}]},
+        ]
+        res = normalize_turn_boundaries(list(contents))
+        self.assertEqual(res, contents)
+
+    def test_append_or_merge_turn_new_role(self):
+        contents: list[dict] = []
+        append_or_merge_turn(contents, "user", [{"text": "Hello"}])
+        self.assertEqual(contents, [{"role": "user", "parts": [{"text": "Hello"}]}])
+        append_or_merge_turn(contents, "model", [{"text": "World"}])
+        self.assertEqual(
+            contents,
+            [
+                {"role": "user", "parts": [{"text": "Hello"}]},
+                {"role": "model", "parts": [{"text": "World"}]},
+            ],
+        )
+
+    def test_append_or_merge_turn_same_role_merges_parts(self):
+        contents: list[dict] = [{"role": "user", "parts": [{"text": "First"}]}]
+        append_or_merge_turn(contents, "user", [{"text": "Second"}])
+        self.assertEqual(
+            contents,
+            [{"role": "user", "parts": [{"text": "First"}, {"text": "Second"}]}],
+        )
+
+    def test_build_tool_declarations(self):
+        self.assertIsNone(build_tool_declarations([]))
+        decls = [{"name": "foo", "description": "bar"}]
+        self.assertEqual(
+            build_tool_declarations(decls),
+            [{"functionDeclarations": decls}],
+        )
 
 
 if __name__ == "__main__":
