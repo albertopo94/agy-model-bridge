@@ -372,7 +372,7 @@ Execute the complete test suite:
 python3 -m unittest discover -s tests -v
 ```
 
-All 865 tests run in ~3-4 seconds locally with zero external dependencies and zero network access.
+All 871 tests run in ~3-4 seconds locally with zero external dependencies and zero network access.
 
 ### End-to-End Smoke Test
 

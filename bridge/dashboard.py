@@ -33,10 +33,7 @@ def get_status_data(client: Any, project: str, host: str, port: int) -> dict[str
                 "message": "Authenticated",
             }
             expiry_attr = getattr(token_provider, "expiry", None)
-            if expiry_attr is not None:
-                cached_expiry = expiry_attr() if callable(expiry_attr) else expiry_attr
-            else:
-                cached_expiry = getattr(token_provider, "_cached_expiry", 0)
+            cached_expiry = expiry_attr() if callable(expiry_attr) else (expiry_attr or 0.0)
             if cached_expiry > 0 and cached_expiry < time.time():
                 auth_status["status"] = "Expired"
                 auth_status["message"] = "Open Antigravity to refresh"

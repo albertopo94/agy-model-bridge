@@ -6,6 +6,7 @@ import http.server
 import itertools
 import json
 import random
+import re
 import sys
 import threading
 import time
@@ -50,6 +51,19 @@ from bridge.responses import (
     build_responses_error_response,
 )
 
+SAFE_REQUEST_ID_REGEX = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+
+
+def sanitize_request_id(request_id: str | None) -> str:
+    """Returns the request ID if safe (alphanumeric, dot, underscore, dash, max 64 chars),
+    or generates a fresh random request ID to prevent CRLF injection or header splitting.
+    """
+    if request_id:
+        val = request_id.strip()
+        if SAFE_REQUEST_ID_REGEX.match(val):
+            return val
+    return f"req_{uuid.uuid4().hex[:12]}"
+
 
 @dataclass
 class CollectedStreamData:
@@ -80,7 +94,8 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
     def parse_request(self) -> bool:
         if not super().parse_request():
             return False
-        self.request_id = self.headers.get("X-Request-ID") or f"req_{uuid.uuid4().hex[:12]}"
+        hdr_val = self.headers.get("X-Request-ID") if self.headers else None
+        self.request_id = sanitize_request_id(hdr_val)
         self.start_time = time.monotonic()
         return True
 
@@ -88,7 +103,7 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
         if not getattr(self, "request_id", ""):
             headers = getattr(self, "headers", None)
             hdr_val = headers.get("X-Request-ID") if headers else None
-            self.request_id = hdr_val or f"req_{uuid.uuid4().hex[:12]}"
+            self.request_id = sanitize_request_id(hdr_val)
         return self.request_id
 
     def _log_structured(
@@ -244,7 +259,11 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
             client_msg = str(exc)
 
         code, err_payload = build_openai_error_response(status_code, client_msg, error_type)
-        self._send_json(code, err_payload)
+        headers: dict[str, str] = {}
+        if status_code == 429:
+            retry_after = getattr(exc, "retry_after", None) or 5
+            headers["Retry-After"] = str(retry_after)
+        self._send_json(code, err_payload, headers=headers)
 
     def do_GET(self) -> None:
         if not self._is_valid_host():
@@ -479,7 +498,11 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
         else:
             client_msg = str(exc)
         code, err_payload = build_anthropic_error_response(status_code, client_msg)
-        self._send_json(code, err_payload)
+        headers: dict[str, str] = {}
+        if status_code == 429:
+            retry_after = getattr(exc, "retry_after", None) or 5
+            headers["Retry-After"] = str(retry_after)
+        self._send_json(code, err_payload, headers=headers)
 
     def _prebuffer_stream(self, stream_gen: Iterator[str]) -> list[str]:
         """Reads lines from stream_gen until finding the first non-empty, non-comment line.

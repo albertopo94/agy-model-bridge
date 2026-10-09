@@ -329,6 +329,48 @@ class TestServerEndpoints(unittest.TestCase):
             urllib.request.urlopen(req)
         err = ctx.exception
         self.assertEqual(err.code, 429)
+        self.assertEqual(err.headers.get("Retry-After"), "5")
+        body = json.loads(err.read().decode("utf-8"))
+        self.assertEqual(body["error"]["type"], "rate_limit_error")
+
+    def test_upstream_rate_limit_with_custom_retry_after(self):
+        self.mock_client.should_fail_with = RateLimitError("Rate limit exceeded", retry_after=12)
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [{"role": "user", "content": "Hello"}],
+        }
+        url = f"{self.base_url}/v1/chat/completions"
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            urllib.request.urlopen(req)
+        err = ctx.exception
+        self.assertEqual(err.code, 429)
+        self.assertEqual(err.headers.get("Retry-After"), "12")
+
+    def test_anthropic_upstream_rate_limit_maps_to_429_with_retry_after(self):
+        self.mock_client.should_fail_with = RateLimitError("Rate limit exceeded", retry_after=7)
+        payload = {
+            "model": "claude-3-7-sonnet",
+            "messages": [{"role": "user", "content": "Hello"}],
+            "max_tokens": 100,
+        }
+        url = f"{self.base_url}/v1/messages"
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            urllib.request.urlopen(req)
+        err = ctx.exception
+        self.assertEqual(err.code, 429)
+        self.assertEqual(err.headers.get("Retry-After"), "7")
         body = json.loads(err.read().decode("utf-8"))
         self.assertEqual(body["error"]["type"], "rate_limit_error")
 
@@ -2032,6 +2074,48 @@ class TestRequestIDAndObservability(unittest.TestCase):
         except urllib.error.HTTPError as err:
             self.assertEqual(err.code, 404)
             self.assertEqual(err.headers.get("X-Request-ID"), "req_err_check")
+
+    def test_sanitize_request_id_helper(self):
+        from bridge.server import sanitize_request_id
+        self.assertEqual(sanitize_request_id("valid-req-123_45.abc"), "valid-req-123_45.abc")
+        self.assertTrue(sanitize_request_id("evil\r\nInjected: true").startswith("req_"))
+        self.assertTrue(sanitize_request_id("evil\nInjected: true").startswith("req_"))
+        self.assertTrue(sanitize_request_id("req with spaces").startswith("req_"))
+        self.assertTrue(sanitize_request_id("a" * 100).startswith("req_"))
+        self.assertTrue(sanitize_request_id("").startswith("req_"))
+        self.assertTrue(sanitize_request_id(None).startswith("req_"))
+
+    def test_oversized_request_id_is_replaced(self):
+        oversized_id = "a" * 100
+        req = urllib.request.Request(
+            f"{self.base_url}/healthz",
+            headers={"X-Request-ID": oversized_id},
+            method="GET",
+        )
+        with urllib.request.urlopen(req, timeout=5.0) as resp:
+            reflected_id = resp.headers.get("X-Request-ID")
+            self.assertIsNotNone(reflected_id)
+            self.assertNotEqual(reflected_id, oversized_id)
+            self.assertTrue(reflected_id.startswith("req_"))
+            self.assertRegex(reflected_id, r"^[A-Za-z0-9._-]{1,64}$")
+
+    def test_raw_socket_crlf_request_id_sanitized(self):
+        import socket
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            s.connect(("127.0.0.1", self.port))
+            raw_req = (
+                b"GET /healthz HTTP/1.1\r\n"
+                b"Host: 127.0.0.1\r\n"
+                b"X-Request-ID: evil\r\n\tinjected\r\n"
+                b"Connection: close\r\n\r\n"
+            )
+            s.sendall(raw_req)
+            resp_data = s.recv(4096).decode("utf-8", errors="replace")
+            self.assertNotIn("injected", resp_data)
+            self.assertIn("X-Request-ID: req_", resp_data)
+        finally:
+            s.close()
 
     def test_log_structured_output_format(self):
         handler = OpenAIRequestHandler.__new__(OpenAIRequestHandler)

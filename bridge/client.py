@@ -92,7 +92,15 @@ class CloudCodeClient:
         if err.code == 404:
             return ModelNotFoundError(f"Upstream 404 Not Found: {msg}")
         if err.code == 429:
-            return RateLimitError(f"Upstream 429 Rate Limit: {msg}")
+            retry_after_val: int | None = None
+            if hasattr(err, "headers") and err.headers:
+                hdr_val = err.headers.get("Retry-After")
+                if hdr_val:
+                    try:
+                        retry_after_val = int(hdr_val.strip())
+                    except ValueError:
+                        pass
+            return RateLimitError(f"Upstream 429 Rate Limit: {msg}", retry_after=retry_after_val)
         if err.code == 503:
             return CapacityExhaustedError(f"Upstream 503 Capacity Exhausted: {msg}")
         return BridgeError(f"Upstream HTTP error ({err.code}): {msg}")

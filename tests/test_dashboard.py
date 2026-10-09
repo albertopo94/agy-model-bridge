@@ -6,10 +6,21 @@ from bridge.dashboard import render_dashboard, get_status_data
 
 
 class MockTokenProvider:
-    def __init__(self, token: str = "test-token", account: str = "antigravity@test.com", fail_with: Exception | None = None):
+    def __init__(
+        self,
+        token: str = "test-token",
+        account: str = "antigravity@test.com",
+        fail_with: Exception | None = None,
+        expiry: float = 0.0,
+    ):
         self.token = token
         self.account = account
         self.fail_with = fail_with
+        self._expiry = expiry
+
+    @property
+    def expiry(self) -> float:
+        return self._expiry
 
     def get_token(self) -> str:
         if self.fail_with:
@@ -499,13 +510,28 @@ class TestDashboardStatusData(unittest.TestCase):
 
     def test_get_status_data_cached_expiry_past_marks_expired(self):
         import time
-        provider = MockTokenProvider(token="valid-tok", account="test@domain.com")
-        provider._cached_expiry = time.time() - 30.0  # Expired 30 seconds ago
+        provider = MockTokenProvider(token="valid-tok", account="test@domain.com", expiry=time.time() - 30.0)
         client = MockClient(token_provider=provider)
 
         data = get_status_data(client, "test-project", "127.0.0.1", 24980)
         self.assertEqual(data["auth"]["status"], "Expired")
         self.assertIn("Open Antigravity to refresh", data["auth"]["message"])
+
+    def test_get_status_data_ignores_private_cached_expiry_attribute(self):
+        import time
+
+        class PrivateOnlyTokenProvider:
+            def __init__(self):
+                self._cached_expiry = time.time() - 30.0  # Private attribute only
+
+            def get_token(self) -> str:
+                return "priv-token"
+
+        provider = PrivateOnlyTokenProvider()
+        client = MockClient(token_provider=provider)
+        data = get_status_data(client, "test-project", "127.0.0.1", 24980)
+        # Without public expiry property, dashboard treats expiry as 0.0 (Valid, not Expired)
+        self.assertEqual(data["auth"]["status"], "Valid")
 
     def test_get_status_data_with_expiry_property_marks_expired(self):
         import time

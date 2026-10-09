@@ -34,7 +34,9 @@ class ModelNotFoundError(BridgeError):
 class RateLimitError(BridgeError):
     """Raised on 429 Too Many Requests."""
 
-    pass
+    def __init__(self, message: str = "Rate limit exceeded", retry_after: int | None = None) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
 
 
 class CapacityExhaustedError(BridgeError):
