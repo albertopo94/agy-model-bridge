@@ -735,6 +735,29 @@ class TestDashboardBilingual(unittest.TestCase):
         self.assertNotIn(".innerHTML =", quota_func_body)
         self.assertIn(".textContent =", quota_func_body)
 
+    def test_render_dashboard_quota_spanish_initial_markup(self):
+        auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
+        html_es = render_dashboard("127.0.0.1", 24980, auth_status, models_count=10, lang="es")
+        self.assertIn('aria-label="Actualizar cuota"', html_es)
+        self.assertIn('title="Actualizar cuota"', html_es)
+        self.assertIn("Cargando cuota...", html_es)
+
+        html_en = render_dashboard("127.0.0.1", 24980, auth_status, models_count=10, lang="en")
+        self.assertIn('aria-label="Refresh quota"', html_en)
+        self.assertIn('title="Refresh quota"', html_en)
+        self.assertIn("Loading quota...", html_en)
+
+    def test_render_dashboard_quota_dynamic_localization_script(self):
+        auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
+        html = render_dashboard("127.0.0.1", 24980, auth_status, models_count=10)
+
+        self.assertIn("quota-refresh-btn", html)
+        self.assertIn('refreshBtn.setAttribute("aria-label"', html)
+        self.assertIn("Modelos Gemini", html)
+        self.assertIn("Modelos Claude y GPT", html)
+        self.assertIn("Límite semanal restante", html)
+        self.assertIn("Límite de 5 horas restante", html)
+
 
 if __name__ == "__main__":
     unittest.main()

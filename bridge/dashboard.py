@@ -433,6 +433,8 @@ def render_dashboard(
         if is_es
         else f"AGY Model Bridge &bull; v{__version__} &bull; Local Gateway"
     )
+    quota_loading_text = "Cargando cuota..." if is_es else "Loading quota..."
+    quota_refresh_text = "Actualizar cuota" if is_es else "Refresh quota"
 
     cards_html_parts: list[str] = []
     for card in CLIENT_CARDS:
@@ -1000,10 +1002,10 @@ def render_dashboard(
               {ANTIGRAVITY_ICON_SVG}
               <div class="quota-title-text">
                 <span class="quota-title" data-i18n="quota_title">Antigravity</span>
-                <span id="quota-subtitle" class="quota-subtitle" data-i18n="quota_loading">Loading quota...</span>
+                <span id="quota-subtitle" class="quota-subtitle" data-i18n="quota_loading">{quota_loading_text}</span>
               </div>
             </div>
-            <button type="button" id="quota-refresh-btn" class="quota-refresh-btn" aria-label="Refresh quota" onclick="refreshQuota()" title="Refresh quota">
+            <button type="button" id="quota-refresh-btn" class="quota-refresh-btn" aria-label="{quota_refresh_text}" onclick="refreshQuota()" title="{quota_refresh_text}">
               {REFRESH_ICON_SVG}
             </button>
           </div>
@@ -1070,7 +1072,12 @@ def render_dashboard(
         quota_refresh: "Refresh quota",
         quota_loading: "Loading quota...",
         quota_unavailable: "Quota unavailable",
-        quota_error_stale: "Showing cached quota (refresh failed)"
+        quota_error_stale: "Showing cached quota (refresh failed)",
+        quota_group_gemini: "Gemini Models",
+        quota_group_claude_gpt: "Claude and GPT models",
+        quota_bucket_weekly: "Weekly Limit Remaining",
+        quota_bucket_5h: "Five Hour Limit Remaining",
+        quota_desc_default: "Within each group, models share a weekly limit and a 5-hour limit."
       }},
       es: {{
         subtitle: "Gateway multiprotocolo sin dependencias para Google Cloud Code Assist",
@@ -1108,7 +1115,12 @@ def render_dashboard(
         quota_refresh: "Actualizar cuota",
         quota_loading: "Cargando cuota...",
         quota_unavailable: "Cuota no disponible",
-        quota_error_stale: "Mostrando cuota en caché (falló la actualización)"
+        quota_error_stale: "Mostrando cuota en caché (falló la actualización)",
+        quota_group_gemini: "Modelos Gemini",
+        quota_group_claude_gpt: "Modelos Claude y GPT",
+        quota_bucket_weekly: "L\u00edmite semanal restante",
+        quota_bucket_5h: "L\u00edmite de 5 horas restante",
+        quota_desc_default: "Dentro de cada grupo, los modelos comparten un l\u00edmite semanal y un l\u00edmite de 5 horas."
       }}
     }};
 
@@ -1168,6 +1180,13 @@ def render_dashboard(
         }}
       }}
 
+      var refreshBtn = document.getElementById("quota-refresh-btn");
+      if (refreshBtn) {{
+        var refreshText = dict.quota_refresh || "Refresh quota";
+        refreshBtn.setAttribute("aria-label", refreshText);
+        refreshBtn.setAttribute("title", refreshText);
+      }}
+
       if (currentQuotaSnapshot) {{
         renderQuotaCard(currentQuotaSnapshot);
       }}
@@ -1219,6 +1238,26 @@ def render_dashboard(
       return "";
     }}
 
+    function formatBucketLabel(b, dict) {{
+      var raw = (b && (b.label || b.name)) ? (b.label || b.name) : "";
+      if (currentLang !== "es") return raw;
+      var groupTranslations = {{
+        "Gemini Models": dict.quota_group_gemini || "Modelos Gemini",
+        "Claude and GPT models": dict.quota_group_claude_gpt || "Modelos Claude y GPT"
+      }};
+      var bucketTranslations = {{
+        "Weekly Limit Remaining": dict.quota_bucket_weekly || "L\u00edmite semanal restante",
+        "Five Hour Limit Remaining": dict.quota_bucket_5h || "L\u00edmite de 5 horas restante"
+      }};
+      if (raw.indexOf(" \u00b7 ") !== -1) {{
+        var parts = raw.split(" \u00b7 ");
+        var grp = groupTranslations[parts[0]] || parts[0];
+        var bkt = bucketTranslations[parts[1]] || parts[1];
+        return grp + " \u00b7 " + bkt;
+      }}
+      return groupTranslations[raw] || bucketTranslations[raw] || raw;
+    }}
+
     function renderQuotaCard(snapshot) {{
       if (!snapshot) return;
       currentQuotaSnapshot = snapshot;
@@ -1252,8 +1291,12 @@ def render_dashboard(
 
       if (footnoteEl) {{
         if (snapshot.description) {{
-          footnoteEl.textContent = snapshot.description;
-          footnoteEl.title = snapshot.description;
+          var descText = snapshot.description;
+          if (currentLang === "es" && descText.indexOf("Within each group, models share a weekly limit and a 5-hour limit") !== -1) {{
+            descText = dict.quota_desc_default || "Dentro de cada grupo, los modelos comparten un l\u00edmite semanal y un l\u00edmite de 5 horas.";
+          }}
+          footnoteEl.textContent = descText;
+          footnoteEl.title = descText;
           footnoteEl.style.display = "block";
         }} else {{
           footnoteEl.style.display = "none";
@@ -1303,7 +1346,7 @@ def render_dashboard(
 
         var labelEl = document.createElement("div");
         labelEl.className = "bucket-label";
-        labelEl.textContent = b.label || b.name;
+        labelEl.textContent = formatBucketLabel(b, dict);
         bucketRow.appendChild(labelEl);
 
         var barEl = document.createElement("div");
