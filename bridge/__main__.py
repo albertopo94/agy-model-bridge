@@ -27,9 +27,6 @@ from bridge.setup import (
     list_backups,
     restore_backup,
     restore_gentle_shell,
-    restore_hermes,
-    restore_openclaw,
-    restore_opencode,
     restore_pi,
     setup_claude,
     setup_codex,
@@ -979,6 +976,13 @@ def main(argv: list[str] | None = None) -> int:
         help=t("cli_help_lang"),
     )
     args = parser.parse_args(argv)
+    from bridge.security import is_loopback_host
+    if args.no_auth and not is_loopback_host(args.host):
+        print(
+            f"Error: Refusing to disable authentication (--no-auth) on non-loopback host '{args.host}'. "
+            "--no-auth is only permitted on loopback addresses."
+        )
+        return 1
     run_server(
         host=args.host,
         port=args.port,

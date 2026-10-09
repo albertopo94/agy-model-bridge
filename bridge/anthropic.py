@@ -10,7 +10,6 @@ from typing import Any, Iterator
 
 from bridge.transform import (
     DUMMY_THOUGHT_SIGNATURE,
-    build_thinking_config,
     cache_thought_signature,
     cache_tool_name,
     check_sse_error,

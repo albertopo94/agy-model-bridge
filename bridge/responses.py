@@ -12,12 +12,10 @@ from typing import Any, Iterator
 
 from bridge.transform import (
     build_openai_error_response,
-    build_thinking_config,
     check_sse_error,
     extract_function_calls,
     extract_text_delta,
     extract_usage,
-    DUMMY_THOUGHT_SIGNATURE,
     cache_thought_signature,
     get_thought_signature,
     cache_tool_name,

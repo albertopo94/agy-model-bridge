@@ -1,7 +1,5 @@
 import io
 import json
-import socket
-import sys
 import threading
 import time
 import unittest
@@ -12,14 +10,10 @@ import urllib.request
 from bridge.server import create_server, OpenAIRequestHandler
 from bridge.transform import DUMMY_THOUGHT_SIGNATURE
 from bridge.client import (
-    CloudCodeClient,
     BridgeError,
     AuthenticationError,
     ForbiddenError,
     RateLimitError,
-    CapacityExhaustedError,
-    ModelNotFoundError,
-    UpstreamTimeoutError,
 )
 
 
@@ -1609,6 +1603,104 @@ class TestServerAuthenticationAndCORS(unittest.TestCase):
 
         _, headers, _ = self._get("/v1/models", {"Authorization": f"Bearer {self.api_key}"})
         self.assertNotIn("Access-Control-Allow-Origin", headers)
+
+
+class TestHostHeaderValidation(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.mock_client = MockCloudCodeClient()
+        cls.server = create_server(
+            host="127.0.0.1",
+            port=0,
+            client=cls.mock_client,
+            project="test-project",
+            no_auth=True,
+        )
+        cls.port = cls.server.server_address[1]
+        cls.base_url = f"http://127.0.0.1:{cls.port}"
+        cls.server_thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.server_thread.start()
+        time.sleep(0.05)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+        cls.server_thread.join(timeout=2.0)
+
+    def test_valid_host_headers_allowed(self):
+        for valid_host in (f"127.0.0.1:{self.port}", f"localhost:{self.port}", f"[::1]:{self.port}"):
+            req = urllib.request.Request(f"{self.base_url}/healthz", headers={"Host": valid_host})
+            with urllib.request.urlopen(req, timeout=5.0) as resp:
+                self.assertEqual(resp.status, 200)
+
+    def test_invalid_host_header_rejected_with_421(self):
+        for evil_host in ("evil.example", f"evil.example:{self.port}", "attacker.com", "192.168.1.100"):
+            req = urllib.request.Request(f"{self.base_url}/healthz", headers={"Host": evil_host})
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                urllib.request.urlopen(req, timeout=5.0)
+            self.assertEqual(ctx.exception.code, 421)
+            err_body = json.loads(ctx.exception.read().decode("utf-8"))
+            self.assertEqual(err_body["error"]["type"], "misdirected_request")
+
+    def test_invalid_host_header_rejected_on_post(self):
+        req = urllib.request.Request(
+            f"{self.base_url}/v1/chat/completions",
+            data=b'{"messages": [{"role": "user", "content": "hi"}]}',
+            headers={"Content-Type": "application/json", "Host": "evil.example"},
+            method="POST",
+        )
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            urllib.request.urlopen(req, timeout=5.0)
+        self.assertEqual(ctx.exception.code, 421)
+
+    def test_invalid_host_header_rejected_on_options(self):
+        req = urllib.request.Request(
+            f"{self.base_url}/v1/chat/completions",
+            headers={"Host": "evil.example"},
+            method="OPTIONS",
+        )
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            urllib.request.urlopen(req, timeout=5.0)
+        self.assertEqual(ctx.exception.code, 421)
+
+
+class TestNoAuthSecurityGuards(unittest.TestCase):
+    def test_create_server_rejects_no_auth_on_wildcard_host(self):
+        mock_client = MockCloudCodeClient()
+        with self.assertRaises(ValueError) as ctx:
+            create_server(
+                host="0.0.0.0",
+                port=0,
+                client=mock_client,
+                project="test-project",
+                no_auth=True,
+            )
+        self.assertIn("Refusing to disable authentication", str(ctx.exception))
+
+    def test_create_server_rejects_no_auth_on_lan_ip(self):
+        mock_client = MockCloudCodeClient()
+        with self.assertRaises(ValueError) as ctx:
+            create_server(
+                host="192.168.1.55",
+                port=0,
+                client=mock_client,
+                project="test-project",
+                no_auth=True,
+            )
+        self.assertIn("Refusing to disable authentication", str(ctx.exception))
+
+    def test_create_server_allows_no_auth_on_loopback(self):
+        mock_client = MockCloudCodeClient()
+        server = create_server(
+            host="127.0.0.1",
+            port=0,
+            client=mock_client,
+            project="test-project",
+            no_auth=True,
+        )
+        self.assertIsNone(server.api_key)
+        server.server_close()
 
 
 if __name__ == "__main__":

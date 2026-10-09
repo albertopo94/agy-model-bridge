@@ -2019,6 +2019,17 @@ class TestThoughtSignatureManagement(unittest.TestCase):
             sig,
         )
 
+    def test_cache_thought_signature_stores_sha256_hashed_keys(self):
+        from bridge.transform import cache_thought_signature, _THOUGHT_SIG_CACHE, _hash_args
+        sig = "sig_hash_test"
+        fn_name = "large_payload_fn"
+        fn_args = {"data": "A" * 10000}
+        cache_thought_signature(signature=sig, name=fn_name, args=fn_args)
+        expected_key = f"call:{fn_name}:{_hash_args(fn_args)}"
+        self.assertIn(expected_key, _THOUGHT_SIG_CACHE)
+        self.assertEqual(len(expected_key), len(f"call:{fn_name}:") + 64)
+
+
     def test_openai_request_preserves_explicit_thought_signature(self):
         sig = "custom_user_sig_555"
         payload = {

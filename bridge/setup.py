@@ -14,7 +14,6 @@ import re
 import shutil
 import subprocess
 from typing import Any
-import uuid
 
 from bridge import __version__
 import bridge.daemon

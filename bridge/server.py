@@ -38,7 +38,7 @@ from bridge.transform import (
 )
 from bridge.dashboard import render_dashboard, get_status_data
 from bridge.i18n import parse_accept_language
-from bridge.security import validate_api_key
+from bridge.security import validate_api_key, is_loopback_host
 from bridge.anthropic import (
     _extract_event_thought_signature,
     anthropic_to_cloudcode_request,
@@ -66,6 +66,27 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
         """Suppress default HTTP request logging to stderr."""
         pass
 
+    def _is_valid_host(self) -> bool:
+        """Validates incoming Host header against allowed loopback/bound hosts to prevent DNS rebinding."""
+        host_header = self.headers.get("Host", "").strip()
+        if not host_header:
+            return False
+
+        if host_header.startswith("["):
+            idx = host_header.find("]")
+            if idx == -1:
+                return False
+            hostname = host_header[1:idx].lower()
+        else:
+            hostname = host_header.split(":")[0].strip().lower()
+
+        allowed = {"127.0.0.1", "localhost", "::1", "[::1]", "0.0.0.0"}
+        server_host = getattr(self.server, "server_address", [None])[0]
+        if server_host and server_host not in ("0.0.0.0", "::"):
+            allowed.add(server_host.lower())
+
+        return hostname in allowed or hostname.startswith("127.")
+
     def _is_authenticated(self) -> bool:
         expected = getattr(self.server, "api_key", None)
         if expected is None:
@@ -74,6 +95,12 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
 
     def do_OPTIONS(self) -> None:
         """Handles CORS preflight requests."""
+        if not self._is_valid_host():
+            self.send_response(421)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+
         parsed_path = urllib.parse.urlparse(self.path).path
         if parsed_path.startswith("/v1/") or parsed_path in ("/", "/api/status"):
             # Inference and admin endpoints forbid browser cross-origin preflight requests
@@ -149,6 +176,19 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
         self._send_json(code, err_payload)
 
     def do_GET(self) -> None:
+        if not self._is_valid_host():
+            self._send_json(
+                421,
+                {
+                    "error": {
+                        "message": f"Misdirected Request: host '{self.headers.get('Host', '')}' is not permitted",
+                        "type": "misdirected_request",
+                        "code": 421,
+                    }
+                },
+            )
+            return
+
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path.rstrip("/")
         if not path:
@@ -225,6 +265,19 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
         )
 
     def do_POST(self) -> None:
+        if not self._is_valid_host():
+            self._send_json(
+                421,
+                {
+                    "error": {
+                        "message": f"Misdirected Request: host '{self.headers.get('Host', '')}' is not permitted",
+                        "type": "misdirected_request",
+                        "code": 421,
+                    }
+                },
+            )
+            return
+
         raw_content_length = self.headers.get("Content-Length")
         if raw_content_length is None:
             content_length = 0
@@ -902,6 +955,12 @@ def create_server(
     no_auth: bool = False,
 ) -> http.server.ThreadingHTTPServer:
     """Instantiates and configures a ThreadingHTTPServer instance."""
+    if no_auth and not is_loopback_host(host):
+        raise ValueError(
+            f"Refusing to disable authentication (--no-auth) on non-loopback host '{host}'. "
+            "--no-auth is only permitted on loopback addresses (127.0.0.1, localhost, ::1)."
+        )
+
     if no_auth or api_key == "":
         api_key = None
     elif api_key is None:

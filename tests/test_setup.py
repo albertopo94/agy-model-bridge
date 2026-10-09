@@ -22,7 +22,6 @@ from bridge.setup import (
     GentleShellConfigurator,
     PiConfigurator,
     atomic_write_file,
-    build_hermes_block,
     create_backup,
     create_zero_state_backup,
     describe_backup,
@@ -221,7 +220,6 @@ class TestListBackups(unittest.TestCase):
         self.assertEqual(list_backups(target), [])
 
     def test_list_backups_sorts_by_mtime_descending(self):
-        import time
         target = self.dir_path / "settings.json"
         target.write_text("{}", encoding="utf-8")
 
@@ -1479,7 +1477,7 @@ class TestUninstall(unittest.TestCase):
         core_dir.mkdir(parents=True, exist_ok=True)
         (core_dir / "bridge").mkdir(parents=True, exist_ok=True)
         (core_dir / "bridge" / "__init__.py").write_text("# core\n", encoding="utf-8")
-        (core_dir / ".agy-bridge-installed").write_text("v0.18.2\n", encoding="utf-8")
+        (core_dir / ".agy-bridge-installed").write_text("v0.18.3\n", encoding="utf-8")
 
         with unittest.mock.patch("bridge.daemon.stop_daemon", return_value={"status": "not_running"}):
             result = uninstall(
@@ -1650,7 +1648,7 @@ class TestUpdateInstallation(unittest.TestCase):
 
         self.assertEqual(result["status"], "updated")
         self.assertTrue(result["restarted_daemon"])
-        self.assertEqual(result["version"], "0.18.2")
+        self.assertEqual(result["version"], "0.18.3")
         mock_run.assert_called_once_with(
             ["git", "-C", str(self.repo_dir), "pull", "--ff-only"],
             capture_output=True,
@@ -1939,7 +1937,7 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main([flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.18.2")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.18.3")
 
     def test_cli_subcommand_version_flags(self):
         from bridge.__main__ import main
@@ -1951,19 +1949,19 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main(["update", flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.18.2")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.18.3")
 
     def test_version_unification(self):
         import bridge
         from pathlib import Path
         import re
 
-        self.assertEqual(bridge.__version__, "0.18.2")
+        self.assertEqual(bridge.__version__, "0.18.3")
         pyproject_path = Path(__file__).resolve().parent.parent / "pyproject.toml"
         pyproject_text = pyproject_path.read_text(encoding="utf-8")
         match = re.search(r'version\s*=\s*"([^"]+)"', pyproject_text)
         self.assertIsNotNone(match)
-        self.assertEqual(match.group(1), "0.18.2")
+        self.assertEqual(match.group(1), "0.18.3")
 
 
 class TestClientConfiguratorRegistry(unittest.TestCase):
@@ -2745,7 +2743,7 @@ class TestOpenCodeConfigurator(unittest.TestCase):
         )
         target.write_text(jsonc_content, encoding="utf-8")
 
-        res = self.configurator.setup(config_path=target)
+        self.configurator.setup(config_path=target)
         self.assertTrue(target.exists())
         data = json.loads(target.read_text(encoding="utf-8"))
         self.assertEqual(data["agent"]["url"], "http://example.com/api//v1")
@@ -3177,7 +3175,7 @@ class TestOpenClawConfigurator(unittest.TestCase):
         )
         target.write_text(jsonc_content, encoding="utf-8")
 
-        res = self.configurator.setup(config_path=target)
+        self.configurator.setup(config_path=target)
         self.assertTrue(target.exists())
         data = json.loads(target.read_text(encoding="utf-8"))
         self.assertEqual(data["agents"]["defaults"]["model"]["primary"], "agy/gemini-3.8-flash-high")
@@ -4880,7 +4878,7 @@ class TestInstallScript(unittest.TestCase):
         sentinel = self.state_dir / "core" / ".agy-bridge-installed"
         self.assertTrue(sentinel.exists())
         self.assertEqual(stat.S_IMODE(sentinel.stat().st_mode), 0o600)
-        self.assertEqual(sentinel.read_text(encoding="utf-8").strip(), "v0.18.2")
+        self.assertEqual(sentinel.read_text(encoding="utf-8").strip(), "v0.18.3")
 
     def test_install_script_launcher_immune_to_cwd_hijacking(self):
         res = subprocess.run(

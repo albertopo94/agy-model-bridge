@@ -744,6 +744,7 @@ class TestAnthropicResponseBuilder(unittest.TestCase):
                 "thought_signature": "sig_cache123",
             }],
         )
+        self.assertIsNotNone(resp)
         self.assertEqual(get_tool_name("toolu_cache123"), "lookup_user")
         self.assertEqual(get_thought_signature("toolu_cache123", "lookup_user", {"uid": 42}), "sig_cache123")
 

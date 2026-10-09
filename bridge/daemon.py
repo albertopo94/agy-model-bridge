@@ -241,6 +241,16 @@ def start_daemon(
     Checks if already running, launches detached process via subprocess.Popen,
     polls health check, writes PID and daemon info files, and opens default web browser.
     """
+    from bridge.security import is_loopback_host
+    if no_auth and not is_loopback_host(host):
+        return {
+            "status": "error",
+            "error": (
+                f"Refusing to disable authentication (--no-auth) on non-loopback host '{host}'. "
+                "--no-auth is only permitted on loopback addresses."
+            ),
+        }
+
     target_pid_file = Path(pid_file) if pid_file is not None else DEFAULT_PID_FILE
     target_info_file = Path(info_file) if info_file is not None else DEFAULT_INFO_FILE
     target_log_file = Path(log_file) if log_file is not None else DEFAULT_LOG_FILE

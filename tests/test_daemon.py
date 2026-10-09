@@ -509,7 +509,7 @@ class TestHealthCheck(unittest.TestCase):
     def test_check_server_healthy_matches_valid_service_identity(self, mock_urlopen):
         resp = MagicMock()
         resp.status = 200
-        resp.read.return_value = b'{"status": "ok", "service": "agy-model-bridge", "version": "0.18.2"}'
+        resp.read.return_value = b'{"status": "ok", "service": "agy-model-bridge", "version": "0.18.3"}'
         resp.__enter__.return_value = resp
         mock_urlopen.return_value = resp
 
@@ -563,7 +563,7 @@ class TestDaemonDescriptorAndPortBinding(unittest.TestCase):
             "host": "127.0.0.1",
             "port": 24980,
             "service": "agy-model-bridge",
-            "version": "0.18.2",
+            "version": "0.18.3",
         }
         write_daemon_info(info_data, info_file=self.info_file)
         self.assertTrue(self.info_file.exists())
@@ -616,7 +616,7 @@ class TestDaemonDescriptorAndPortBinding(unittest.TestCase):
                 "host": "127.0.0.1",
                 "port": 24980,
                 "service": "agy-model-bridge",
-                "version": "0.18.2",
+                "version": "0.18.3",
             },
             info_file=self.info_file,
         )
@@ -635,6 +635,17 @@ class TestDaemonDescriptorAndPortBinding(unittest.TestCase):
         self.assertEqual(res["port"], 24980)
         self.assertIn("127.0.0.1:24980", res["error"])
 
+    def test_start_daemon_rejects_no_auth_on_non_loopback(self):
+        res = start_daemon(
+            host="0.0.0.0",
+            no_auth=True,
+            pid_file=self.pid_file,
+            info_file=self.info_file,
+            log_file=self.log_file,
+        )
+        self.assertEqual(res["status"], "error")
+        self.assertIn("Refusing to disable authentication", res["error"])
+
     @patch("bridge.daemon.os.kill")
     def test_stop_daemon_removes_daemon_info_and_pid(self, mock_kill):
         write_pid(77777, pid_file=self.pid_file)
@@ -644,7 +655,7 @@ class TestDaemonDescriptorAndPortBinding(unittest.TestCase):
                 "host": "127.0.0.1",
                 "port": 24980,
                 "service": "agy-model-bridge",
-                "version": "0.18.2",
+                "version": "0.18.3",
             },
             info_file=self.info_file,
         )
@@ -666,13 +677,13 @@ class TestDaemonDescriptorAndPortBinding(unittest.TestCase):
                 "host": "127.0.0.1",
                 "port": 24999,
                 "service": "agy-model-bridge",
-                "version": "0.18.2",
+                "version": "0.18.3",
             },
             info_file=self.info_file,
         )
         mock_fetch.return_value = {
             "service": "agy-model-bridge",
-            "version": "0.18.2",
+            "version": "0.18.3",
             "models_count": 5,
             "auth": {"status": "Valid"},
         }
@@ -775,7 +786,7 @@ class TestDaemonDescriptorAndPortBinding(unittest.TestCase):
                 "host": "127.0.0.1",
                 "port": 24980,
                 "service": "agy-model-bridge",
-                "version": "0.18.2",
+                "version": "0.18.3",
             },
             info_file=self.info_file,
         )
@@ -799,7 +810,7 @@ class TestDaemonDescriptorAndPortBinding(unittest.TestCase):
                 "host": "127.0.0.1",
                 "port": 24980,
                 "service": "agy-model-bridge",
-                "version": "0.18.2",
+                "version": "0.18.3",
             },
             info_file=self.info_file,
         )
@@ -823,7 +834,7 @@ class TestDaemonDescriptorAndPortBinding(unittest.TestCase):
                 "host": "127.0.0.1",
                 "port": 24980,
                 "service": "agy-model-bridge",
-                "version": "0.18.2",
+                "version": "0.18.3",
             },
             info_file=self.info_file,
         )

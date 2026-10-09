@@ -8,7 +8,6 @@ Zero external dependencies: pure Python standard library.
 from __future__ import annotations
 
 import os
-import re
 from typing import Any
 
 _current_locale: str | None = None

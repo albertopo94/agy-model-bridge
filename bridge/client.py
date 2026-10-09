@@ -2,7 +2,6 @@
 
 from collections.abc import Iterator
 import http.client
-import io
 import json
 import socket
 from typing import Any

@@ -1,5 +1,6 @@
 """Pure transformation functions between OpenAI and Google Cloud Code Assist schemas."""
 
+import hashlib
 import json
 import threading
 import time
@@ -10,6 +11,28 @@ DUMMY_THOUGHT_SIGNATURE: str = "context_engineering_is_the_way_to_go"
 _THOUGHT_SIG_CACHE: dict[str, str] = {}
 _THOUGHT_SIG_LOCK = threading.Lock()
 _THOUGHT_SIG_MAX = 2048
+
+
+def _hash_args(args: Any) -> str:
+    """Computes a deterministic SHA-256 hash for tool arguments."""
+    raw = ""
+    if isinstance(args, dict):
+        try:
+            raw = json.dumps(args, sort_keys=True)
+        except Exception:
+            raw = str(args)
+    elif isinstance(args, str):
+        try:
+            parsed = json.loads(args)
+            if isinstance(parsed, dict):
+                raw = json.dumps(parsed, sort_keys=True)
+            else:
+                raw = args
+        except Exception:
+            raw = args
+    elif args is not None:
+        raw = str(args)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def cache_thought_signature(
@@ -28,22 +51,7 @@ def cache_thought_signature(
         if call_id:
             _THOUGHT_SIG_CACHE[f"id:{call_id}"] = signature
         if name:
-            args_key = ""
-            if isinstance(args, dict):
-                try:
-                    args_key = json.dumps(args, sort_keys=True)
-                except Exception:
-                    args_key = str(args)
-            elif isinstance(args, str):
-                try:
-                    parsed = json.loads(args)
-                    if isinstance(parsed, dict):
-                        args_key = json.dumps(parsed, sort_keys=True)
-                    else:
-                        args_key = args
-                except Exception:
-                    args_key = args
-            _THOUGHT_SIG_CACHE[f"call:{name}:{args_key}"] = signature
+            _THOUGHT_SIG_CACHE[f"call:{name}:{_hash_args(args)}"] = signature
 
 
 def get_thought_signature(
@@ -58,22 +66,7 @@ def get_thought_signature(
             if sig:
                 return sig
         if name:
-            args_key = ""
-            if isinstance(args, dict):
-                try:
-                    args_key = json.dumps(args, sort_keys=True)
-                except Exception:
-                    args_key = str(args)
-            elif isinstance(args, str):
-                try:
-                    parsed = json.loads(args)
-                    if isinstance(parsed, dict):
-                        args_key = json.dumps(parsed, sort_keys=True)
-                    else:
-                        args_key = args
-                except Exception:
-                    args_key = args
-            sig = _THOUGHT_SIG_CACHE.get(f"call:{name}:{args_key}")
+            sig = _THOUGHT_SIG_CACHE.get(f"call:{name}:{_hash_args(args)}")
             if sig:
                 return sig
     return DUMMY_THOUGHT_SIGNATURE

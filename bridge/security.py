@@ -143,3 +143,11 @@ def validate_api_key(expected_key: str | None, headers: Any) -> bool:
         return True
 
     return False
+
+
+def is_loopback_host(host: str | None) -> bool:
+    """Returns True if the given host string is a recognized loopback address."""
+    if not host:
+        return False
+    h = host.strip().lower()
+    return h in ("127.0.0.1", "localhost", "::1", "[::1]") or h.startswith("127.")

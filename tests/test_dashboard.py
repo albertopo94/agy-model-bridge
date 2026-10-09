@@ -611,6 +611,18 @@ class TestDashboardBilingual(unittest.TestCase):
         self.assertNotIn(secret, html)
         self.assertTrue("Configured" in html or "Configurada" in html)
 
+    def test_i18n_dictionary_contains_api_key_and_gentle_shell_translations(self):
+        auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
+        html = render_dashboard("127.0.0.1", 24980, auth_status, models_count=10)
+        # Check there is exactly one 'es: {' definition inside I18N
+        i18n_start = html.find("var I18N = {")
+        self.assertNotEqual(i18n_start, -1)
+        i18n_block = html[i18n_start:html.find("function setLanguage", i18n_start)]
+        self.assertEqual(i18n_block.count("es: {"), 1)
+        self.assertIn('"desc_gentle-shell"', i18n_block)
+        self.assertIn("api_key_configured", i18n_block)
+        self.assertIn("api_key_not_required", i18n_block)
+
 
 if __name__ == "__main__":
     unittest.main()
