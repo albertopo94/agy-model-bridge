@@ -25,11 +25,6 @@ from bridge.events import parse_stream_event
 from bridge.transform import (
     openai_to_cloudcode_request,
     parse_cloudcode_sse_event,
-    extract_text_delta,
-    extract_thought_delta,
-    extract_function_calls,
-    extract_finish_reason,
-    extract_usage,
     build_openai_model_list,
     build_openai_error_response,
     check_sse_error,
@@ -42,9 +37,9 @@ from bridge.dashboard import render_dashboard, get_status_data
 from bridge.i18n import parse_accept_language
 from bridge.security import validate_api_key, is_loopback_host
 from bridge.anthropic import (
+    AnthropicProtocolAdapter,
     _extract_event_thought_signature,
     anthropic_to_cloudcode_request,
-    build_anthropic_message,
     build_anthropic_sse_events,
     build_anthropic_error_response,
 )
@@ -500,32 +495,27 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                 for line in stream_gen:
                     parsed = parse_cloudcode_sse_event(line)
                     if parsed is not None:
+                        event = parse_stream_event(parsed, check_error=True)
                         event_count += 1
-                        check_sse_error(parsed)
-                        sig = _extract_event_thought_signature(parsed)
+                        sig = event.thought_signature or _extract_event_thought_signature(parsed)
                         if sig:
                             latest_thought_sig = sig
-                        usage = extract_usage(parsed)
-                        if usage:
-                            last_usage = usage
-                        fr = extract_finish_reason(parsed)
-                        if fr:
+                        if event.usage:
+                            last_usage = event.usage.to_dict()
+                        if event.finish_reason:
                             has_finish_reason = True
-                            if fr in ("length", "max_tokens"):
+                            if event.finish_reason in ("length", "max_tokens"):
                                 last_finish = "max_tokens"
-                            elif fr in ("stop_sequence", "tool_use"):
-                                last_finish = fr
+                            elif event.finish_reason in ("stop_sequence", "tool_use"):
+                                last_finish = event.finish_reason
                             else:
                                 last_finish = "end_turn"
-                        thought = extract_thought_delta(parsed)
-                        if thought:
-                            collected_thoughts.append(thought)
-                        delta = extract_text_delta(parsed)
-                        if delta:
-                            collected_text.append(delta)
-                        fc_list = extract_function_calls(parsed)
-                        if fc_list:
-                            collected_tool_calls.extend(fc_list)
+                        if event.delta_thought:
+                            collected_thoughts.append(event.delta_thought)
+                        if event.delta_text:
+                            collected_text.append(event.delta_text)
+                        if event.tool_calls:
+                            collected_tool_calls.extend(tc.to_dict() for tc in event.tool_calls)
 
                 if (
                     event_count == 0
@@ -542,15 +532,15 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                 msg_id = f"msg_{uuid.uuid4().hex[:16]}"
                 full_text = "".join(collected_text)
                 full_thought = "".join(collected_thoughts) if collected_thoughts else None
-                resp_obj = build_anthropic_message(
+                resp_obj = AnthropicProtocolAdapter.build_response(
                     message_id=msg_id,
                     model=model,
                     text=full_text,
                     usage=last_usage,
                     stop_reason=last_finish,
-                    thinking=full_thought,
                     tool_calls=collected_tool_calls if collected_tool_calls else None,
-                    signature=latest_thought_sig,
+                    thought=full_thought,
+                    thought_signature=latest_thought_sig,
                 )
                 try:
                     self._send_json(200, resp_obj)

@@ -8,16 +8,16 @@ import json
 import uuid
 from typing import Any, Iterator
 
+from bridge.events import (
+    StreamEvent,
+    ToolCallDelta as ToolCallDelta,
+    Usage as Usage,
+    parse_stream_event,
+)
 from bridge.transform import (
     DUMMY_THOUGHT_SIGNATURE,
     cache_thought_signature,
     cache_tool_name,
-    check_sse_error,
-    extract_finish_reason,
-    extract_function_calls,
-    extract_text_delta,
-    extract_thought_delta,
-    extract_usage,
     get_thought_signature,
     get_tool_name,
     parse_cloudcode_sse_event,
@@ -399,8 +399,13 @@ def build_anthropic_message(
     thinking: str | None = None,
     tool_calls: list[dict[str, Any]] | None = None,
     signature: str | None = None,
+    thought: str | None = None,
+    thought_signature: str | None = None,
 ) -> dict[str, Any]:
     """Constructs non-streaming Anthropic Messages response dictionary."""
+    effective_thinking = thought if thought is not None else thinking
+    effective_sig = thought_signature if thought_signature is not None else signature
+
     if tool_calls and stop_reason == "end_turn":
         stop_reason = "tool_use"
     elif stop_reason in ("length", "max_tokens"):
@@ -417,11 +422,11 @@ def build_anthropic_message(
         output_tokens = int(usage.get("completion_tokens") or usage.get("output_tokens") or 0)
 
     content: list[dict[str, Any]] = []
-    if thinking:
-        sig = signature if signature is not None else (get_thought_signature() or "")
+    if effective_thinking:
+        sig = effective_sig if effective_sig is not None else (get_thought_signature() or "")
         content.append({
             "type": "thinking",
-            "thinking": thinking,
+            "thinking": effective_thinking,
             "signature": sig,
         })
     if text:
@@ -470,7 +475,7 @@ def build_anthropic_message(
     }
 
 
-def build_anthropic_sse_events(lines_gen: Iterator[str], model: str) -> Iterator[str]:
+def build_anthropic_sse_events(lines_gen: Iterator[Any], model: str) -> Iterator[str]:
     """Transforms Cloud Code SSE stream into Anthropic Messages SSE events."""
     message_id = f"msg_{uuid.uuid4().hex[:16]}"
     input_tokens = 0
@@ -484,7 +489,7 @@ def build_anthropic_sse_events(lines_gen: Iterator[str], model: str) -> Iterator
     text_block_open = False
     text_block_index = -1
 
-    accumulated_tool_calls: list[dict[str, Any]] = []
+    has_tool_calls = False
     current_thought_sig: str | None = None
 
     def _close_thinking() -> Iterator[str]:
@@ -526,33 +531,34 @@ def build_anthropic_sse_events(lines_gen: Iterator[str], model: str) -> Iterator
     yield f"event: message_start\ndata: {json.dumps(start_payload)}\n\n"
 
     # 2. Stream content deltas
-    for line in lines_gen:
-        parsed = parse_cloudcode_sse_event(line)
-        if parsed is None:
-            continue
+    for item in lines_gen:
+        if isinstance(item, StreamEvent):
+            event = item
+        else:
+            parsed = parse_cloudcode_sse_event(item)
+            if parsed is None:
+                continue
+            event = parse_stream_event(parsed, check_error=True)
 
-        check_sse_error(parsed)
-
-        ev_sig = _extract_event_thought_signature(parsed)
+        ev_sig = event.thought_signature or (
+            _extract_event_thought_signature(event.raw) if isinstance(event.raw, dict) else None
+        )
         if ev_sig:
             current_thought_sig = ev_sig
 
-        usage = extract_usage(parsed)
-        if usage:
-            input_tokens = usage.get("prompt_tokens", input_tokens)
-            output_tokens = usage.get("completion_tokens", output_tokens)
+        if event.usage:
+            input_tokens = event.usage.prompt_tokens or input_tokens
+            output_tokens = event.usage.completion_tokens or output_tokens
 
-        finish_reason = extract_finish_reason(parsed)
-        if finish_reason:
-            if finish_reason in ("length", "max_tokens"):
+        if event.finish_reason:
+            if event.finish_reason in ("length", "max_tokens"):
                 upstream_stop_reason = "max_tokens"
-            elif finish_reason in ("stop_sequence", "tool_use"):
-                upstream_stop_reason = finish_reason
+            elif event.finish_reason in ("stop_sequence", "tool_use"):
+                upstream_stop_reason = event.finish_reason
             else:
                 upstream_stop_reason = "end_turn"
 
-        thought_delta = extract_thought_delta(parsed)
-        if thought_delta:
+        if event.delta_thought:
             if text_block_open:
                 yield f"event: content_block_stop\ndata: {json.dumps({'type': 'content_block_stop', 'index': text_block_index})}\n\n"
                 text_block_open = False
@@ -563,10 +569,9 @@ def build_anthropic_sse_events(lines_gen: Iterator[str], model: str) -> Iterator
                 yield f"event: content_block_start\ndata: {json.dumps({'type': 'content_block_start', 'index': thinking_block_index, 'content_block': {'type': 'thinking', 'thinking': ''}})}\n\n"
                 thinking_block_open = True
 
-            yield f"event: content_block_delta\ndata: {json.dumps({'type': 'content_block_delta', 'index': thinking_block_index, 'delta': {'type': 'thinking_delta', 'thinking': thought_delta}})}\n\n"
+            yield f"event: content_block_delta\ndata: {json.dumps({'type': 'content_block_delta', 'index': thinking_block_index, 'delta': {'type': 'thinking_delta', 'thinking': event.delta_thought}})}\n\n"
 
-        text_delta = extract_text_delta(parsed)
-        if text_delta:
+        if event.delta_text:
             if thinking_block_open:
                 yield from _close_thinking()
 
@@ -576,10 +581,9 @@ def build_anthropic_sse_events(lines_gen: Iterator[str], model: str) -> Iterator
                 yield f"event: content_block_start\ndata: {json.dumps({'type': 'content_block_start', 'index': text_block_index, 'content_block': {'type': 'text', 'text': ''}})}\n\n"
                 text_block_open = True
 
-            yield f"event: content_block_delta\ndata: {json.dumps({'type': 'content_block_delta', 'index': text_block_index, 'delta': {'type': 'text_delta', 'text': text_delta}})}\n\n"
+            yield f"event: content_block_delta\ndata: {json.dumps({'type': 'content_block_delta', 'index': text_block_index, 'delta': {'type': 'text_delta', 'text': event.delta_text}})}\n\n"
 
-        fc_list = extract_function_calls(parsed)
-        if fc_list:
+        if event.tool_calls:
             if thinking_block_open:
                 yield from _close_thinking()
 
@@ -587,27 +591,48 @@ def build_anthropic_sse_events(lines_gen: Iterator[str], model: str) -> Iterator
                 yield f"event: content_block_stop\ndata: {json.dumps({'type': 'content_block_stop', 'index': text_block_index})}\n\n"
                 text_block_open = False
 
-            for fc in fc_list:
-                call_id = fc.get("id") or f"toolu_{uuid.uuid4().hex[:16]}"
-                fc["id"] = call_id
-                name = fc.get("name", "")
-                args = fc.get("args") or {}
-                sig = fc.get("thought_signature") or fc.get("thoughtSignature")
-                if not sig:
-                    resp = parsed.get("response") if isinstance(parsed.get("response"), dict) else parsed
-                    cands = resp.get("candidates") if isinstance(resp, dict) else None
-                    if cands and isinstance(cands, list) and len(cands) > 0 and isinstance(cands[0], dict):
-                        cand = cands[0]
-                        sig = cand.get("thoughtSignature") or cand.get("thought_signature")
-                        if not sig and isinstance(cand.get("content"), dict):
-                            sig = cand["content"].get("thoughtSignature") or cand["content"].get("thought_signature")
+            for tc in event.tool_calls:
+                call_id = tc.id or f"toolu_{uuid.uuid4().hex[:16]}"
+                sig = tc.thought_signature or current_thought_sig
                 if sig:
-                    fc["thought_signature"] = sig
-                    cache_thought_signature(call_id=call_id, signature=sig, name=name, args=args)
-                if call_id and name:
-                    cache_tool_name(call_id, name)
+                    cache_thought_signature(call_id=call_id, signature=sig, name=tc.name, args=tc.args)
+                if tc.name and call_id:
+                    cache_tool_name(call_id, tc.name)
 
-            accumulated_tool_calls.extend(fc_list)
+                tool_index = next_index
+                next_index += 1
+                call_args = tc.args if tc.args is not None else {}
+                json_args = json.dumps(call_args) if not isinstance(call_args, str) else call_args
+
+                block_start = {
+                    "type": "content_block_start",
+                    "index": tool_index,
+                    "content_block": {
+                        "type": "tool_use",
+                        "id": call_id,
+                        "name": tc.name,
+                        "input": {},
+                    },
+                }
+                yield f"event: content_block_start\ndata: {json.dumps(block_start)}\n\n"
+
+                block_delta = {
+                    "type": "content_block_delta",
+                    "index": tool_index,
+                    "delta": {
+                        "type": "input_json_delta",
+                        "partial_json": json_args,
+                    },
+                }
+                yield f"event: content_block_delta\ndata: {json.dumps(block_delta)}\n\n"
+
+                block_stop = {
+                    "type": "content_block_stop",
+                    "index": tool_index,
+                }
+                yield f"event: content_block_stop\ndata: {json.dumps(block_stop)}\n\n"
+
+                has_tool_calls = True
 
     # 3. Close open blocks
     if thinking_block_open:
@@ -617,57 +642,13 @@ def build_anthropic_sse_events(lines_gen: Iterator[str], model: str) -> Iterator
         yield f"event: content_block_stop\ndata: {json.dumps({'type': 'content_block_stop', 'index': text_block_index})}\n\n"
         text_block_open = False
 
-    # 4. Emit accumulated tool calls
-    for call in accumulated_tool_calls:
-        tool_index = next_index
-        next_index += 1
-        call_id = call.get("id") or f"toolu_{uuid.uuid4().hex[:16]}"
-        call_name = call.get("name", "")
-        call_args = call.get("args")
-        if call_args is None:
-            call_args = {}
-        if call_id and call_name:
-            cache_tool_name(call_id, call_name)
-        thought_sig = call.get("thought_signature") or call.get("thoughtSignature")
-        if thought_sig:
-            cache_thought_signature(call_id=call_id, signature=thought_sig, name=call_name, args=call_args)
-        json_args = json.dumps(call_args) if not isinstance(call_args, str) else call_args
-
-        block_start = {
-            "type": "content_block_start",
-            "index": tool_index,
-            "content_block": {
-                "type": "tool_use",
-                "id": call_id,
-                "name": call_name,
-                "input": {},
-            },
-        }
-        yield f"event: content_block_start\ndata: {json.dumps(block_start)}\n\n"
-
-        block_delta = {
-            "type": "content_block_delta",
-            "index": tool_index,
-            "delta": {
-                "type": "input_json_delta",
-                "partial_json": json_args,
-            },
-        }
-        yield f"event: content_block_delta\ndata: {json.dumps(block_delta)}\n\n"
-
-        block_stop = {
-            "type": "content_block_stop",
-            "index": tool_index,
-        }
-        yield f"event: content_block_stop\ndata: {json.dumps(block_stop)}\n\n"
-
-    # If stream produced no thinking, text, or tools, ensure at least one empty text block
+    # 4. If stream produced no thinking, text, or tools, ensure at least one empty text block
     if next_index == 0:
         yield f"event: content_block_start\ndata: {json.dumps({'type': 'content_block_start', 'index': 0, 'content_block': {'type': 'text', 'text': ''}})}\n\n"
         yield f"event: content_block_stop\ndata: {json.dumps({'type': 'content_block_stop', 'index': 0})}\n\n"
 
     # 5. Determine stop_reason
-    if accumulated_tool_calls:
+    if has_tool_calls:
         final_stop_reason = "tool_use"
     elif upstream_stop_reason:
         final_stop_reason = upstream_stop_reason
@@ -691,6 +672,52 @@ def build_anthropic_sse_events(lines_gen: Iterator[str], model: str) -> Iterator
     # 7. message_stop
     msg_stop_payload = {"type": "message_stop"}
     yield f"event: message_stop\ndata: {json.dumps(msg_stop_payload)}\n\n"
+
+
+class AnthropicProtocolAdapter:
+    """Protocol adapter for Anthropic Messages API."""
+
+    @staticmethod
+    def transform_request(
+        payload: dict[str, Any], project: str = ""
+    ) -> tuple[
+        str,
+        list[dict[str, Any]],
+        dict[str, Any] | None,
+        dict[str, Any] | None,
+        list[dict[str, Any]] | None,
+        dict[str, Any] | None,
+    ]:
+        return anthropic_to_cloudcode_request(payload, project)
+
+    @staticmethod
+    def build_response(
+        message_id: str,
+        model: str,
+        text: str,
+        usage: dict[str, int] | None = None,
+        stop_reason: str = "end_turn",
+        tool_calls: list[dict[str, Any]] | None = None,
+        thought: str | None = None,
+        thought_signature: str | None = None,
+    ) -> dict[str, Any]:
+        return build_anthropic_message(
+            message_id=message_id,
+            model=model,
+            text=text,
+            usage=usage,
+            stop_reason=stop_reason,
+            tool_calls=tool_calls,
+            thought=thought,
+            thought_signature=thought_signature,
+        )
+
+    @staticmethod
+    def build_stream(
+        lines_gen: Iterator[Any],
+        model: str,
+    ) -> Iterator[str]:
+        return build_anthropic_sse_events(lines_gen, model)
 
 
 def build_anthropic_error_response(

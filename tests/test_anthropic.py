@@ -3,12 +3,14 @@
 import json
 import unittest
 from bridge.anthropic import (
+    AnthropicProtocolAdapter,
     _extract_event_thought_signature,
     anthropic_to_cloudcode_request,
     build_anthropic_message,
     build_anthropic_sse_events,
     build_anthropic_error_response,
 )
+from bridge.events import StreamEvent, ToolCallDelta, Usage
 from bridge.transform import (
     DUMMY_THOUGHT_SIGNATURE,
     get_thought_signature,
@@ -1070,6 +1072,207 @@ class TestExtractEventThoughtSignature(unittest.TestCase):
         self.assertIsNone(_extract_event_thought_signature(None))  # type: ignore
         self.assertIsNone(_extract_event_thought_signature("invalid"))  # type: ignore
         self.assertIsNone(_extract_event_thought_signature({"candidates": []}))
+
+
+class TestAnthropicSSEEventsWithStreamEvent(unittest.TestCase):
+    def _parse_sse(self, events: list[str]) -> list[tuple[str, dict]]:
+        parsed = []
+        for raw in events:
+            lines = [l for l in raw.strip().split("\n") if l]
+            ev_name = None
+            ev_data = None
+            for l in lines:
+                if l.startswith("event:"):
+                    ev_name = l[6:].strip()
+                elif l.startswith("data:"):
+                    ev_data = json.loads(l[5:].strip())
+            if ev_name and ev_data:
+                parsed.append((ev_name, ev_data))
+        return parsed
+
+    def test_stream_event_text(self):
+        stream_events = [
+            StreamEvent(delta_text="Hello "),
+            StreamEvent(
+                delta_text="world!",
+                usage=Usage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+            ),
+            StreamEvent(finish_reason="stop"),
+        ]
+        events = list(build_anthropic_sse_events(iter(stream_events), "claude-sonnet-5-5"))
+        parsed = self._parse_sse(events)
+
+        event_names = [e[0] for e in parsed]
+        self.assertEqual(event_names[0], "message_start")
+        self.assertEqual(event_names[-2], "message_delta")
+        self.assertEqual(event_names[-1], "message_stop")
+
+        text_deltas = [
+            d["delta"]["text"]
+            for n, d in parsed
+            if n == "content_block_delta" and d["delta"].get("type") == "text_delta"
+        ]
+        self.assertEqual("".join(text_deltas), "Hello world!")
+
+        msg_delta = [d for n, d in parsed if n == "message_delta"][0]
+        self.assertEqual(msg_delta["delta"]["stop_reason"], "end_turn")
+        self.assertEqual(msg_delta["usage"]["input_tokens"], 10)
+        self.assertEqual(msg_delta["usage"]["output_tokens"], 5)
+
+    def test_stream_event_thinking_and_text(self):
+        stream_events = [
+            StreamEvent(delta_thought="Thinking...", thought_signature="sig_event_test_123"),
+            StreamEvent(delta_text="Result"),
+            StreamEvent(finish_reason="stop"),
+        ]
+        events = list(build_anthropic_sse_events(iter(stream_events), "claude-sonnet-5-5"))
+        parsed = self._parse_sse(events)
+
+        starts = [d for n, d in parsed if n == "content_block_start"]
+        self.assertEqual(len(starts), 2)
+        self.assertEqual(starts[0]["content_block"]["type"], "thinking")
+        self.assertEqual(starts[1]["content_block"]["type"], "text")
+
+        sig_deltas = [
+            d["delta"]["signature"]
+            for n, d in parsed
+            if n == "content_block_delta" and d["delta"].get("type") == "signature_delta"
+        ]
+        self.assertEqual(sig_deltas, ["sig_event_test_123"])
+
+        text_deltas = [
+            d["delta"]["text"]
+            for n, d in parsed
+            if n == "content_block_delta" and d["delta"].get("type") == "text_delta"
+        ]
+        self.assertEqual("".join(text_deltas), "Result")
+
+    def test_stream_event_tool_calls(self):
+        tc = ToolCallDelta(
+            id="toolu_sevt_789",
+            name="calculator",
+            args={"expr": "2+2"},
+            thought_signature="sig_tool_evt_99",
+        )
+        stream_events = [
+            StreamEvent(tool_calls=[tc]),
+            StreamEvent(finish_reason="stop"),
+        ]
+        events = list(build_anthropic_sse_events(iter(stream_events), "claude-sonnet-5-5"))
+        parsed = self._parse_sse(events)
+
+        tool_starts = [
+            d for n, d in parsed if n == "content_block_start" and d["content_block"]["type"] == "tool_use"
+        ]
+        self.assertEqual(len(tool_starts), 1)
+        self.assertEqual(tool_starts[0]["content_block"]["id"], "toolu_sevt_789")
+        self.assertEqual(tool_starts[0]["content_block"]["name"], "calculator")
+
+        tool_deltas = [
+            d for n, d in parsed if n == "content_block_delta" and d["delta"].get("type") == "input_json_delta"
+        ]
+        self.assertEqual(len(tool_deltas), 1)
+        self.assertEqual(json.loads(tool_deltas[0]["delta"]["partial_json"]), {"expr": "2+2"})
+
+        msg_delta = [d for n, d in parsed if n == "message_delta"][0]
+        self.assertEqual(msg_delta["delta"]["stop_reason"], "tool_use")
+
+        self.assertEqual(get_tool_name("toolu_sevt_789"), "calculator")
+        self.assertEqual(
+            get_thought_signature("toolu_sevt_789", "calculator", {"expr": "2+2"}),
+            "sig_tool_evt_99",
+        )
+
+    def test_stream_event_finish_reasons_mapping(self):
+        for reason, expected_stop in (
+            ("length", "max_tokens"),
+            ("max_tokens", "max_tokens"),
+            ("stop_sequence", "stop_sequence"),
+            ("tool_use", "tool_use"),
+            ("stop", "end_turn"),
+            ("content_filter", "end_turn"),
+        ):
+            with self.subTest(reason=reason):
+                stream_events = [
+                    StreamEvent(delta_text="Hi"),
+                    StreamEvent(finish_reason=reason),
+                ]
+                events = list(build_anthropic_sse_events(iter(stream_events), "claude-sonnet-5-5"))
+                parsed = self._parse_sse(events)
+                msg_delta = [d for n, d in parsed if n == "message_delta"][0]
+                self.assertEqual(msg_delta["delta"]["stop_reason"], expected_stop)
+
+    def test_stream_event_empty_stream_yields_empty_text_block(self):
+        stream_events = [StreamEvent()]
+        events = list(build_anthropic_sse_events(iter(stream_events), "claude-sonnet-5-5"))
+        parsed = self._parse_sse(events)
+
+        starts = [d for n, d in parsed if n == "content_block_start"]
+        self.assertEqual(len(starts), 1)
+        self.assertEqual(starts[0]["content_block"]["type"], "text")
+        self.assertEqual(starts[0]["content_block"]["text"], "")
+
+
+class TestAnthropicProtocolAdapter(unittest.TestCase):
+    def test_transform_request(self):
+        payload = {
+            "model": "claude-sonnet-5-5",
+            "messages": [{"role": "user", "content": "Hello"}],
+            "max_tokens": 512,
+        }
+        model, contents, system_inst, gen_config, tools, tool_config = (
+            AnthropicProtocolAdapter.transform_request(payload, "my-proj")
+        )
+        self.assertEqual(model, "claude-sonnet-5-5")
+        self.assertEqual(contents, [{"role": "user", "parts": [{"text": "Hello"}]}])
+        self.assertIsNone(system_inst)
+        self.assertEqual(gen_config["maxOutputTokens"], 512)
+        self.assertIsNone(tools)
+        self.assertIsNone(tool_config)
+
+    def test_build_response(self):
+        resp = AnthropicProtocolAdapter.build_response(
+            message_id="msg_adapter_1",
+            model="claude-sonnet-5-5",
+            text="Adapter answer",
+            usage={"prompt_tokens": 12, "completion_tokens": 8},
+            stop_reason="end_turn",
+            thought="Adapter reasoning",
+            thought_signature="sig_adapter_123",
+        )
+        self.assertEqual(resp["id"], "msg_adapter_1")
+        self.assertEqual(resp["model"], "claude-sonnet-5-5")
+        self.assertEqual(resp["stop_reason"], "end_turn")
+        self.assertEqual(resp["usage"], {"input_tokens": 12, "output_tokens": 8})
+        self.assertEqual(len(resp["content"]), 2)
+        self.assertEqual(resp["content"][0]["type"], "thinking")
+        self.assertEqual(resp["content"][0]["thinking"], "Adapter reasoning")
+        self.assertEqual(resp["content"][0]["signature"], "sig_adapter_123")
+        self.assertEqual(resp["content"][1]["type"], "text")
+        self.assertEqual(resp["content"][1]["text"], "Adapter answer")
+
+    def test_build_response_with_tool_calls(self):
+        resp = AnthropicProtocolAdapter.build_response(
+            message_id="msg_adapter_tc",
+            model="claude-sonnet-5-5",
+            text="",
+            tool_calls=[{"id": "toolu_1", "name": "do_work", "args": {"a": 1}}],
+        )
+        self.assertEqual(resp["stop_reason"], "tool_use")
+        self.assertEqual(len(resp["content"]), 1)
+        self.assertEqual(resp["content"][0]["type"], "tool_use")
+        self.assertEqual(resp["content"][0]["id"], "toolu_1")
+        self.assertEqual(resp["content"][0]["name"], "do_work")
+        self.assertEqual(resp["content"][0]["input"], {"a": 1})
+
+    def test_build_stream(self):
+        stream_events = [
+            StreamEvent(delta_text="Streaming with adapter"),
+            StreamEvent(finish_reason="stop"),
+        ]
+        events = list(AnthropicProtocolAdapter.build_stream(iter(stream_events), "claude-sonnet-5-5"))
+        self.assertTrue(any("Streaming with adapter" in ev for ev in events))
+        self.assertTrue(any("event: message_stop" in ev for ev in events))
 
 
 if __name__ == "__main__":
