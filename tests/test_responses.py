@@ -2,12 +2,16 @@
 
 import json
 import unittest
+from bridge.events import StreamEvent, ToolCallDelta, Usage
 from bridge.responses import (
+    ResponsesProtocolAdapter,
     responses_to_cloudcode_request,
     build_responses_completion,
     build_responses_sse_events,
     build_responses_error_response,
 )
+from bridge.transform import get_thought_signature, get_tool_name
+
 
 
 class TestResponsesRequestTranslation(unittest.TestCase):
@@ -711,5 +715,146 @@ class TestResponsesErrorResponses(unittest.TestCase):
         self.assertEqual(err["error"]["type"], "api_error")
 
 
+class TestResponsesStreamEventAndAdapter(unittest.TestCase):
+    def test_build_responses_sse_events_with_stream_events_text_and_usage(self):
+        stream_events = [
+            StreamEvent(delta_text="Hello "),
+            StreamEvent(
+                delta_text="world!",
+                usage=Usage(prompt_tokens=8, completion_tokens=12, total_tokens=20),
+            ),
+        ]
+        events = list(build_responses_sse_events(iter(stream_events), "gemini-2.5-pro"))
+        parsed_events = []
+        for raw in events:
+            for line in raw.strip().split("\n"):
+                if line.startswith("data:"):
+                    parsed_events.append(json.loads(line[5:].strip()))
+
+        event_types = [p.get("type") for p in parsed_events]
+        expected_types = [
+            "response.created",
+            "response.in_progress",
+            "response.output_item.added",
+            "response.content_part.added",
+            "response.output_text.delta",
+            "response.output_text.delta",
+            "response.output_text.done",
+            "response.content_part.done",
+            "response.output_item.done",
+            "response.completed",
+        ]
+        self.assertEqual(event_types, expected_types)
+
+        deltas = [p.get("delta") for p in parsed_events if p.get("type") == "response.output_text.delta"]
+        self.assertEqual(deltas, ["Hello ", "world!"])
+
+        completed = parsed_events[-1]["response"]
+        self.assertEqual(completed["status"], "completed")
+        self.assertEqual(completed["output_text"], "Hello world!")
+        self.assertEqual(completed["usage"]["total_tokens"], 20)
+        self.assertEqual(completed["usage"]["input_tokens"], 8)
+        self.assertEqual(completed["usage"]["output_tokens"], 12)
+
+    def test_build_responses_sse_events_with_stream_events_tool_calls(self):
+        stream_events = [
+            StreamEvent(delta_text="Running tool: "),
+            StreamEvent(
+                tool_calls=[
+                    ToolCallDelta(
+                        id="call_evt_123",
+                        name="get_weather",
+                        args={"city": "Madrid"},
+                        thought_signature="sig_direct_tc",
+                    )
+                ]
+            ),
+        ]
+        events = list(build_responses_sse_events(iter(stream_events), "gemini-2.5-pro"))
+        parsed_events = []
+        for raw in events:
+            for line in raw.strip().split("\n"):
+                if line.startswith("data:"):
+                    parsed_events.append(json.loads(line[5:].strip()))
+
+        event_types = [p.get("type") for p in parsed_events]
+        self.assertIn("response.output_item.added", event_types)
+        self.assertIn("response.function_call_arguments.delta", event_types)
+        self.assertIn("response.function_call_arguments.done", event_types)
+
+        fc_items = [
+            p["item"]
+            for p in parsed_events
+            if p.get("type") == "response.output_item.done" and p.get("item", {}).get("type") == "function_call"
+        ]
+        self.assertEqual(len(fc_items), 1)
+        self.assertEqual(fc_items[0]["call_id"], "call_evt_123")
+        self.assertEqual(fc_items[0]["name"], "get_weather")
+        self.assertEqual(json.loads(fc_items[0]["arguments"]), {"city": "Madrid"})
+
+        # Thought signature and tool name should be cached
+        self.assertEqual(get_thought_signature("call_evt_123"), "sig_direct_tc")
+        self.assertEqual(get_tool_name("call_evt_123"), "get_weather")
+
+    def test_build_responses_sse_events_thought_signature_preserved_across_events(self):
+        stream_events = [
+            StreamEvent(thought_signature="sig_stream_level_preservation"),
+            StreamEvent(
+                tool_calls=[
+                    ToolCallDelta(
+                        id="call_inherited_sig",
+                        name="do_action",
+                        args={"action": "test"},
+                    )
+                ]
+            ),
+        ]
+        list(build_responses_sse_events(iter(stream_events), "gemini-2.5-pro"))
+        self.assertEqual(get_thought_signature("call_inherited_sig"), "sig_stream_level_preservation")
+
+    def test_build_responses_sse_events_tool_call_signature_overrides_event_signature(self):
+        stream_events = [
+            StreamEvent(
+                thought_signature="sig_fallback",
+                tool_calls=[
+                    ToolCallDelta(
+                        id="call_overridden_sig",
+                        name="do_action",
+                        args={},
+                        thought_signature="sig_specific",
+                    )
+                ],
+            ),
+        ]
+        list(build_responses_sse_events(iter(stream_events), "gemini-2.5-pro"))
+        self.assertEqual(get_thought_signature("call_overridden_sig"), "sig_specific")
+
+    def test_responses_protocol_adapter_methods(self):
+        payload = {"model": "gemini-2.5-pro", "input": "Hello"}
+        model, contents, sys_inst, gen_cfg, tools = ResponsesProtocolAdapter.transform_request(payload, "proj-1")
+        self.assertEqual(model, "gemini-2.5-pro")
+        self.assertEqual(len(contents), 1)
+
+        resp = ResponsesProtocolAdapter.build_response(
+            "resp_adapter_test",
+            "gemini-2.5-pro",
+            "Hi there!",
+            usage={"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7},
+        )
+        self.assertEqual(resp["id"], "resp_adapter_test")
+        self.assertEqual(resp["output"][0]["content"][0]["text"], "Hi there!")
+        self.assertEqual(resp["usage"]["total_tokens"], 7)
+
+        stream_gen = ResponsesProtocolAdapter.build_stream(
+            iter([StreamEvent(delta_text="Stream from adapter")]),
+            "gemini-2.5-pro",
+            response_id="resp_stream_test",
+        )
+        events = list(stream_gen)
+        self.assertGreater(len(events), 0)
+        self.assertTrue(any("Stream from adapter" in e for e in events))
+
+
 if __name__ == "__main__":
     unittest.main()
+

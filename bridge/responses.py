@@ -10,12 +10,14 @@ import time
 import uuid
 from typing import Any, Iterator
 
+from bridge.events import (
+    StreamEvent,
+    ToolCallDelta as ToolCallDelta,
+    Usage as Usage,
+    parse_stream_event,
+)
 from bridge.transform import (
     build_openai_error_response,
-    check_sse_error,
-    extract_function_calls,
-    extract_text_delta,
-    extract_usage,
     cache_thought_signature,
     get_thought_signature,
     cache_tool_name,
@@ -436,7 +438,7 @@ def build_responses_completion(
 
 
 def build_responses_sse_events(
-    lines_gen: Iterator[str],
+    lines_gen: Iterator[Any],
     model: str,
     response_id: str | None = None,
 ) -> Iterator[str]:
@@ -490,22 +492,26 @@ def build_responses_sse_events(
     in_tok = 0
     out_tok = 0
     total_tok = 0
+    cached_stream_thought_sig: str | None = None
 
-    for line in lines_gen:
-        parsed = parse_cloudcode_sse_event(line)
-        if parsed is None:
-            continue
+    for item in lines_gen:
+        if isinstance(item, StreamEvent):
+            event = item
+        else:
+            parsed = parse_cloudcode_sse_event(item)
+            if parsed is None:
+                continue
+            event = parse_stream_event(parsed, check_error=True)
 
-        check_sse_error(parsed)
+        if event.usage:
+            in_tok = event.usage.prompt_tokens or in_tok
+            out_tok = event.usage.completion_tokens or out_tok
+            total_tok = event.usage.total_tokens or (in_tok + out_tok)
 
-        usage = extract_usage(parsed)
-        if usage:
-            in_tok = usage.get("prompt_tokens", in_tok)
-            out_tok = usage.get("completion_tokens", out_tok)
-            total_tok = usage.get("total_tokens", in_tok + out_tok)
+        if event.thought_signature:
+            cached_stream_thought_sig = event.thought_signature
 
-        text_delta = extract_text_delta(parsed)
-        if text_delta:
+        if event.delta_text:
             if text_item_id is None:
                 text_item_id = f"msg_{uuid.uuid4().hex[:16]}"
                 text_output_index = output_index
@@ -545,13 +551,12 @@ def build_responses_sse_events(
                     "item_id": text_item_id,
                     "output_index": text_output_index,
                     "content_index": 0,
-                    "delta": text_delta,
+                    "delta": event.delta_text,
                 },
             )
-            full_text += text_delta
+            full_text += event.delta_text
 
-        function_calls = extract_function_calls(parsed)
-        if function_calls:
+        if event.tool_calls:
             if text_item_id is not None:
                 yield emit(
                     "response.output_text.done",
@@ -601,16 +606,16 @@ def build_responses_sse_events(
                 outputs.append(completed_text_item)
                 text_item_id = None
 
-            for fc in function_calls:
+            for tc in event.tool_calls:
                 fc_id = f"fc_{uuid.uuid4().hex[:16]}"
-                call_id = fc.get("id") or f"call_{uuid.uuid4().hex[:16]}"
-                name = fc.get("name", "")
-                sig = fc.get("thought_signature") or fc.get("thoughtSignature")
+                call_id = tc.id or f"call_{uuid.uuid4().hex[:16]}"
+                name = tc.name or ""
+                sig = tc.thought_signature or event.thought_signature or cached_stream_thought_sig
                 if sig:
-                    cache_thought_signature(call_id, sig)
+                    cache_thought_signature(call_id, sig, name=name, args=tc.args)
                 if name and call_id:
                     cache_tool_name(call_id, name)
-                args_val = fc.get("args", {})
+                args_val = tc.args or {}
                 args_str = json.dumps(args_val) if isinstance(args_val, (dict, list)) else str(args_val or "")
                 fc_output_index = output_index
                 output_index += 1
@@ -754,3 +759,32 @@ def build_responses_error_response(
             error_type = "api_error"
 
     return build_openai_error_response(status_code, message, error_type)
+
+
+class ResponsesProtocolAdapter:
+    """Protocol adapter for OpenAI Responses API."""
+
+    @staticmethod
+    def transform_request(
+        payload: dict[str, Any], project: str = ""
+    ) -> tuple[str, list[dict[str, Any]], dict[str, Any] | None, dict[str, Any] | None, list[dict[str, Any]] | None]:
+        return responses_to_cloudcode_request(payload, project)
+
+    @staticmethod
+    def build_response(
+        response_id: str,
+        model: str,
+        text: str,
+        usage: dict[str, int] | None = None,
+        tool_calls: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        return build_responses_completion(response_id, model, text, usage, tool_calls)
+
+    @staticmethod
+    def build_stream(
+        lines_gen: Iterator[Any],
+        model: str,
+        response_id: str | None = None,
+    ) -> Iterator[str]:
+        return build_responses_sse_events(lines_gen, model, response_id=response_id)
+

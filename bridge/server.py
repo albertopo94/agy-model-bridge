@@ -21,6 +21,7 @@ from bridge.errors import (
     RateLimitError,
     UpstreamTimeoutError,
 )
+from bridge.events import parse_stream_event
 from bridge.transform import (
     openai_to_cloudcode_request,
     parse_cloudcode_sse_event,
@@ -663,20 +664,16 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                 for line in stream_gen:
                     parsed = parse_cloudcode_sse_event(line)
                     if parsed is not None:
+                        event = parse_stream_event(parsed, check_error=True)
                         event_count += 1
-                        check_sse_error(parsed)
-                        usage = extract_usage(parsed)
-                        if usage:
-                            last_usage = usage
-                        fr = extract_finish_reason(parsed)
-                        if fr:
+                        if event.usage:
+                            last_usage = event.usage.to_dict()
+                        if event.finish_reason:
                             has_finish_reason = True
-                        delta = extract_text_delta(parsed)
-                        if delta:
-                            collected_text.append(delta)
-                        fcs = extract_function_calls(parsed)
-                        if fcs:
-                            collected_tool_calls.extend(fcs)
+                        if event.delta_text:
+                            collected_text.append(event.delta_text)
+                        if event.tool_calls:
+                            collected_tool_calls.extend(tc.to_dict() for tc in event.tool_calls)
 
                 if event_count == 0 and not collected_text and not has_finish_reason and not collected_tool_calls:
                     raise BridgeError("Stream ended without data")
