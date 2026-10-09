@@ -1120,7 +1120,7 @@ def render_dashboard(
         quota_group_claude_gpt: "Modelos Claude y GPT",
         quota_bucket_weekly: "L\u00edmite semanal restante",
         quota_bucket_5h: "L\u00edmite de 5 horas restante",
-        quota_desc_default: "Dentro de cada grupo, los modelos comparten un l\u00edmite semanal y un l\u00edmite de 5 horas."
+        quota_desc_default: "Dentro de cada grupo, los modelos comparten un l\u00edmite semanal y un l\u00edmite de 5 horas. La cuota se consume proporcionalmente al costo de los tokens, por lo que los l\u00edmites durar\u00e1n m\u00e1s con tareas cortas o usando modelos m\u00e1s econ\u00f3micos. El l\u00edmite de 5 horas suaviza la demanda agregada para distribuir equitativamente la capacidad global entre todos los usuarios, mientras que el l\u00edmite semanal est\u00e1 vinculado directamente a tu nivel individual."
       }}
     }};
 

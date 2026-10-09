@@ -757,6 +757,11 @@ class TestDashboardBilingual(unittest.TestCase):
         self.assertIn("Modelos Claude y GPT", html)
         self.assertIn("Límite semanal restante", html)
         self.assertIn("Límite de 5 horas restante", html)
+        self.assertIn(
+            "Dentro de cada grupo, los modelos comparten un límite semanal y un límite de 5 horas. "
+            "La cuota se consume proporcionalmente al costo de los tokens",
+            html,
+        )
 
 
 if __name__ == "__main__":
