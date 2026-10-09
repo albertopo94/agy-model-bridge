@@ -5,7 +5,10 @@ from dataclasses import dataclass, field
 import http.server
 import itertools
 import json
+import random
 import sys
+import threading
+import time
 import urllib.parse
 import uuid
 from typing import Any
@@ -64,6 +67,48 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
     client: CloudCodeClient
     project: str
     api_key: str | None = None
+    request_id: str = ""
+    command: str = ""
+    path: str = ""
+    start_time: float = 0.0
+    concurrency_semaphore: threading.Semaphore | None = None
+    concurrency_timeout: float = 5.0
+    max_retries: int = 3
+    initial_retry_delay: float = 0.5
+
+    def parse_request(self) -> bool:
+        if not super().parse_request():
+            return False
+        self.request_id = self.headers.get("X-Request-ID") or f"req_{uuid.uuid4().hex[:12]}"
+        self.start_time = time.monotonic()
+        return True
+
+    def _ensure_request_id(self) -> str:
+        if not getattr(self, "request_id", ""):
+            headers = getattr(self, "headers", None)
+            hdr_val = headers.get("X-Request-ID") if headers else None
+            self.request_id = hdr_val or f"req_{uuid.uuid4().hex[:12]}"
+        return self.request_id
+
+    def _log_structured(
+        self,
+        status: int,
+        latency_ms: int,
+        model: str = "",
+        usage: dict[str, int] | None = None,
+        error: str | None = None,
+    ) -> None:
+        self._ensure_request_id()
+        parts = [f"[{self.request_id}]", self.command, self.path, f"-> {status}", f"({latency_ms}ms)"]
+        if model:
+            parts.append(f"model={model}")
+        if usage:
+            parts.append(f"tokens={usage.get('total_tokens', 0)} ({usage.get('prompt_tokens', 0)}in/{usage.get('completion_tokens', 0)}out)")
+        if error:
+            parts.append(f"error={error}")
+        msg = " ".join(parts) + "\n"
+        sys.stderr.write(msg)
+        sys.stderr.flush()
 
     def log_message(self, format: str, *args: Any) -> None:
         """Suppress default HTTP request logging to stderr."""
@@ -98,8 +143,10 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
 
     def do_OPTIONS(self) -> None:
         """Handles CORS preflight requests."""
+        self._ensure_request_id()
         if not self._is_valid_host():
             self.send_response(421)
+            self.send_header("X-Request-ID", self.request_id)
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
@@ -108,6 +155,7 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
         if parsed_path.startswith("/v1/") or parsed_path in ("/", "/api/status"):
             # Inference and admin endpoints forbid browser cross-origin preflight requests
             self.send_response(403)
+            self.send_header("X-Request-ID", self.request_id)
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
@@ -119,6 +167,7 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
             "Access-Control-Allow-Headers",
             "Content-Type, Authorization, x-api-key, anthropic-version, anthropic-beta, anthropic-auth-token, openai-beta, openai-organization, openai-project",
         )
+        self.send_header("X-Request-ID", self.request_id)
         self.send_header("Content-Length", "0")
         self.end_headers()
 
@@ -128,9 +177,11 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
         data: dict[str, Any],
         headers: dict[str, str] | None = None,
     ) -> None:
+        self._ensure_request_id()
         encoded = json.dumps(data).encode("utf-8")
         self.send_response(status_code)
         self.send_header("Content-Type", "application/json")
+        self.send_header("X-Request-ID", self.request_id)
         req_path = urllib.parse.urlparse(getattr(self, "path", "")).path
         if not req_path.startswith("/v1/") and req_path not in ("/", "/api/status"):
             self.send_header("Access-Control-Allow-Origin", "*")
@@ -218,8 +269,10 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                 api_key="configured" if getattr(self.server, "api_key", None) else None,
             )
             encoded = html_content.encode("utf-8")
+            self._ensure_request_id()
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("X-Request-ID", self.request_id)
             self.send_header("Content-Length", str(len(encoded)))
             self.end_headers()
             self.wfile.write(encoded)
@@ -426,6 +479,39 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
             raise InvalidRequestError("Stream ended without data")
         return buffered_lines
 
+    def _execute_upstream_call(
+        self,
+        model: str,
+        contents: list[dict[str, Any]],
+        system_instruction: dict[str, Any] | None = None,
+        extra_kwargs: dict[str, Any] | None = None,
+    ) -> tuple[Any, list[str]]:
+        kwargs = extra_kwargs if extra_kwargs is not None else {}
+        max_retries = getattr(self, "max_retries", 3)
+        initial_delay = getattr(self, "initial_retry_delay", 0.5)
+
+        for attempt in range(max_retries + 1):
+            stream_gen = None
+            try:
+                stream_gen = self.client.stream_generate_content(
+                    self.project, model, contents, system_instruction, **kwargs
+                )
+                buffered_lines = self._prebuffer_stream(stream_gen)
+                return stream_gen, buffered_lines
+            except (RateLimitError, CapacityExhaustedError):
+                if stream_gen is not None and hasattr(stream_gen, "close"):
+                    stream_gen.close()
+                if attempt < max_retries:
+                    delay = min(4.0, initial_delay * (2 ** attempt)) + random.uniform(0.01, 0.05)
+                    time.sleep(delay)
+                    continue
+                raise
+            except Exception:
+                if stream_gen is not None and hasattr(stream_gen, "close"):
+                    stream_gen.close()
+                raise
+        raise BridgeError("Upstream call failed without response")
+
     def _dispatch_stream(
         self,
         model: str,
@@ -436,20 +522,41 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
         error_sender: Any,
         stream_error_formatter: Any = None,
     ) -> None:
+        self._ensure_request_id()
+        sem = getattr(self, "concurrency_semaphore", None)
+        if sem is None and hasattr(self, "server"):
+            sem = getattr(self.server, "concurrency_semaphore", None)
+        acquired = True
+        if sem is not None:
+            acquired = sem.acquire(blocking=True, timeout=getattr(self, "concurrency_timeout", 5.0))
+            if not acquired:
+                self.send_response(429)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Retry-After", "1")
+                self.send_header("X-Request-ID", self.request_id)
+                self.end_headers()
+                err = {
+                    "error": {
+                        "message": "Server concurrency limit reached, please retry later",
+                        "type": "concurrency_limit_error",
+                        "code": 429,
+                    }
+                }
+                self.wfile.write(json.dumps(err).encode("utf-8"))
+                return
+
         stream_gen = None
         try:
             try:
-                stream_gen = self.client.stream_generate_content(
-                    self.project, model, contents, system_instruction, **extra_kwargs
+                stream_gen, buffered_lines = self._execute_upstream_call(
+                    model=model,
+                    contents=contents,
+                    system_instruction=system_instruction,
+                    extra_kwargs=extra_kwargs,
                 )
-                buffered_lines = self._prebuffer_stream(stream_gen)
             except (BrokenPipeError, ConnectionResetError):
-                if stream_gen is not None and hasattr(stream_gen, "close"):
-                    stream_gen.close()
                 return
             except Exception as exc:
-                if stream_gen is not None and hasattr(stream_gen, "close"):
-                    stream_gen.close()
                 error_sender(exc)
                 return
 
@@ -457,6 +564,7 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
             self.send_header("Content-Type", "text/event-stream; charset=utf-8")
             self.send_header("Cache-Control", "no-cache")
             self.send_header("Connection", "close")
+            self.send_header("X-Request-ID", self.request_id)
             self.end_headers()
 
             combined_gen = itertools.chain(buffered_lines, stream_gen)
@@ -483,6 +591,8 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
             if stream_gen is not None and hasattr(stream_gen, "close"):
                 stream_gen.close()
             self.close_connection = True
+            if sem is not None and acquired:
+                sem.release()
 
     def _dispatch_non_streaming(
         self,
@@ -496,11 +606,44 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
         if error_sender is None:
             error_sender = self._send_error
 
+        self._ensure_request_id()
+        sem = getattr(self, "concurrency_semaphore", None)
+        if sem is None and hasattr(self, "server"):
+            sem = getattr(self.server, "concurrency_semaphore", None)
+        acquired = True
+        if sem is not None:
+            acquired = sem.acquire(blocking=True, timeout=getattr(self, "concurrency_timeout", 5.0))
+            if not acquired:
+                self.send_response(429)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Retry-After", "1")
+                self.send_header("X-Request-ID", self.request_id)
+                self.end_headers()
+                err = {
+                    "error": {
+                        "message": "Server concurrency limit reached, please retry later",
+                        "type": "concurrency_limit_error",
+                        "code": 429,
+                    }
+                }
+                self.wfile.write(json.dumps(err).encode("utf-8"))
+                return
+
         stream_gen = None
         try:
-            stream_gen = self.client.stream_generate_content(
-                self.project, model, contents, system_instruction, **extra_kwargs
-            )
+            try:
+                stream_gen, buffered_lines = self._execute_upstream_call(
+                    model=model,
+                    contents=contents,
+                    system_instruction=system_instruction,
+                    extra_kwargs=extra_kwargs,
+                )
+            except (BrokenPipeError, ConnectionResetError):
+                return
+            except Exception as exc:
+                error_sender(exc)
+                return
+
             try:
                 text_parts: list[str] = []
                 thought_parts: list[str] = []
@@ -511,7 +654,8 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                 event_count = 0
                 has_finish_reason = False
 
-                for line in stream_gen:
+                combined_gen = itertools.chain(buffered_lines, stream_gen)
+                for line in combined_gen:
                     parsed = parse_cloudcode_sse_event(line)
                     if parsed is None:
                         continue
@@ -562,6 +706,9 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
             pass
         except Exception as exc:
             error_sender(exc)
+        finally:
+            if sem is not None and acquired:
+                sem.release()
 
     def _handle_anthropic_messages(self, payload: dict[str, Any]) -> None:
         try:
@@ -796,6 +943,9 @@ def create_server(
     base_url: str | None = None,
     api_key: str | None = None,
     no_auth: bool = False,
+    max_concurrency: int = 16,
+    max_retries: int = 3,
+    initial_retry_delay: float = 0.5,
 ) -> http.server.ThreadingHTTPServer:
     """Instantiates and configures a ThreadingHTTPServer instance."""
     if no_auth and not is_loopback_host(host):
@@ -838,13 +988,22 @@ def create_server(
     class ConfiguredHandler(OpenAIRequestHandler):
         pass
 
+    concurrency_semaphore = threading.Semaphore(max_concurrency)
+
     ConfiguredHandler.client = client
     ConfiguredHandler.project = project
     ConfiguredHandler.api_key = api_key
+    ConfiguredHandler.concurrency_semaphore = concurrency_semaphore
+    ConfiguredHandler.max_retries = max_retries
+    ConfiguredHandler.initial_retry_delay = initial_retry_delay
 
     server = http.server.ThreadingHTTPServer((host, port), ConfiguredHandler)
     server.daemon_threads = True
     server.api_key = api_key
+    server.concurrency_semaphore = concurrency_semaphore
+    server.max_concurrency = max_concurrency
+    server.max_retries = max_retries
+    server.initial_retry_delay = initial_retry_delay
     return server
 
 
@@ -855,6 +1014,9 @@ def run_server(
     base_url: str | None = None,
     api_key: str | None = None,
     no_auth: bool = False,
+    max_concurrency: int = 16,
+    max_retries: int = 3,
+    initial_retry_delay: float = 0.5,
 ) -> None:
     """Starts the ThreadingHTTPServer serving OpenAI-compatible endpoints."""
     server = create_server(
@@ -864,6 +1026,9 @@ def run_server(
         base_url=base_url,
         api_key=api_key,
         no_auth=no_auth,
+        max_concurrency=max_concurrency,
+        max_retries=max_retries,
+        initial_retry_delay=initial_retry_delay,
     )
     actual_port = server.server_address[1]
     print(f"Antigravity Model Bridge listening on http://{host}:{actual_port}")

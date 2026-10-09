@@ -15,6 +15,7 @@ from bridge.client import (
     ForbiddenError,
     RateLimitError,
 )
+from bridge.errors import CapacityExhaustedError
 
 
 class MockCloudCodeClient:
@@ -1904,6 +1905,391 @@ class TestUnifiedDispatchers(unittest.TestCase):
         self.assertEqual(error_sender.call_count, 1)
         self.assertIsInstance(error_sender.call_args[0][0], BridgeError)
         self.assertIn("Stream ended without data", str(error_sender.call_args[0][0]))
+
+
+class TestRequestIDAndObservability(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.mock_client = MockCloudCodeClient()
+        cls.server = create_server(
+            host="127.0.0.1",
+            port=0,
+            client=cls.mock_client,
+            project="test-project",
+            no_auth=True,
+        )
+        cls.port = cls.server.server_address[1]
+        cls.base_url = f"http://127.0.0.1:{cls.port}"
+        cls.server_thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.server_thread.start()
+        time.sleep(0.05)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+        cls.server_thread.join(timeout=2.0)
+
+    def test_get_generates_request_id_when_missing(self):
+        req = urllib.request.Request(f"{self.base_url}/healthz", method="GET")
+        with urllib.request.urlopen(req, timeout=5.0) as resp:
+            req_id = resp.headers.get("X-Request-ID")
+            self.assertIsNotNone(req_id)
+            self.assertTrue(req_id.startswith("req_"))
+            self.assertEqual(len(req_id), 16)
+
+    def test_get_propagates_request_id_when_provided(self):
+        custom_id = "req_custom_trace_987654"
+        req = urllib.request.Request(
+            f"{self.base_url}/healthz",
+            headers={"X-Request-ID": custom_id},
+            method="GET",
+        )
+        with urllib.request.urlopen(req, timeout=5.0) as resp:
+            self.assertEqual(resp.headers.get("X-Request-ID"), custom_id)
+
+    def test_post_generates_request_id_in_response(self):
+        payload = json.dumps({
+            "model": "gemini-2.5-flash",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": False,
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            f"{self.base_url}/v1/chat/completions",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=5.0) as resp:
+            req_id = resp.headers.get("X-Request-ID")
+            self.assertIsNotNone(req_id)
+            self.assertTrue(req_id.startswith("req_"))
+
+    def test_post_propagates_request_id_when_provided(self):
+        custom_id = "req_incoming_custom_456"
+        payload = json.dumps({
+            "model": "gemini-2.5-flash",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": False,
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            f"{self.base_url}/v1/chat/completions",
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "X-Request-ID": custom_id,
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=5.0) as resp:
+            self.assertEqual(resp.headers.get("X-Request-ID"), custom_id)
+
+    def test_sse_streaming_propagates_request_id(self):
+        custom_id = "req_sse_stream_123"
+        payload = json.dumps({
+            "model": "gemini-2.5-flash",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            f"{self.base_url}/v1/chat/completions",
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "X-Request-ID": custom_id,
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=5.0) as resp:
+            self.assertEqual(resp.headers.get("X-Request-ID"), custom_id)
+            _ = resp.read()
+
+    def test_error_response_contains_request_id(self):
+        req = urllib.request.Request(
+            f"{self.base_url}/nonexistent-path",
+            headers={"X-Request-ID": "req_err_check"},
+            method="GET",
+        )
+        try:
+            urllib.request.urlopen(req, timeout=5.0)
+            self.fail("Expected 404 HTTPError")
+        except urllib.error.HTTPError as err:
+            self.assertEqual(err.code, 404)
+            self.assertEqual(err.headers.get("X-Request-ID"), "req_err_check")
+
+    def test_log_structured_output_format(self):
+        handler = OpenAIRequestHandler.__new__(OpenAIRequestHandler)
+        handler.request_id = "req_trace_123"
+        handler.command = "POST"
+        handler.path = "/v1/chat/completions"
+
+        with patch("sys.stderr", new_callable=io.StringIO) as mock_stderr:
+            handler._log_structured(
+                status=200,
+                latency_ms=45,
+                model="gemini-2.5-pro",
+                usage={"total_tokens": 12, "prompt_tokens": 5, "completion_tokens": 7},
+            )
+            output = mock_stderr.getvalue()
+            self.assertEqual(
+                output,
+                "[req_trace_123] POST /v1/chat/completions -> 200 (45ms) model=gemini-2.5-pro tokens=12 (5in/7out)\n",
+            )
+
+    def test_log_structured_error_output(self):
+        handler = OpenAIRequestHandler.__new__(OpenAIRequestHandler)
+        handler.request_id = "req_err_456"
+        handler.command = "POST"
+        handler.path = "/v1/messages"
+
+        with patch("sys.stderr", new_callable=io.StringIO) as mock_stderr:
+            handler._log_structured(
+                status=500,
+                latency_ms=12,
+                error="Upstream capacity exhausted",
+            )
+            output = mock_stderr.getvalue()
+            self.assertEqual(
+                output,
+                "[req_err_456] POST /v1/messages -> 500 (12ms) error=Upstream capacity exhausted\n",
+            )
+
+
+class TestConcurrencyLimit(unittest.TestCase):
+    def test_create_server_attaches_concurrency_semaphore(self):
+        mock_client = MockCloudCodeClient()
+        server = create_server(
+            host="127.0.0.1",
+            port=0,
+            client=mock_client,
+            project="test-proj",
+            no_auth=True,
+            max_concurrency=4,
+        )
+        try:
+            self.assertTrue(hasattr(server, "concurrency_semaphore"))
+            self.assertIsInstance(server.concurrency_semaphore, threading.Semaphore)
+            self.assertEqual(server.concurrency_semaphore._value, 4)
+            self.assertEqual(server.RequestHandlerClass.concurrency_semaphore, server.concurrency_semaphore)
+        finally:
+            server.server_close()
+
+    def test_concurrency_limit_exhausted_returns_429_non_streaming(self):
+        handler = OpenAIRequestHandler.__new__(OpenAIRequestHandler)
+        handler.request_id = "req_limit_test"
+        handler.concurrency_semaphore = threading.Semaphore(0)
+        handler.concurrency_timeout = 0.01
+        handler.wfile = io.BytesIO()
+        handler.send_response = MagicMock()
+        handler.send_header = MagicMock()
+        handler.end_headers = MagicMock()
+
+        handler._dispatch_non_streaming(
+            model="gemini-2.5-flash",
+            contents=[],
+            system_instruction=None,
+            extra_kwargs={},
+            response_builder=lambda c: {},
+        )
+
+        handler.send_response.assert_called_with(429)
+        handler.send_header.assert_any_call("Content-Type", "application/json")
+        handler.send_header.assert_any_call("Retry-After", "1")
+        handler.send_header.assert_any_call("X-Request-ID", "req_limit_test")
+        handler.end_headers.assert_called_once()
+
+        body = json.loads(handler.wfile.getvalue().decode("utf-8"))
+        self.assertEqual(body["error"]["code"], 429)
+        self.assertEqual(body["error"]["type"], "concurrency_limit_error")
+        self.assertIn("concurrency limit", body["error"]["message"].lower())
+
+    def test_concurrency_limit_exhausted_returns_429_streaming(self):
+        handler = OpenAIRequestHandler.__new__(OpenAIRequestHandler)
+        handler.request_id = "req_limit_stream"
+        handler.concurrency_semaphore = threading.Semaphore(0)
+        handler.concurrency_timeout = 0.01
+        handler.wfile = io.BytesIO()
+        handler.send_response = MagicMock()
+        handler.send_header = MagicMock()
+        handler.end_headers = MagicMock()
+
+        handler._dispatch_stream(
+            model="gemini-2.5-flash",
+            contents=[],
+            system_instruction=None,
+            extra_kwargs={},
+            stream_builder=lambda gen: iter([]),
+            error_sender=MagicMock(),
+        )
+
+        handler.send_response.assert_called_with(429)
+        handler.send_header.assert_any_call("Content-Type", "application/json")
+        handler.send_header.assert_any_call("Retry-After", "1")
+        handler.send_header.assert_any_call("X-Request-ID", "req_limit_stream")
+        handler.end_headers.assert_called_once()
+
+        body = json.loads(handler.wfile.getvalue().decode("utf-8"))
+        self.assertEqual(body["error"]["code"], 429)
+        self.assertEqual(body["error"]["type"], "concurrency_limit_error")
+
+    def test_semaphore_released_on_completion_and_error(self):
+        sem = threading.Semaphore(1)
+        handler = OpenAIRequestHandler.__new__(OpenAIRequestHandler)
+        handler.request_id = "req_sem_release"
+        handler.concurrency_semaphore = sem
+        handler.concurrency_timeout = 1.0
+        handler.project = "test-proj"
+        handler.client = MagicMock()
+        handler.client.stream_generate_content.side_effect = RuntimeError("Upstream explosion")
+        handler.close_connection = False
+        error_sender = MagicMock()
+
+        self.assertEqual(sem._value, 1)
+        handler._dispatch_non_streaming(
+            model="gemini-2.5-flash",
+            contents=[],
+            system_instruction=None,
+            extra_kwargs={},
+            response_builder=lambda c: {},
+            error_sender=error_sender,
+        )
+        # Verify semaphore was released even after error
+        self.assertEqual(sem._value, 1)
+        self.assertEqual(error_sender.call_count, 1)
+
+
+class TestUpstreamRetries(unittest.TestCase):
+    def test_create_server_sets_retry_parameters(self):
+        mock_client = MockCloudCodeClient()
+        server = create_server(
+            host="127.0.0.1",
+            port=0,
+            client=mock_client,
+            project="test-proj",
+            no_auth=True,
+            max_retries=5,
+            initial_retry_delay=0.2,
+        )
+        try:
+            self.assertEqual(server.max_retries, 5)
+            self.assertEqual(server.initial_retry_delay, 0.2)
+            self.assertEqual(server.RequestHandlerClass.max_retries, 5)
+            self.assertEqual(server.RequestHandlerClass.initial_retry_delay, 0.2)
+        finally:
+            server.server_close()
+
+    def test_execute_upstream_call_succeeds_without_retries(self):
+        handler = OpenAIRequestHandler.__new__(OpenAIRequestHandler)
+        handler.project = "test-proj"
+        handler.max_retries = 3
+        handler.initial_retry_delay = 0.5
+        mock_client = MagicMock()
+        mock_client.stream_generate_content.return_value = iter([
+            'data: {"candidates": [{"content": {"parts": [{"text": "OK"}]}}]}\n'
+        ])
+        handler.client = mock_client
+
+        stream_gen, buffered_lines = handler._execute_upstream_call(
+            model="gemini-2.5-flash",
+            contents=[{"role": "user", "parts": [{"text": "hi"}]}],
+        )
+
+        self.assertEqual(mock_client.stream_generate_content.call_count, 1)
+        self.assertEqual(len(buffered_lines), 1)
+
+    @patch("time.sleep")
+    def test_execute_upstream_call_retries_on_rate_limit(self, mock_sleep):
+        handler = OpenAIRequestHandler.__new__(OpenAIRequestHandler)
+        handler.project = "test-proj"
+        handler.max_retries = 3
+        handler.initial_retry_delay = 0.5
+
+        mock_client = MagicMock()
+        valid_stream = [
+            'data: {"candidates": [{"content": {"parts": [{"text": "Recovered"}]}}]}\n'
+        ]
+        mock_client.stream_generate_content.side_effect = [
+            RateLimitError("Rate limit exceeded"),
+            iter(valid_stream),
+        ]
+        handler.client = mock_client
+
+        stream_gen, buffered_lines = handler._execute_upstream_call(
+            model="gemini-2.5-flash",
+            contents=[],
+        )
+
+        self.assertEqual(mock_client.stream_generate_content.call_count, 2)
+        self.assertEqual(mock_sleep.call_count, 1)
+        # Delay should be approx 0.5 + jitter (between 0.51 and 0.55)
+        slept_delay = mock_sleep.call_args[0][0]
+        self.assertGreaterEqual(slept_delay, 0.5)
+        self.assertLess(slept_delay, 0.6)
+        self.assertEqual(len(buffered_lines), 1)
+
+    @patch("time.sleep")
+    def test_execute_upstream_call_retries_on_capacity_exhausted(self, mock_sleep):
+        handler = OpenAIRequestHandler.__new__(OpenAIRequestHandler)
+        handler.project = "test-proj"
+        handler.max_retries = 3
+        handler.initial_retry_delay = 0.5
+
+        mock_client = MagicMock()
+        valid_stream = [
+            'data: {"candidates": [{"content": {"parts": [{"text": "Recovered"}]}}]}\n'
+        ]
+        mock_client.stream_generate_content.side_effect = [
+            CapacityExhaustedError("503 Service Unavailable"),
+            iter(valid_stream),
+        ]
+        handler.client = mock_client
+
+        stream_gen, buffered_lines = handler._execute_upstream_call(
+            model="gemini-2.5-flash",
+            contents=[],
+        )
+
+        self.assertEqual(mock_client.stream_generate_content.call_count, 2)
+        self.assertEqual(mock_sleep.call_count, 1)
+        self.assertEqual(len(buffered_lines), 1)
+
+    @patch("time.sleep")
+    def test_execute_upstream_call_exhausts_retries_and_raises(self, mock_sleep):
+        handler = OpenAIRequestHandler.__new__(OpenAIRequestHandler)
+        handler.project = "test-proj"
+        handler.max_retries = 2
+        handler.initial_retry_delay = 0.1
+
+        mock_client = MagicMock()
+        mock_client.stream_generate_content.side_effect = RateLimitError("Quota limit hit")
+        handler.client = mock_client
+
+        with self.assertRaises(RateLimitError):
+            handler._execute_upstream_call(
+                model="gemini-2.5-flash",
+                contents=[],
+            )
+
+        # 1 initial attempt + 2 retries = 3 calls
+        self.assertEqual(mock_client.stream_generate_content.call_count, 3)
+        self.assertEqual(mock_sleep.call_count, 2)
+
+    def test_execute_upstream_call_does_not_retry_non_retryable_error(self):
+        handler = OpenAIRequestHandler.__new__(OpenAIRequestHandler)
+        handler.project = "test-proj"
+        handler.max_retries = 3
+        mock_client = MagicMock()
+        mock_client.stream_generate_content.side_effect = AuthenticationError("401 Unauthorized")
+        handler.client = mock_client
+
+        with patch("time.sleep") as mock_sleep:
+            with self.assertRaises(AuthenticationError):
+                handler._execute_upstream_call(
+                    model="gemini-2.5-flash",
+                    contents=[],
+                )
+            self.assertEqual(mock_client.stream_generate_content.call_count, 1)
+            self.assertEqual(mock_sleep.call_count, 0)
 
 
 if __name__ == "__main__":
