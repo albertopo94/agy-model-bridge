@@ -5,16 +5,12 @@ import json
 import threading
 import time
 from typing import Any
-import uuid
-
-from bridge.errors import (
-    AuthenticationError,
-    BridgeError,
-    CapacityExhaustedError,
-    ForbiddenError,
-    InvalidRequestError,
-    ModelNotFoundError,
-    RateLimitError,
+from bridge.events import (
+    StreamEvent as StreamEvent,
+    ToolCallDelta as ToolCallDelta,
+    Usage as Usage,
+    check_sse_error as check_sse_error,
+    parse_stream_event as parse_stream_event,
 )
 
 DUMMY_THOUGHT_SIGNATURE: str = "context_engineering_is_the_way_to_go"
@@ -778,81 +774,12 @@ def parse_cloudcode_sse_event(raw_line: str) -> dict[str, Any] | None:
 
 def extract_text_delta(event_dict: dict[str, Any]) -> str | None:
     """Extracts text chunk from candidates[0].parts; drops blocks with thought: true."""
-    resp_obj = (
-        event_dict.get("response")
-        if isinstance(event_dict.get("response"), dict)
-        else event_dict
-    )
-    candidates = resp_obj.get("candidates")
-    if not candidates or not isinstance(candidates, list) or len(candidates) == 0:
-        return None
-
-    candidate = candidates[0]
-    if not isinstance(candidate, dict):
-        return None
-
-    content = candidate.get("content")
-    if isinstance(content, dict):
-        parts = content.get("parts")
-    else:
-        parts = candidate.get("parts")
-
-    if not parts or not isinstance(parts, list):
-        return None
-
-    clean_texts: list[str] = []
-    for part in parts:
-        if not isinstance(part, dict):
-            continue
-        if part.get("thought") is True:
-            continue
-        text = part.get("text")
-        if text:
-            clean_texts.append(text)
-
-    if clean_texts:
-        return "".join(clean_texts)
-    return None
+    return parse_stream_event(event_dict, check_error=False).delta_text
 
 
 def extract_thought_delta(event_dict: dict[str, Any]) -> str | None:
     """Extracts text chunk from candidates[0].parts where thought is True."""
-    if not isinstance(event_dict, dict):
-        return None
-    resp_obj = (
-        event_dict.get("response")
-        if isinstance(event_dict.get("response"), dict)
-        else event_dict
-    )
-    candidates = resp_obj.get("candidates")
-    if not candidates or not isinstance(candidates, list) or len(candidates) == 0:
-        return None
-
-    candidate = candidates[0]
-    if not isinstance(candidate, dict):
-        return None
-
-    content = candidate.get("content")
-    if isinstance(content, dict):
-        parts = content.get("parts")
-    else:
-        parts = candidate.get("parts")
-
-    if not parts or not isinstance(parts, list):
-        return None
-
-    thought_texts: list[str] = []
-    for part in parts:
-        if not isinstance(part, dict):
-            continue
-        if part.get("thought") is True:
-            text = part.get("text")
-            if text:
-                thought_texts.append(text)
-
-    if thought_texts:
-        return "".join(thought_texts)
-    return None
+    return parse_stream_event(event_dict, check_error=False).delta_thought
 
 
 def extract_function_calls(event_dict: dict[str, Any]) -> list[dict[str, Any]]:
@@ -860,179 +787,23 @@ def extract_function_calls(event_dict: dict[str, Any]) -> list[dict[str, Any]]:
 
     Returns a list of dicts: [{"id": ..., "name": ..., "args": ...}]
     """
-    if not isinstance(event_dict, dict):
-        return []
-    resp_obj = (
-        event_dict.get("response")
-        if isinstance(event_dict.get("response"), dict)
-        else event_dict
-    )
-    candidates = resp_obj.get("candidates")
-    if not candidates or not isinstance(candidates, list) or len(candidates) == 0:
-        return []
-
-    candidate = candidates[0]
-    if not isinstance(candidate, dict):
-        return []
-
-    content = candidate.get("content")
-    if isinstance(content, dict):
-        parts = content.get("parts")
-    else:
-        parts = candidate.get("parts")
-
-    if not parts or not isinstance(parts, list):
-        return []
-
-    calls: list[dict[str, Any]] = []
-    for part in parts:
-        if not isinstance(part, dict):
-            continue
-        fc = part.get("functionCall")
-        if fc and isinstance(fc, dict):
-            name = fc.get("name")
-            if name:
-                call_id = fc.get("id") or part.get("id") or f"toolu_{uuid.uuid4().hex[:16]}"
-                args = fc.get("args")
-                if args is None:
-                    args = {}
-                elif isinstance(args, str):
-                    try:
-                        args = json.loads(args)
-                    except Exception:
-                        pass
-                call_info: dict[str, Any] = {
-                    "id": call_id,
-                    "name": name,
-                    "args": args,
-                }
-                thought_sig = (
-                    part.get("thoughtSignature")
-                    or part.get("thought_signature")
-                    or fc.get("thoughtSignature")
-                    or fc.get("thought_signature")
-                )
-                if thought_sig:
-                    call_info["thought_signature"] = thought_sig
-                calls.append(call_info)
-    return calls
+    return [
+        tc.to_dict()
+        for tc in parse_stream_event(event_dict, check_error=False).tool_calls
+    ]
 
 
-def check_sse_error(event_dict: dict[str, Any]) -> None:
-    """Checks if SSE event contains an error payload and raises appropriate BridgeError."""
-    resp_obj = (
-        event_dict.get("response")
-        if isinstance(event_dict.get("response"), dict)
-        else event_dict
-    )
-    error_obj = resp_obj.get("error")
-    if not error_obj:
-        return
-
-    code = None
-    message = ""
-    status = ""
-    if isinstance(error_obj, dict):
-        code = error_obj.get("code")
-        message = error_obj.get("message") or ""
-        status = error_obj.get("status") or ""
-    else:
-        message = str(error_obj)
-
-    err_msg = message or status or "Unknown upstream error"
-    if status and status not in err_msg:
-        err_msg = f"{err_msg} ({status})"
-
-    if code == 429 or status == "RESOURCE_EXHAUSTED":
-        raise RateLimitError(f"Upstream rate limit: {err_msg}")
-    if code == 503 or status == "UNAVAILABLE":
-        raise CapacityExhaustedError(f"Upstream capacity exhausted: {err_msg}")
-    if code == 403 or status == "PERMISSION_DENIED":
-        raise ForbiddenError(f"Upstream forbidden: {err_msg}")
-    if code == 401 or status == "UNAUTHENTICATED":
-        raise AuthenticationError(f"Upstream authentication error: {err_msg}")
-    if code == 404 or status == "NOT_FOUND":
-        raise ModelNotFoundError(f"Upstream model not found: {err_msg}")
-    if code == 400 or status == "INVALID_ARGUMENT":
-        raise InvalidRequestError(f"Upstream invalid request: {err_msg}")
-
-    raise BridgeError(f"Upstream error ({code or 'unknown'}): {err_msg}")
 
 
 def extract_finish_reason(event_dict: dict[str, Any]) -> str | None:
     """Extracts finishReason ('stop', 'length', 'content_filter') if candidate finished."""
-    resp_obj = (
-        event_dict.get("response")
-        if isinstance(event_dict.get("response"), dict)
-        else event_dict
-    )
-    prompt_feedback = resp_obj.get("promptFeedback") or event_dict.get("promptFeedback")
-    if isinstance(prompt_feedback, dict):
-        block_reason = prompt_feedback.get("blockReason")
-        if block_reason:
-            block_reason_str = str(block_reason).strip().upper()
-            if block_reason_str not in ("BLOCK_REASON_UNSPECIFIED", "0", "UNSPECIFIED", ""):
-                return "content_filter"
-
-    candidates = resp_obj.get("candidates")
-    if not candidates or not isinstance(candidates, list) or len(candidates) == 0:
-        return None
-
-    candidate = candidates[0]
-    if not isinstance(candidate, dict):
-        return None
-
-    reason = candidate.get("finishReason")
-    if not reason:
-        return None
-
-    reason_str = str(reason).strip().upper()
-    if not reason_str or reason_str in ("FINISH_REASON_UNSPECIFIED", "0", "UNSPECIFIED"):
-        return None
-    if reason_str in ("STOP", "1"):
-        return "stop"
-    if reason_str in ("MAX_TOKENS", "LENGTH", "2"):
-        return "length"
-    if reason_str in (
-        "SAFETY",
-        "RECITATION",
-        "BLOCKLIST",
-        "PROHIBITED_CONTENT",
-        "SPII",
-        "MALICIOUS",
-        "3",
-        "4",
-        "5",
-        "6",
-        "7",
-        "8",
-        "9",
-    ):
-        return "content_filter"
-    return "stop"
-
+    return parse_stream_event(event_dict, check_error=False).finish_reason
 
 
 def extract_usage(event_dict: dict[str, Any]) -> dict[str, int] | None:
     """Translates usageMetadata into OpenAI usage format."""
-    resp_obj = (
-        event_dict.get("response")
-        if isinstance(event_dict.get("response"), dict)
-        else event_dict
-    )
-    metadata = resp_obj.get("usageMetadata")
-    if not metadata or not isinstance(metadata, dict):
-        return None
-
-    prompt_tokens = int(metadata.get("promptTokenCount") or 0)
-    candidates_tokens = int(metadata.get("candidatesTokenCount") or 0)
-    total_tokens = int(metadata.get("totalTokenCount") or (prompt_tokens + candidates_tokens))
-
-    return {
-        "prompt_tokens": prompt_tokens,
-        "completion_tokens": candidates_tokens,
-        "total_tokens": total_tokens,
-    }
+    ev = parse_stream_event(event_dict, check_error=False)
+    return ev.usage.to_dict() if ev.usage is not None else None
 
 
 def build_openai_chunk(

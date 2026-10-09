@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agy-model-bridge"
-version = "0.18.4"
+version = "0.18.5"
 description = "Antigravity Model Bridge - Local AI Gateway for Claude Code, Codex, and OpenAI Clients"
 readme = "README.md"
 requires-python = ">=3.10"
