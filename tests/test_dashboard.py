@@ -695,6 +695,8 @@ class TestDashboardBilingual(unittest.TestCase):
         self.assertIn('<aside class="quota-panel"', html)
         self.assertIn('id="quota-card"', html)
         self.assertIn("Antigravity", html)
+        self.assertIn('viewBox="0 0 16 15"', html)
+        self.assertIn('id="google-antigravity"', html)
         self.assertIn("fetchQuota", html)
         self.assertIn("/api/quota", html)
         self.assertIn("1280px", html)
