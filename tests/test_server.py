@@ -15,7 +15,13 @@ from bridge.client import (
     ForbiddenError,
     RateLimitError,
 )
-from bridge.errors import CapacityExhaustedError
+from bridge.errors import (
+    CapacityExhaustedError,
+    InvalidRequestError,
+    ModelNotFoundError,
+    UpstreamTimeoutError,
+    UpstreamError,
+)
 
 
 class MockCloudCodeClient:
@@ -942,7 +948,7 @@ class TestServerEndpoints(unittest.TestCase):
         self.assertTrue(len(error_chunks) > 0, f"Expected SSE error chunk in written_chunks: {written_chunks}")
         parsed_chunk = json.loads(error_chunks[0].replace("data: ", "").strip())
         self.assertEqual(parsed_chunk["error"]["code"], 500)
-        self.assertEqual(parsed_chunk["error"]["type"], "api_error")
+        self.assertEqual(parsed_chunk["error"]["type"], "internal_server_error")
         self.assertEqual(parsed_chunk["error"]["message"], "Mid stream unexpected error")
 
     def test_root_dashboard_endpoint(self):
@@ -2290,6 +2296,101 @@ class TestUpstreamRetries(unittest.TestCase):
                 )
             self.assertEqual(mock_client.stream_generate_content.call_count, 1)
             self.assertEqual(mock_sleep.call_count, 0)
+
+
+class TestServerErrorSanitization(unittest.TestCase):
+    def test_get_error_details_known_and_unknown_errors(self):
+        handler = OpenAIRequestHandler.__new__(OpenAIRequestHandler)
+        handler.request_id = "req_test_1"
+
+        # Known errors
+        self.assertEqual(handler._get_error_details(InvalidRequestError("bad")), (400, "invalid_request_error"))
+        self.assertEqual(handler._get_error_details(ValueError("bad value")), (400, "invalid_request_error"))
+        self.assertEqual(handler._get_error_details(AuthenticationError("auth")), (401, "authentication_error"))
+        self.assertEqual(handler._get_error_details(ForbiddenError("denied")), (403, "permission_denied"))
+        self.assertEqual(handler._get_error_details(ModelNotFoundError("not found")), (404, "invalid_request_error"))
+        self.assertEqual(handler._get_error_details(RateLimitError("quota")), (429, "rate_limit_error"))
+        self.assertEqual(handler._get_error_details(CapacityExhaustedError("cap")), (503, "api_error"))
+        self.assertEqual(handler._get_error_details(UpstreamTimeoutError("timeout")), (504, "api_error"))
+        self.assertEqual(handler._get_error_details(UpstreamError("gateway", status_code=502)), (502, "api_error"))
+        self.assertEqual(handler._get_error_details(UpstreamError("gateway")), (500, "api_error"))
+        self.assertEqual(handler._get_error_details(BridgeError("bridge base")), (500, "api_error"))
+
+        # Unknown / unexpected internal errors must map to 500 internal_server_error
+        self.assertEqual(
+            handler._get_error_details(RuntimeError("leak /var/root/secret.py: divide by zero")),
+            (500, "internal_server_error"),
+        )
+        self.assertEqual(
+            handler._get_error_details(KeyError("missing")),
+            (500, "internal_server_error"),
+        )
+        self.assertEqual(
+            handler._get_error_details(Exception("generic unhandled")),
+            (500, "internal_server_error"),
+        )
+
+    def test_send_error_sanitizes_unexpected_500_errors(self):
+        handler = OpenAIRequestHandler.__new__(OpenAIRequestHandler)
+        handler.request_id = "req_abc123"
+        handler.start_time = time.monotonic()
+        handler.send_response = MagicMock()
+        handler.send_header = MagicMock()
+        handler.end_headers = MagicMock()
+        handler.wfile = MagicMock()
+
+        handler._send_json = MagicMock()
+        handler._log_structured = MagicMock()
+
+        secret_err = RuntimeError("Fatal error in /Users/secret/app.py on line 123")
+        handler._send_error(secret_err)
+
+        handler._send_json.assert_called_once()
+        status_code, err_payload = handler._send_json.call_args[0]
+        self.assertEqual(status_code, 500)
+        self.assertEqual(err_payload["error"]["type"], "internal_server_error")
+        self.assertEqual(err_payload["error"]["code"], 500)
+        self.assertEqual(err_payload["error"]["message"], "Internal server error [req_abc123]")
+        self.assertNotIn("/Users/secret/app.py", err_payload["error"]["message"])
+
+        handler._log_structured.assert_called_once_with(status=500, error=str(secret_err))
+
+    def test_send_anthropic_error_sanitizes_unexpected_500_errors(self):
+        handler = OpenAIRequestHandler.__new__(OpenAIRequestHandler)
+        handler.request_id = "req_anthropic_999"
+        handler.start_time = time.monotonic()
+        handler._send_json = MagicMock()
+        handler._log_structured = MagicMock()
+
+        secret_err = KeyError("missing_key_in /etc/shadow")
+        handler._send_anthropic_error(secret_err)
+
+        handler._send_json.assert_called_once()
+        status_code, err_payload = handler._send_json.call_args[0]
+        self.assertEqual(status_code, 500)
+        self.assertEqual(err_payload["error"]["type"], "api_error")
+        self.assertEqual(err_payload["error"]["message"], "Internal server error [req_anthropic_999]")
+        self.assertNotIn("/etc/shadow", err_payload["error"]["message"])
+
+        handler._log_structured.assert_called_once_with(status=500, error=str(secret_err))
+
+    def test_send_error_preserves_known_bridge_error_messages(self):
+        handler = OpenAIRequestHandler.__new__(OpenAIRequestHandler)
+        handler.request_id = "req_valid_456"
+        handler.start_time = time.monotonic()
+        handler._send_json = MagicMock()
+        handler._log_structured = MagicMock()
+
+        known_err = InvalidRequestError("Parameter 'temperature' must be a number")
+        handler._send_error(known_err)
+
+        handler._send_json.assert_called_once()
+        status_code, err_payload = handler._send_json.call_args[0]
+        self.assertEqual(status_code, 400)
+        self.assertEqual(err_payload["error"]["type"], "invalid_request_error")
+        self.assertEqual(err_payload["error"]["code"], 400)
+        self.assertEqual(err_payload["error"]["message"], "Parameter 'temperature' must be a number")
+        handler._log_structured.assert_not_called()
 
 
 if __name__ == "__main__":

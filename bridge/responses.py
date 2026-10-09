@@ -25,7 +25,9 @@ from bridge.transform import (
     parse_cloudcode_sse_event,
     resolve_model_and_thinking,
     sanitize_schema_for_gemini,
+    validate_generation_parameters,
 )
+from bridge.errors import InvalidRequestError
 
 _CACHE_LOCK = threading.Lock()
 
@@ -66,6 +68,7 @@ def responses_to_cloudcode_request(
     Raises:
         ValueError: If model or input are missing or invalid.
     """
+    validate_generation_parameters(payload)
     raw_model = payload.get("model")
     if raw_model is not None and not isinstance(raw_model, str):
         raise ValueError("Invalid 'model' parameter: must be a string")
@@ -100,6 +103,8 @@ def responses_to_cloudcode_request(
             turn_parts = [{"text": part_text}]
             turn_role = "user"
         elif isinstance(item, dict):
+            if item.get("type") in ("image_url", "image") or "image_url" in item:
+                raise InvalidRequestError("Multimodal image content is not supported by agy-model-bridge")
             role = item.get("role", "user")
             item_type = item.get("type")
 
@@ -230,6 +235,8 @@ def responses_to_cloudcode_request(
                     for tc in tool_calls:
                         if isinstance(tc, dict):
                             fn = tc.get("function") if "function" in tc and isinstance(tc["function"], dict) else tc
+                            if not isinstance(fn, dict):
+                                continue
                             tc_call_id = tc.get("id") or fn.get("id") or ""
                             tc_name = fn.get("name", "")
                             if tc_call_id and tc_name:
@@ -257,11 +264,17 @@ def responses_to_cloudcode_request(
                     parts_str = []
                     for block in raw_content:
                         if isinstance(block, dict):
+                            if block.get("type") in ("image_url", "image") or "image_url" in block:
+                                raise InvalidRequestError("Multimodal image content is not supported by agy-model-bridge")
                             if block.get("type") in ("input_text", "text", "output_text") or "text" in block:
                                 parts_str.append(str(block.get("text") or ""))
                         elif isinstance(block, str):
                             parts_str.append(block)
                     text = "".join(parts_str)
+                elif isinstance(raw_content, dict):
+                    if raw_content.get("type") in ("image_url", "image") or "image_url" in raw_content:
+                        raise InvalidRequestError("Multimodal image content is not supported by agy-model-bridge")
+                    text = str(raw_content.get("text") or "")
                 elif raw_content is None:
                     text = ""
                 else:

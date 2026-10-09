@@ -23,7 +23,9 @@ from bridge.transform import (
     parse_cloudcode_sse_event,
     resolve_model_and_thinking,
     sanitize_schema_for_gemini,
+    validate_generation_parameters,
 )
+from bridge.errors import InvalidRequestError
 
 
 def _extract_event_thought_signature(parsed: dict[str, Any]) -> str | None:
@@ -84,6 +86,7 @@ def anthropic_to_cloudcode_request(
     Raises:
         ValueError: If model or messages are missing or invalid, or if parameters violate model constraints.
     """
+    validate_generation_parameters(payload)
     raw_model = payload.get("model")
     if raw_model is not None and not isinstance(raw_model, str):
         raise ValueError("Invalid 'model' parameter: must be a string")
@@ -120,10 +123,13 @@ def anthropic_to_cloudcode_request(
             system_texts.append(raw_system.strip())
     elif isinstance(raw_system, list):
         for item in raw_system:
-            if isinstance(item, dict) and (item.get("type") == "text" or "text" in item):
-                txt = str(item.get("text") or "")
-                if txt.strip():
-                    system_texts.append(txt.strip())
+            if isinstance(item, dict):
+                if item.get("type") == "image" or "source" in item:
+                    raise InvalidRequestError("Multimodal image content is not supported by agy-model-bridge")
+                if item.get("type") == "text" or "text" in item:
+                    txt = str(item.get("text") or "")
+                    if txt.strip():
+                        system_texts.append(txt.strip())
             elif isinstance(item, str) and item.strip():
                 system_texts.append(item.strip())
 
@@ -179,6 +185,8 @@ def anthropic_to_cloudcode_request(
             for block in raw_content:
                 if isinstance(block, dict):
                     b_type = block.get("type")
+                    if b_type == "image" or "source" in block:
+                        raise InvalidRequestError("Multimodal image content is not supported by agy-model-bridge")
                     if b_type == "thinking":
                         sig = (
                             block.get("signature")
@@ -261,6 +269,12 @@ def anthropic_to_cloudcode_request(
             if parts_added == 0:
                 part_role = "model" if role == "assistant" else "user"
                 _add_part(part_role, {"text": " "})
+        elif isinstance(raw_content, dict):
+            if raw_content.get("type") == "image" or "source" in raw_content:
+                raise InvalidRequestError("Multimodal image content is not supported by agy-model-bridge")
+            text_str = str(raw_content.get("text") or "")
+            part_role = "model" if role == "assistant" else "user"
+            _add_part(part_role, {"text": text_str if text_str.strip() else " "})
         elif isinstance(raw_content, str):
             text_str = raw_content if raw_content.strip() else " "
             part_role = "model" if role == "assistant" else "user"

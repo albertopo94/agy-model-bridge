@@ -30,6 +30,7 @@ from bridge.client import (
     AuthenticationError,
     ForbiddenError,
 )
+from bridge.errors import InvalidRequestError
 
 
 class TestOpenAIToCloudCodeRequest(unittest.TestCase):
@@ -231,7 +232,7 @@ class TestOpenAIToCloudCodeRequest(unittest.TestCase):
             [{"role": "user", "parts": [{"text": "Hello world!"}]}],
         )
 
-    def test_multimodal_content_list_with_image_dropped_safely(self):
+    def test_multimodal_content_list_with_image_rejected(self):
         payload = {
             "model": "gemini-2.5-pro",
             "messages": [
@@ -244,11 +245,69 @@ class TestOpenAIToCloudCodeRequest(unittest.TestCase):
                 }
             ],
         }
-        _, contents, _, _, _ = openai_to_cloudcode_request(payload, project="test-project")
-        self.assertEqual(
-            contents,
-            [{"role": "user", "parts": [{"text": "Describe this image."}]}],
-        )
+        with self.assertRaises(InvalidRequestError) as ctx:
+            openai_to_cloudcode_request(payload, project="test-project")
+        self.assertIn("Multimodal image content is not supported by agy-model-bridge", str(ctx.exception))
+
+    def test_multimodal_content_list_with_image_type_rejected(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image", "image": "base64data"},
+                    ],
+                }
+            ],
+        }
+        with self.assertRaises(InvalidRequestError) as ctx:
+            openai_to_cloudcode_request(payload, project="test-project")
+        self.assertIn("Multimodal image content is not supported by agy-model-bridge", str(ctx.exception))
+
+    def test_temperature_invalid_type_raises_invalid_request_error(self):
+        for bad_temp in (True, False, "0.5", [0.5], {"temp": 0.5}):
+            payload = {
+                "model": "gemini-2.5-pro",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "temperature": bad_temp,
+            }
+            with self.assertRaises(InvalidRequestError) as ctx:
+                openai_to_cloudcode_request(payload, project="test-project")
+            self.assertEqual(str(ctx.exception), "Parameter 'temperature' must be a number")
+
+    def test_top_p_invalid_type_raises_invalid_request_error(self):
+        for bad_top_p in (True, False, "0.9", [0.9], {"p": 0.9}):
+            payload = {
+                "model": "gemini-2.5-pro",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "top_p": bad_top_p,
+            }
+            with self.assertRaises(InvalidRequestError) as ctx:
+                openai_to_cloudcode_request(payload, project="test-project")
+            self.assertEqual(str(ctx.exception), "Parameter 'top_p' must be a number")
+
+    def test_max_tokens_invalid_type_or_value_raises_invalid_request_error(self):
+        for bad_max in (True, False, "100", 0, -1, -100, 1.5, [100]):
+            payload = {
+                "model": "gemini-2.5-pro",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "max_tokens": bad_max,
+            }
+            with self.assertRaises(InvalidRequestError) as ctx:
+                openai_to_cloudcode_request(payload, project="test-project")
+            self.assertEqual(str(ctx.exception), "Parameter 'max_tokens' must be a positive integer")
+
+    def test_max_completion_tokens_invalid_type_or_value_raises_invalid_request_error(self):
+        for bad_max in (True, False, "100", 0, -5, 2.5):
+            payload = {
+                "model": "gemini-2.5-pro",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "max_completion_tokens": bad_max,
+            }
+            with self.assertRaises(InvalidRequestError) as ctx:
+                openai_to_cloudcode_request(payload, project="test-project")
+            self.assertEqual(str(ctx.exception), "Parameter 'max_tokens' must be a positive integer")
 
     def test_multimodal_content_dict_with_only_text_key(self):
         payload = {
@@ -1615,6 +1674,36 @@ class TestResolveModelAndThinking(unittest.TestCase):
         model2, thinking2 = resolve_model_and_thinking("gemini-2.5-pro-high", {})
         self.assertEqual(model2, "gemini-2.5-pro-high")
         self.assertEqual(thinking2, {"thinkingLevel": "HIGH"})
+
+    def test_claude_3_7_sonnet_tiers_aliasing(self):
+        cases = [
+            ("claude-3-7-sonnet-high", "claude-3-7-sonnet", {"thinkingLevel": "HIGH"}),
+            ("claude-3-7-sonnet-medium", "claude-3-7-sonnet", {"thinkingLevel": "MEDIUM"}),
+            ("claude-3-7-sonnet-low", "claude-3-7-sonnet", {"thinkingLevel": "LOW"}),
+            ("claude-3-7-sonnet", "claude-3-7-sonnet", None),
+            ("CLAUDE-3-7-SONNET-HIGH", "claude-3-7-sonnet", {"thinkingLevel": "HIGH"}),
+        ]
+        for raw_model, exp_model, exp_thinking in cases:
+            model, thinking = resolve_model_and_thinking(raw_model, {})
+            self.assertEqual(model, exp_model, f"Failed model resolution for {raw_model}")
+            self.assertEqual(thinking, exp_thinking, f"Failed thinking resolution for {raw_model}")
+
+    def test_flash_standalone_tiers_aliasing(self):
+        cases = [
+            ("flash-high", "gemini-3.8-flash-tiered", {"thinkingLevel": "HIGH"}),
+            ("flash-medium", "gemini-3.8-flash-tiered", {"thinkingLevel": "MEDIUM"}),
+            ("flash-low", "gemini-3.8-flash-tiered", {"thinkingLevel": "LOW"}),
+            ("FLASH-HIGH", "gemini-3.8-flash-tiered", {"thinkingLevel": "HIGH"}),
+        ]
+        for raw_model, exp_model, exp_thinking in cases:
+            model, thinking = resolve_model_and_thinking(raw_model, {})
+            self.assertEqual(model, exp_model, f"Failed model resolution for {raw_model}")
+            self.assertEqual(thinking, exp_thinking, f"Failed thinking resolution for {raw_model}")
+
+    def test_gemini_3_8_pro_aliasing(self):
+        model, thinking = resolve_model_and_thinking("gemini-3.8-pro", {})
+        self.assertEqual(model, "gemini-3.8-pro")
+        self.assertIsNone(thinking)
 
 
 class TestSanitizeSchemaForGemini(unittest.TestCase):

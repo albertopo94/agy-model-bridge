@@ -37,12 +37,16 @@ def write_secret_file(path: Path, content: str | bytes, mode: int = 0o600, encod
     flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
     fd = os.open(tmp_path, flags, mode)
     try:
-        mode_str = "wb" if isinstance(content, bytes) else "w"
-        kwargs = {} if isinstance(content, bytes) else {"encoding": encoding}
-        with open(fd, mode_str, closefd=True, **kwargs) as f:
-            f.write(content)
-            f.flush()
-            os.fsync(f.fileno())
+        if isinstance(content, bytes):
+            with open(fd, "wb", closefd=True) as f_bytes:
+                f_bytes.write(content)
+                f_bytes.flush()
+                os.fsync(f_bytes.fileno())
+        else:
+            with open(fd, "w", encoding=encoding, closefd=True) as f_text:
+                f_text.write(content)
+                f_text.flush()
+                os.fsync(f_text.fileno())
         try:
             os.chmod(tmp_path, mode)
         except OSError:

@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   lint:
-    name: Lint (ruff)
+    name: Lint & Typecheck (ruff, mypy)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -22,11 +22,14 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install ruff
-        run: pip install ruff
+      - name: Install dependencies
+        run: pip install ruff mypy
 
       - name: Run ruff check
         run: ruff check bridge/ scripts/ tests/
+
+      - name: Run mypy
+        run: mypy bridge/
 
   test:
     name: Test (Python ${{ matrix.python-version }} on ${{ matrix.os }})

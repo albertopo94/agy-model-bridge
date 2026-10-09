@@ -16,6 +16,7 @@ from bridge.transform import (
     get_thought_signature,
     get_tool_name,
 )
+from bridge.errors import InvalidRequestError
 
 
 class TestAnthropicRequestTranslation(unittest.TestCase):
@@ -41,6 +42,72 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
         self.assertNotIn("thinkingConfig", gen_config)
         self.assertIsNone(tools)
         self.assertIsNone(tool_config)
+
+    def test_anthropic_payload_temperature_invalid_type_raises_error(self):
+        for bad_temp in (True, False, "0.5", [0.5], {"val": 0.5}):
+            payload = {
+                "model": "gemini-2.5-pro",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "temperature": bad_temp,
+            }
+            with self.assertRaises(InvalidRequestError) as ctx:
+                anthropic_to_cloudcode_request(payload, project="test-project")
+            self.assertEqual(str(ctx.exception), "Parameter 'temperature' must be a number")
+
+    def test_anthropic_payload_top_p_invalid_type_raises_error(self):
+        for bad_top_p in (True, False, "0.9", [0.9]):
+            payload = {
+                "model": "gemini-2.5-pro",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "top_p": bad_top_p,
+            }
+            with self.assertRaises(InvalidRequestError) as ctx:
+                anthropic_to_cloudcode_request(payload, project="test-project")
+            self.assertEqual(str(ctx.exception), "Parameter 'top_p' must be a number")
+
+    def test_anthropic_payload_max_tokens_invalid_type_raises_error(self):
+        for bad_max in (True, False, "100", 0, -1, 1.5):
+            payload = {
+                "model": "gemini-2.5-pro",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "max_tokens": bad_max,
+            }
+            with self.assertRaises(InvalidRequestError) as ctx:
+                anthropic_to_cloudcode_request(payload, project="test-project")
+            self.assertEqual(str(ctx.exception), "Parameter 'max_tokens' must be a positive integer")
+
+    def test_anthropic_multimodal_image_block_rejected(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "abc"}},
+                        {"type": "text", "text": "What is this?"},
+                    ],
+                }
+            ],
+        }
+        with self.assertRaises(InvalidRequestError) as ctx:
+            anthropic_to_cloudcode_request(payload, project="test-project")
+        self.assertIn("Multimodal image content is not supported by agy-model-bridge", str(ctx.exception))
+
+    def test_anthropic_content_with_source_block_rejected(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"source": {"type": "base64", "data": "abc"}},
+                    ],
+                }
+            ],
+        }
+        with self.assertRaises(InvalidRequestError) as ctx:
+            anthropic_to_cloudcode_request(payload, project="test-project")
+        self.assertIn("Multimodal image content is not supported by agy-model-bridge", str(ctx.exception))
 
     def test_request_translation_with_tools(self):
         payload = {

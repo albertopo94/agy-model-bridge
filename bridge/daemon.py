@@ -21,7 +21,7 @@ import webbrowser
 try:
     import fcntl
 except ImportError:
-    fcntl = None
+    fcntl = None  # type: ignore[assignment]
 
 from bridge import __version__
 
@@ -494,16 +494,16 @@ def get_daemon_status(
             "auth": status_data.get("auth", {}),
         }
     else:
-        status_data = fetch_status_json(effective_host, effective_port, timeout=0.5)
-        if status_data and status_data.get("service") == "agy-model-bridge":
+        unbound_status = fetch_status_json(effective_host, effective_port, timeout=0.5)
+        if unbound_status and unbound_status.get("service") == "agy-model-bridge":
             return {
                 "running": True,
                 "pid": None,
                 "port": effective_port,
                 "host": effective_host,
                 "url": dashboard_url,
-                "models_count": status_data.get("models_count", 0),
-                "auth": status_data.get("auth", {}),
+                "models_count": unbound_status.get("models_count", 0),
+                "auth": unbound_status.get("auth", {}),
             }
         if pid and not alive:
             remove_pid(pid_file=target_pid_file)

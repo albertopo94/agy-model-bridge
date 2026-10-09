@@ -73,11 +73,8 @@ class StreamEvent:
 
 def check_sse_error(event_dict: dict[str, Any]) -> None:
     """Checks if SSE event contains an error payload and raises appropriate BridgeError."""
-    resp_obj = (
-        event_dict.get("response")
-        if isinstance(event_dict.get("response"), dict)
-        else event_dict
-    )
+    resp = event_dict.get("response")
+    resp_obj: dict[str, Any] = resp if isinstance(resp, dict) else event_dict
     error_obj = resp_obj.get("error")
     if not error_obj:
         return
@@ -123,11 +120,8 @@ def parse_stream_event(
     if check_error:
         check_sse_error(event_dict)
 
-    resp_obj = (
-        event_dict.get("response")
-        if isinstance(event_dict.get("response"), dict)
-        else event_dict
-    )
+    resp = event_dict.get("response")
+    resp_obj: dict[str, Any] = resp if isinstance(resp, dict) else event_dict
 
     finish_reason: str | None = None
 

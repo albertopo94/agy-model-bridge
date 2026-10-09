@@ -11,6 +11,7 @@ from bridge.responses import (
     build_responses_error_response,
 )
 from bridge.transform import get_thought_signature, get_tool_name
+from bridge.errors import InvalidRequestError
 
 
 
@@ -34,6 +35,34 @@ class TestResponsesRequestTranslation(unittest.TestCase):
         self.assertEqual(gen_config["temperature"], 0.2)
         self.assertNotIn("thinkingConfig", gen_config)
         self.assertIsNone(tools)
+
+    def test_responses_payload_temperature_invalid_type_raises_error(self):
+        for bad_temp in (True, False, "0.5", [0.5], {"val": 0.5}):
+            payload = {"model": "gemini-2.5-pro", "input": "Hello", "temperature": bad_temp}
+            with self.assertRaises(InvalidRequestError) as ctx:
+                responses_to_cloudcode_request(payload, project="test-project")
+            self.assertEqual(str(ctx.exception), "Parameter 'temperature' must be a number")
+
+    def test_responses_payload_top_p_invalid_type_raises_error(self):
+        for bad_top_p in (True, False, "0.9", [0.9]):
+            payload = {"model": "gemini-2.5-pro", "input": "Hello", "top_p": bad_top_p}
+            with self.assertRaises(InvalidRequestError) as ctx:
+                responses_to_cloudcode_request(payload, project="test-project")
+            self.assertEqual(str(ctx.exception), "Parameter 'top_p' must be a number")
+
+    def test_responses_payload_max_tokens_invalid_type_raises_error(self):
+        for bad_max in (True, False, "100", 0, -1, 1.5):
+            payload = {"model": "gemini-2.5-pro", "input": "Hello", "max_tokens": bad_max}
+            with self.assertRaises(InvalidRequestError) as ctx:
+                responses_to_cloudcode_request(payload, project="test-project")
+            self.assertEqual(str(ctx.exception), "Parameter 'max_tokens' must be a positive integer")
+
+    def test_responses_payload_max_output_tokens_invalid_type_raises_error(self):
+        for bad_max in (True, False, "100", 0, -5, 2.5):
+            payload = {"model": "gemini-2.5-pro", "input": "Hello", "max_output_tokens": bad_max}
+            with self.assertRaises(InvalidRequestError) as ctx:
+                responses_to_cloudcode_request(payload, project="test-project")
+            self.assertEqual(str(ctx.exception), "Parameter 'max_tokens' must be a positive integer")
 
     def test_input_with_typed_items_and_input_text_blocks(self):
         payload = {

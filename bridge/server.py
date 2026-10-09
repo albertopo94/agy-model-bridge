@@ -25,6 +25,7 @@ from bridge.errors import (
     ModelNotFoundError,
     RateLimitError,
     UpstreamTimeoutError,
+    UpstreamError,
 )
 from bridge.events import parse_stream_event
 from bridge.transform import (
@@ -93,13 +94,18 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
     def _log_structured(
         self,
         status: int,
-        latency_ms: int,
+        latency_ms: int = 0,
         model: str = "",
         usage: dict[str, int] | None = None,
         error: str | None = None,
     ) -> None:
         self._ensure_request_id()
-        parts = [f"[{self.request_id}]", self.command, self.path, f"-> {status}", f"({latency_ms}ms)"]
+        start_t = getattr(self, "start_time", None)
+        if latency_ms == 0 and start_t:
+            latency_ms = int((time.monotonic() - float(start_t)) * 1000)
+        command = getattr(self, "command", "") or "HTTP"
+        path = getattr(self, "path", "") or "/"
+        parts = [f"[{self.request_id}]", command, path, f"-> {status}", f"({latency_ms}ms)"]
         if model:
             parts.append(f"model={model}")
         if usage:
@@ -215,9 +221,14 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
             return 503, "api_error"
         if isinstance(exc, UpstreamTimeoutError):
             return 504, "api_error"
-        return 500, "api_error"
+        if isinstance(exc, UpstreamError):
+            return exc.status_code or 500, "api_error"
+        if isinstance(exc, BridgeError):
+            return 500, "api_error"
+        return 500, "internal_server_error"
 
     def _send_error(self, exc: Exception) -> None:
+        self._ensure_request_id()
         status_code, error_type = self._get_error_details(exc)
         if status_code == 401:
             if hasattr(self, "client") and hasattr(self.client, "token_provider") and hasattr(self.client.token_provider, "invalidate"):
@@ -226,7 +237,13 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                 except Exception:
                     pass
 
-        code, err_payload = build_openai_error_response(status_code, str(exc), error_type)
+        if error_type == "internal_server_error":
+            self._log_structured(status=500, error=str(exc))
+            client_msg = f"Internal server error [{self.request_id}]"
+        else:
+            client_msg = str(exc)
+
+        code, err_payload = build_openai_error_response(status_code, client_msg, error_type)
         self._send_json(code, err_payload)
 
     def do_GET(self) -> None:
@@ -257,9 +274,10 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                 accept_lang = self.headers.get("Accept-Language", "")
                 client_lang = parse_accept_language(accept_lang)
 
-            host = self.server.server_address[0] if hasattr(self.server, "server_address") else "127.0.0.1"
-            port = self.server.server_address[1] if hasattr(self.server, "server_address") else 24980
-            status_data = get_status_data(self.client, self.project, host, port)
+            server_addr = getattr(self.server, "server_address", None)
+            host = server_addr[0] if isinstance(server_addr, tuple) and len(server_addr) > 0 else "127.0.0.1"
+            port = int(server_addr[1]) if isinstance(server_addr, tuple) and len(server_addr) > 1 else 24980
+            status_data = get_status_data(self.client, self.project, str(host), port)
             html_content = render_dashboard(
                 host=status_data["host"],
                 port=status_data["port"],
@@ -279,9 +297,10 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
             return
 
         if path == "/api/status":
-            host = self.server.server_address[0] if hasattr(self.server, "server_address") else "127.0.0.1"
-            port = self.server.server_address[1] if hasattr(self.server, "server_address") else 24980
-            status_data = get_status_data(self.client, self.project, host, port)
+            server_addr = getattr(self.server, "server_address", None)
+            host = server_addr[0] if isinstance(server_addr, tuple) and len(server_addr) > 0 else "127.0.0.1"
+            port = int(server_addr[1]) if isinstance(server_addr, tuple) and len(server_addr) > 1 else 24980
+            status_data = get_status_data(self.client, self.project, str(host), port)
             self._send_json(200, status_data)
             return
 
@@ -446,14 +465,20 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
             self._handle_responses(payload)
 
     def _send_anthropic_error(self, exc: Exception) -> None:
-        status_code, _ = self._get_error_details(exc)
+        self._ensure_request_id()
+        status_code, error_type = self._get_error_details(exc)
         if status_code == 401:
             if hasattr(self, "client") and hasattr(self.client, "token_provider") and hasattr(self.client.token_provider, "invalidate"):
                 try:
                     self.client.token_provider.invalidate()
                 except Exception:
                     pass
-        code, err_payload = build_anthropic_error_response(status_code, str(exc))
+        if error_type == "internal_server_error":
+            self._log_structured(status=500, error=str(exc))
+            client_msg = f"Internal server error [{self.request_id}]"
+        else:
+            client_msg = str(exc)
+        code, err_payload = build_anthropic_error_response(status_code, client_msg)
         self._send_json(code, err_payload)
 
     def _prebuffer_stream(self, stream_gen: Iterator[str]) -> list[str]:
@@ -903,7 +928,7 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                         if thought_sig:
                             cache_thought_signature(call_id=tc_id, signature=thought_sig, name=fc.get("name"), args=args)
                         if fc.get("name") and tc_id:
-                            cache_tool_name(tc_id, fc.get("name"))
+                            cache_tool_name(tc_id, str(fc["name"]))
                         call_dict: dict[str, Any] = {
                             "id": tc_id,
                             "type": "function",
@@ -999,11 +1024,11 @@ def create_server(
 
     server = http.server.ThreadingHTTPServer((host, port), ConfiguredHandler)
     server.daemon_threads = True
-    server.api_key = api_key
-    server.concurrency_semaphore = concurrency_semaphore
-    server.max_concurrency = max_concurrency
-    server.max_retries = max_retries
-    server.initial_retry_delay = initial_retry_delay
+    setattr(server, "api_key", api_key)
+    setattr(server, "concurrency_semaphore", concurrency_semaphore)
+    setattr(server, "max_concurrency", max_concurrency)
+    setattr(server, "max_retries", max_retries)
+    setattr(server, "initial_retry_delay", initial_retry_delay)
     return server
 
 

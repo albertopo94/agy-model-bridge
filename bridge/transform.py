@@ -14,6 +14,7 @@ from bridge.events import (
     check_sse_error as check_sse_error,
     parse_stream_event as parse_stream_event,
 )
+from bridge.errors import InvalidRequestError
 
 DUMMY_THOUGHT_SIGNATURE: str = "context_engineering_is_the_way_to_go"
 _THOUGHT_SIG_CACHE: dict[str, str] = {}
@@ -432,17 +433,56 @@ def build_thinking_config(model: str, payload: dict[str, Any]) -> dict[str, Any]
     if "-low" in m:
         return {"thinkingLevel": "LOW"}
     if "-thinking" in m:
-        b = _default_budget()
-        return {"thinkingBudget": b} if b else None
+        budget_val = _default_budget()
+        return {"thinkingBudget": budget_val} if budget_val else None
 
     return None
+
+
+MODEL_TIER_TABLE: dict[str, tuple[str, str | None]] = {
+    # Default / empty / auto
+    "": ("gemini-3.8-flash-tiered", "HIGH"),
+    "auto": ("gemini-3.8-flash-tiered", "HIGH"),
+    # Gemini 3.8 / flash
+    "gemini-3.8": ("gemini-3.8-flash-tiered", "HIGH"),
+    "gemini-3.8-flash": ("gemini-3.8-flash-tiered", "HIGH"),
+    "gemini-3.8-flash-high": ("gemini-3.8-flash-tiered", "HIGH"),
+    "gemini-3.8-flash-medium": ("gemini-3.8-flash-tiered", "MEDIUM"),
+    "gemini-3.8-flash-low": ("gemini-3.8-flash-tiered", "LOW"),
+    "gemini-3.8-pro": ("gemini-3.8-pro", None),
+    # Standalone flash aliases
+    "flash": ("gemini-3.8-flash-tiered", "HIGH"),
+    "flash-high": ("gemini-3.8-flash-tiered", "HIGH"),
+    "flash-medium": ("gemini-3.8-flash-tiered", "MEDIUM"),
+    "flash-low": ("gemini-3.8-flash-tiered", "LOW"),
+    # Claude 3.7 Sonnet aliases
+    "claude-3-7-sonnet": ("claude-3-7-sonnet", None),
+    "claude-3-7-sonnet-high": ("claude-3-7-sonnet", "HIGH"),
+    "claude-3-7-sonnet-medium": ("claude-3-7-sonnet", "MEDIUM"),
+    "claude-3-7-sonnet-low": ("claude-3-7-sonnet", "LOW"),
+    # Claude 5.5 Sonnet aliases
+    "claude-sonnet-5-5": ("claude-sonnet-5-5", None),
+    "claude-sonnet-5-5-high": ("claude-sonnet-5-5", "HIGH"),
+    "claude-sonnet-5-5-medium": ("claude-sonnet-5-5", "MEDIUM"),
+    "claude-sonnet-5-5-low": ("claude-sonnet-5-5", "LOW"),
+    # Claude 5.5 Opus aliases
+    "claude-opus-5-5": ("claude-opus-5-5", None),
+    "claude-opus-5-5-high": ("claude-opus-5-5", "HIGH"),
+    "claude-opus-5-5-medium": ("claude-opus-5-5", "MEDIUM"),
+    "claude-opus-5-5-low": ("claude-opus-5-5", "LOW"),
+    # Claude 5.5 Haiku aliases
+    "claude-haiku-5-5": ("claude-haiku-5-5", None),
+    "claude-haiku-5-5-high": ("claude-haiku-5-5", "HIGH"),
+    "claude-haiku-5-5-medium": ("claude-haiku-5-5", "MEDIUM"),
+    "claude-haiku-5-5-low": ("claude-haiku-5-5", "LOW"),
+}
 
 
 def resolve_model_and_thinking(
     model: str | None,
     payload: dict[str, Any],
 ) -> tuple[str, dict[str, Any] | None]:
-    """Resolves model name and thinkingConfig applying flash-high/auto aliasing and client overrides.
+    """Resolves model name and thinkingConfig applying model routing table and client overrides.
 
     Args:
         model: Optional model identifier string.
@@ -454,51 +494,9 @@ def resolve_model_and_thinking(
     raw_model = (model or "").strip()
     m = raw_model.lower()
 
-    if not m or m == "auto" or m in ("gemini-3.8", "gemini-3.8-flash", "gemini-3.8-flash-high"):
-        resolved_model = "gemini-3.8-flash-tiered"
-        default_thinking: dict[str, Any] | None = {"thinkingLevel": "HIGH"}
-    elif m == "gemini-3.8-flash-medium":
-        resolved_model = "gemini-3.8-flash-tiered"
-        default_thinking = {"thinkingLevel": "MEDIUM"}
-    elif m == "gemini-3.8-flash-low":
-        resolved_model = "gemini-3.8-flash-tiered"
-        default_thinking = {"thinkingLevel": "LOW"}
-    elif m == "claude-sonnet-5-5-high":
-        resolved_model = "claude-sonnet-5-5"
-        default_thinking = {"thinkingLevel": "HIGH"}
-    elif m == "claude-sonnet-5-5-medium":
-        resolved_model = "claude-sonnet-5-5"
-        default_thinking = {"thinkingLevel": "MEDIUM"}
-    elif m == "claude-sonnet-5-5-low":
-        resolved_model = "claude-sonnet-5-5"
-        default_thinking = {"thinkingLevel": "LOW"}
-    elif m == "claude-sonnet-5-5":
-        resolved_model = "claude-sonnet-5-5"
-        default_thinking = None
-    elif m == "claude-opus-5-5-high":
-        resolved_model = "claude-opus-5-5"
-        default_thinking = {"thinkingLevel": "HIGH"}
-    elif m == "claude-opus-5-5-medium":
-        resolved_model = "claude-opus-5-5"
-        default_thinking = {"thinkingLevel": "MEDIUM"}
-    elif m == "claude-opus-5-5-low":
-        resolved_model = "claude-opus-5-5"
-        default_thinking = {"thinkingLevel": "LOW"}
-    elif m == "claude-opus-5-5":
-        resolved_model = "claude-opus-5-5"
-        default_thinking = None
-    elif m == "claude-haiku-5-5-high":
-        resolved_model = "claude-haiku-5-5"
-        default_thinking = {"thinkingLevel": "HIGH"}
-    elif m == "claude-haiku-5-5-medium":
-        resolved_model = "claude-haiku-5-5"
-        default_thinking = {"thinkingLevel": "MEDIUM"}
-    elif m == "claude-haiku-5-5-low":
-        resolved_model = "claude-haiku-5-5"
-        default_thinking = {"thinkingLevel": "LOW"}
-    elif m == "claude-haiku-5-5":
-        resolved_model = "claude-haiku-5-5"
-        default_thinking = None
+    if m in MODEL_TIER_TABLE:
+        resolved_model, tier = MODEL_TIER_TABLE[m]
+        default_thinking: dict[str, Any] | None = {"thinkingLevel": tier} if tier else None
     else:
         resolved_model = raw_model
         default_thinking = None
@@ -523,6 +521,58 @@ def resolve_model_and_thinking(
     return resolved_model, thinking_cfg
 
 
+def validate_generation_parameters(payload: dict[str, Any]) -> None:
+    """Validates generation parameters in payload according to API specifications.
+
+    Raises:
+        InvalidRequestError: If temperature, top_p, or max_tokens have invalid types or values.
+    """
+    if "temperature" in payload and payload["temperature"] is not None:
+        val = payload["temperature"]
+        if isinstance(val, bool) or not isinstance(val, (int, float)):
+            raise InvalidRequestError("Parameter 'temperature' must be a number")
+
+    if "top_p" in payload and payload["top_p"] is not None:
+        val = payload["top_p"]
+        if isinstance(val, bool) or not isinstance(val, (int, float)):
+            raise InvalidRequestError("Parameter 'top_p' must be a number")
+
+    for key in ("max_tokens", "max_output_tokens", "max_completion_tokens"):
+        if key in payload and payload[key] is not None:
+            val = payload[key]
+            if isinstance(val, bool) or not isinstance(val, int) or val <= 0:
+                raise InvalidRequestError("Parameter 'max_tokens' must be a positive integer")
+
+
+def _extract_text_and_parts_from_content(raw_content: Any) -> str:
+    """Extracts text content, rejecting multimodal image content with 400 InvalidRequestError."""
+    if isinstance(raw_content, list):
+        parts_str: list[str] = []
+        for item in raw_content:
+            if isinstance(item, dict):
+                item_type = item.get("type")
+                if item_type in ("image_url", "image") or "image_url" in item:
+                    raise InvalidRequestError("Multimodal image content is not supported by agy-model-bridge")
+                if item_type == "text" or "text" in item:
+                    parts_str.append(str(item.get("text") or ""))
+            elif isinstance(item, str):
+                parts_str.append(item)
+        return "".join(parts_str)
+    elif isinstance(raw_content, dict):
+        item_type = raw_content.get("type")
+        if item_type in ("image_url", "image") or "image_url" in raw_content:
+            raise InvalidRequestError("Multimodal image content is not supported by agy-model-bridge")
+        if item_type == "text" or "text" in raw_content:
+            return str(raw_content.get("text") or "")
+        return ""
+    elif raw_content is None:
+        return ""
+    elif isinstance(raw_content, str):
+        return raw_content
+    else:
+        return str(raw_content)
+
+
 def openai_to_cloudcode_request(
     openai_payload: dict[str, Any], project: str
 ) -> tuple[
@@ -544,6 +594,7 @@ def openai_to_cloudcode_request(
     Raises:
         ValueError: If model or messages are missing/invalid.
     """
+    validate_generation_parameters(openai_payload)
     raw_model = openai_payload.get("model")
     if raw_model is not None and not isinstance(raw_model, str):
         raise ValueError("Invalid 'model' parameter: must be a string")
@@ -562,25 +613,13 @@ def openai_to_cloudcode_request(
             raise ValueError("Each message must be a dictionary")
         role = msg.get("role")
         raw_content = msg.get("content")
-        if isinstance(raw_content, list):
-            parts_str = []
-            for item in raw_content:
-                if isinstance(item, dict) and (item.get("type") == "text" or "text" in item):
-                    parts_str.append(str(item.get("text") or ""))
-                elif isinstance(item, str):
-                    parts_str.append(item)
-            content = "".join(parts_str)
-        elif raw_content is None:
-            content = ""
-        elif isinstance(raw_content, str):
-            content = raw_content
-        else:
-            content = str(raw_content)
+        content = _extract_text_and_parts_from_content(raw_content)
 
         if role in ("system", "developer"):
             system_texts.append(content)
             continue
-        elif role == "user":
+        turn_parts: list[dict[str, Any]]
+        if role == "user":
             turn_role = "user"
             part_text = content if content and content.strip() else " "
             turn_parts = [{"text": part_text}]
@@ -595,7 +634,8 @@ def openai_to_cloudcode_request(
                     if not isinstance(tc, dict):
                         continue
                     call_id = tc.get("id") or ""
-                    fn = tc.get("function") if isinstance(tc.get("function"), dict) else tc
+                    fn_raw = tc.get("function")
+                    fn: dict[str, Any] = fn_raw if isinstance(fn_raw, dict) else tc
                     fn_name = fn.get("name") or "unknown"
                     if call_id:
                         tool_names_by_call_id[call_id] = fn_name
@@ -622,33 +662,34 @@ def openai_to_cloudcode_request(
                         "thoughtSignature": sig,
                         "functionCall": {"name": fn_name, "args": args_dict},
                     })
-            elif msg.get("function_call") and isinstance(msg.get("function_call"), dict):
+            else:
                 fc = msg.get("function_call")
-                fn_name = fc.get("name") or "unknown"
-                call_id = msg.get("name") or ""
-                if call_id:
-                    tool_names_by_call_id[call_id] = fn_name
-                args_raw = fc.get("arguments")
-                if isinstance(args_raw, dict):
-                    args_dict = args_raw
-                elif isinstance(args_raw, str):
-                    try:
-                        args_dict = json.loads(args_raw) if args_raw.strip() else {}
-                        if not isinstance(args_dict, dict):
-                            args_dict = {"raw": args_dict}
-                    except Exception:
-                        args_dict = {"raw": args_raw} if args_raw else {}
-                else:
-                    args_dict = {}
-                sig = (
-                    fc.get("thoughtSignature")
-                    or fc.get("thought_signature")
-                    or get_thought_signature(call_id, fn_name, args_dict)
-                )
-                turn_parts.append({
-                    "thoughtSignature": sig,
-                    "functionCall": {"name": fn_name, "args": args_dict},
-                })
+                if isinstance(fc, dict):
+                    fn_name = fc.get("name") or "unknown"
+                    call_id = msg.get("name") or ""
+                    if call_id:
+                        tool_names_by_call_id[call_id] = fn_name
+                    args_raw = fc.get("arguments")
+                    if isinstance(args_raw, dict):
+                        args_dict = args_raw
+                    elif isinstance(args_raw, str):
+                        try:
+                            args_dict = json.loads(args_raw) if args_raw.strip() else {}
+                            if not isinstance(args_dict, dict):
+                                args_dict = {"raw": args_dict}
+                        except Exception:
+                            args_dict = {"raw": args_raw} if args_raw else {}
+                    else:
+                        args_dict = {}
+                    sig = (
+                        fc.get("thoughtSignature")
+                        or fc.get("thought_signature")
+                        or get_thought_signature(call_id, fn_name, args_dict)
+                    )
+                    turn_parts.append({
+                        "thoughtSignature": sig,
+                        "functionCall": {"name": fn_name, "args": args_dict},
+                    })
             if not turn_parts:
                 part_text = content if content and content.strip() else " "
                 turn_parts = [{"text": part_text}]
@@ -734,15 +775,18 @@ def openai_to_cloudcode_request(
         for t in raw_tools:
             if not isinstance(t, dict):
                 continue
-            fn = t.get("function") if isinstance(t.get("function"), dict) else t
-            name = fn.get("name")
+            fn_obj = t.get("function")
+            fn_dict: dict[str, Any] = fn_obj if isinstance(fn_obj, dict) else t
+            if not isinstance(fn_dict, dict):
+                continue
+            name = fn_dict.get("name")
             if not name or not isinstance(name, str):
                 continue
             decl: dict[str, Any] = {"name": name}
-            desc = fn.get("description")
+            desc = fn_dict.get("description")
             if desc is not None:
                 decl["description"] = str(desc)
-            params = fn.get("parameters")
+            params = fn_dict.get("parameters")
             if params is not None and isinstance(params, dict):
                 decl["parameters"] = sanitize_schema_for_gemini(params)
             else:
