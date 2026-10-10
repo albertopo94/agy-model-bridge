@@ -62,6 +62,27 @@ class ClientConfigurator(ABC):
         """Restores the client configuration from a backup or performs surgical removal."""
         pass
 
+    def factory_reset(self, config_path: Path | None = None) -> bool:
+        """Resets the client configuration to pristine factory state.
+
+        If a zero-state/original backup exists, restores from it.
+        Otherwise, performs client-specific surgical clean or unlinking.
+        """
+        target = self.get_config_path(config_path)
+        for b in self.list_backups(target):
+            if b.name.endswith("-original") or "_zero_state" in b.name:
+                return self.restore(config_path=target, backup_path=b)
+            try:
+                if "_zero_state" in b.read_text(encoding="utf-8"):
+                    return self.restore(config_path=target, backup_path=b)
+            except OSError:
+                pass
+        return self._do_factory_reset(target)
+
+    def _do_factory_reset(self, target: Path) -> bool:
+        """Subclass hook for factory reset without backup file."""
+        return self.restore(config_path=target)
+
     def list_backups(self, config_path: Path | None = None) -> list[Path]:
         """Lists historical backup files for this client, sorted by mtime descending."""
         target = self.get_config_path(config_path)

@@ -160,6 +160,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "restore_prompt": "\nEnter a number ({range_str}), press Enter for [1], or 'q' to cancel: ",
         "restore_cancelled": "Operation cancelled.",
         "restore_invalid_choice": "Invalid choice.",
+        "restore_factory_reset_option": "Factory default clean state (Clean Reset)",
+        "restore_factory_reset_success": "Restored {client_name} to factory default clean state.",
         # Uninstall
         "uninstall_confirm_prompt": "Are you sure you want to uninstall AGY Model Bridge? [{choice}]: ",
         "uninstall_cancelled": "Uninstall operation cancelled.",
@@ -257,6 +259,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "restore_prompt": "\nIngrese un número ({range_str}), presione Enter para [1], o 'q' para cancelar: ",
         "restore_cancelled": "Operación cancelada.",
         "restore_invalid_choice": "Opción inválida.",
+        "restore_factory_reset_option": "Estado de fábrica original (Clean Reset)",
+        "restore_factory_reset_success": "Se restauró {client_name} al estado original de fábrica.",
         # Uninstall
         "uninstall_confirm_prompt": "¿Estás seguro de que deseas desinstalar AGY Model Bridge? [{choice}]: ",
         "uninstall_cancelled": "Operación de desinstalación cancelada.",

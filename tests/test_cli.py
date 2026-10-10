@@ -97,14 +97,14 @@ class TestCliDaemonHandlers(unittest.TestCase):
 
 class TestCliLifecycleHandlers(unittest.TestCase):
     def test_handle_update_updated(self):
-        mock_update = MagicMock(return_value={"status": "updated", "version": "0.23.1", "restarted_daemon": True})
+        mock_update = MagicMock(return_value={"status": "updated", "version": "0.24.0", "restarted_daemon": True})
         with patch("sys.stdout", new=io.StringIO()) as out:
             ret = handle_update([], prog_base="agy-bridge", subcmd="update", update_fn=mock_update)
             self.assertEqual(ret, 0)
-            self.assertIn("0.23.1", out.getvalue())
+            self.assertIn("0.24.0", out.getvalue())
 
     def test_handle_update_already_up_to_date(self):
-        mock_update = MagicMock(return_value={"status": "already_up_to_date", "version": "0.23.1"})
+        mock_update = MagicMock(return_value={"status": "already_up_to_date", "version": "0.24.0"})
         with patch("sys.stdout", new=io.StringIO()):
             ret = handle_update([], prog_base="agy-bridge", subcmd="update", update_fn=mock_update)
             self.assertEqual(ret, 0)
@@ -192,6 +192,33 @@ class TestCliSetupHandlers(unittest.TestCase):
         with patch("bridge.cli.setup.list_backups", return_value=[]), patch("sys.stdout", new=io.StringIO()):
             ret = handle_restore_cli("Claude Code", Path("/tmp/settings.json"), [], "agy-bridge restore-claude")
             self.assertEqual(ret, 1)
+
+    def test_handle_restore_cli_factory_reset_flag(self):
+        mock_cfg = MagicMock()
+        mock_cfg.display_name = "Gentle Shell"
+        mock_cfg.name = "gentle-shell"
+        mock_cfg.factory_reset.return_value = True
+        with patch("bridge.cli.setup.list_configurators", return_value=[mock_cfg]), patch("sys.stdout", new=io.StringIO()):
+            ret = handle_restore_cli("Gentle Shell", Path("/tmp/models.json"), ["--factory-reset"], "agy-bridge restore-gentle-shell")
+            self.assertEqual(ret, 0)
+            mock_cfg.factory_reset.assert_called_once()
+
+    def test_handle_restore_cli_interactive_choice_zero(self):
+        mock_cfg = MagicMock()
+        mock_cfg.display_name = "Gentle Shell"
+        mock_cfg.name = "gentle-shell"
+        mock_cfg.factory_reset.return_value = True
+        fake_backup = Path("/tmp/models.json.backup-1")
+        with (
+            patch("bridge.cli.setup.list_configurators", return_value=[mock_cfg]),
+            patch("bridge.cli.setup.list_backups", return_value=[fake_backup]),
+            patch("bridge.cli.setup.describe_backup", return_value="FreeLLMAPI"),
+            patch("builtins.input", return_value="0"),
+            patch("sys.stdout", new=io.StringIO()),
+        ):
+            ret = handle_restore_cli("Gentle Shell", Path("/tmp/models.json"), [], "agy-bridge restore-gentle-shell")
+            self.assertEqual(ret, 0)
+            mock_cfg.factory_reset.assert_called_once()
 
 
 class TestCliServerHandler(unittest.TestCase):

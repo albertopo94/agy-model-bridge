@@ -53,6 +53,13 @@ def handle_restore_cli(
         help="Restore the most recent backup directly without interactive prompt",
     )
     parser.add_argument(
+        "--clean",
+        "--factory-reset",
+        action="store_true",
+        dest="factory_reset",
+        help="Reset configuration to clean factory defaults without prompting",
+    )
+    parser.add_argument(
         "--lang",
         type=str,
         default=None,
@@ -60,6 +67,20 @@ def handle_restore_cli(
     )
     args = parser.parse_args(argv)
     target = args.path
+
+    cfg = None
+    for c in list_configurators():
+        if c.display_name == client_name or c.name == client_name:
+            cfg = c
+            break
+
+    if args.factory_reset:
+        if cfg is not None and cfg.factory_reset(config_path=target):
+            print(t("restore_factory_reset_success", client_name=client_name))
+            print(t("restore_client_ready", client_name=client_name, target=target))
+            return 0
+        print(f"Error: Failed to perform factory reset for {client_name}")
+        return 1
 
     if args.backup is not None:
         try:
@@ -77,11 +98,6 @@ def handle_restore_cli(
 
     backups = list_backups(target)
     if not backups:
-        cfg = None
-        for c in list_configurators():
-            if c.display_name == client_name or c.name == client_name:
-                cfg = c
-                break
         if cfg is not None and target.exists() and target.is_file():
             if cfg.restore(config_path=target):
                 print(t("restore_client_ready", client_name=client_name, target=target))
@@ -107,9 +123,10 @@ def handle_restore_cli(
             print(f"  [{i}] {b.name}{tag_str}  {t('restore_immediate_prev')}")
         else:
             print(f"  [{i}] {b.name}{tag_str}")
+    print(f"  [0] {t('restore_factory_reset_option')}")
 
     count = len(backups)
-    range_str = f"1-{count}" if count > 1 else "1"
+    range_str = f"0-{count}"
     prompt_str = t("restore_prompt", range_str=range_str)
 
     try:
@@ -121,6 +138,14 @@ def handle_restore_cli(
     if choice.lower() in ("q", "quit", "cancel"):
         print(t("restore_cancelled"))
         return 0
+
+    if choice == "0":
+        if cfg is not None and cfg.factory_reset(config_path=target):
+            print("\n" + t("restore_factory_reset_success", client_name=client_name))
+            print(t("restore_client_ready", client_name=client_name, target=target))
+            return 0
+        print(t("restore_invalid_choice"))
+        return 1
 
     if not choice:
         selected_index = 0

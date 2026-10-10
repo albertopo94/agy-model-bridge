@@ -147,17 +147,26 @@ def _cleanup_pi_or_gentle_settings(settings_path: Path) -> None:
                 if isinstance(s_data, dict):
                     modified = False
                     agy_model_ids = {m["id"] for m in DEFAULT_PI_AND_GENTLE_MODELS} | {"gemini-3.8-flash-high", "gemini-3.8"}
-                    if s_data.get("defaultProvider") == "agy":
+                    def_p = s_data.get("defaultProvider")
+                    if def_p in ("agy", "freellmapi") or (isinstance(def_p, str) and def_p.startswith("freellmapi-")):
                         s_data.pop("defaultProvider", None)
                         modified = True
                         def_model = s_data.get("defaultModel")
-                        if def_model in agy_model_ids or (isinstance(def_model, str) and def_model.startswith("agy/")):
+                        if (
+                            def_model in agy_model_ids
+                            or def_model == "auto"
+                            or (isinstance(def_model, str) and (def_model.startswith("agy/") or def_model.startswith("freellmapi/")))
+                        ):
                             s_data.pop("defaultModel", None)
                             modified = True
                     if "enabledModels" in s_data and isinstance(s_data["enabledModels"], list):
                         new_models = [
                             m for m in s_data["enabledModels"]
-                            if not (m in agy_model_ids or (isinstance(m, str) and m.startswith("agy/")))
+                            if not (
+                                m in agy_model_ids
+                                or m == "auto"
+                                or (isinstance(m, str) and (m.startswith("agy/") or m.startswith("freellmapi/")))
+                            )
                         ]
                         if len(new_models) != len(s_data["enabledModels"]):
                             s_data["enabledModels"] = new_models
@@ -362,6 +371,12 @@ class PiConfigurator(ClientConfigurator):
             _cleanup_pi_or_gentle_settings(target.parent / "settings.json")
 
         return restored
+
+    def _do_factory_reset(self, target: Path) -> bool:
+        if target.exists() and target.is_file():
+            target.unlink(missing_ok=True)
+        _cleanup_pi_or_gentle_settings(target.parent / "settings.json")
+        return True
 
 
 class GentleShellConfigurator(ClientConfigurator):
@@ -679,6 +694,12 @@ class GentleShellConfigurator(ClientConfigurator):
             _cleanup_pi_or_gentle_settings(target.parent / "settings.json")
 
         return restored
+
+    def _do_factory_reset(self, target: Path) -> bool:
+        if target.exists() and target.is_file():
+            target.unlink(missing_ok=True)
+        _cleanup_pi_or_gentle_settings(target.parent / "settings.json")
+        return True
 
 
 def setup_pi(

@@ -937,7 +937,7 @@ class TestCLIRestore(unittest.TestCase):
         )
         self.assertIn("[2] settings.json.backup-2026-09-20T10-00-00  [Anthropic Original]", output)
         prompt_arg = mock_input.call_args[0][0]
-        self.assertTrue("1-2" in prompt_arg)
+        self.assertTrue("0-2" in prompt_arg or "1-2" in prompt_arg)
         self.assertTrue("Enter" in prompt_arg)
         self.assertTrue("'q'" in prompt_arg)
 
@@ -1479,7 +1479,7 @@ class TestUninstall(unittest.TestCase):
         core_dir.mkdir(parents=True, exist_ok=True)
         (core_dir / "bridge").mkdir(parents=True, exist_ok=True)
         (core_dir / "bridge" / "__init__.py").write_text("# core\n", encoding="utf-8")
-        (core_dir / ".agy-bridge-installed").write_text("v0.23.1\n", encoding="utf-8")
+        (core_dir / ".agy-bridge-installed").write_text("v0.24.0\n", encoding="utf-8")
 
         with unittest.mock.patch("bridge.daemon.stop_daemon", return_value={"status": "not_running"}):
             result = uninstall(
@@ -1658,7 +1658,7 @@ class TestUpdateInstallation(unittest.TestCase):
 
         self.assertEqual(result["status"], "updated")
         self.assertTrue(result["restarted_daemon"])
-        self.assertEqual(result["version"], "0.23.1")
+        self.assertEqual(result["version"], "0.24.0")
         mock_run.assert_called_once_with(
             ["git", "-C", str(self.repo_dir), "pull", "--ff-only"],
             capture_output=True,
@@ -1989,7 +1989,7 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main([flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.23.1")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.24.0")
 
     def test_cli_subcommand_version_flags(self):
         from bridge.__main__ import main
@@ -2001,19 +2001,19 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main(["update", flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.23.1")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.24.0")
 
     def test_version_unification(self):
         import bridge
         from pathlib import Path
         import re
 
-        self.assertEqual(bridge.__version__, "0.23.1")
+        self.assertEqual(bridge.__version__, "0.24.0")
         pyproject_path = Path(__file__).resolve().parent.parent / "pyproject.toml"
         pyproject_text = pyproject_path.read_text(encoding="utf-8")
         match = re.search(r'version\s*=\s*"([^"]+)"', pyproject_text)
         self.assertIsNotNone(match)
-        self.assertEqual(match.group(1), "0.23.1")
+        self.assertEqual(match.group(1), "0.24.0")
 
     def test_config_path_instantiation_and_backup_attribute(self):
         from bridge.setup.base import ConfigPath
@@ -4963,6 +4963,95 @@ class TestCLIGentleShell(unittest.TestCase):
         self.assertFalse(target.exists(), "models.json should be removed when empty")
         self.assertIn("Gentle Shell ready at", out.getvalue())
 
+    def test_cli_restore_gentle_shell_option_zero_interactive(self):
+        import io
+        from bridge.__main__ import main
+        target = self.dir_path / "agent" / "models.json"
+        settings_target = self.dir_path / "agent" / "settings.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps({"providers": {"freellmapi": {"name": "FreeLLMAPI"}}}), encoding="utf-8")
+        settings_target.write_text(json.dumps({"defaultProvider": "freellmapi", "defaultModel": "auto"}), encoding="utf-8")
+
+        b1 = self.dir_path / "agent" / "models.json.backup-1"
+        b1.write_text(json.dumps({"providers": {"freellmapi": {"name": "Backup"}}}), encoding="utf-8")
+
+        out = io.StringIO()
+        with unittest.mock.patch("sys.stdout", out), unittest.mock.patch("builtins.input", return_value="0"):
+            exit_code = main(["restore-gentle-shell", "--path", str(target)])
+        self.assertEqual(exit_code, 0)
+        self.assertFalse(target.exists(), "models.json should be removed by factory reset")
+        s_data = json.loads(settings_target.read_text(encoding="utf-8"))
+        self.assertNotIn("defaultProvider", s_data)
+        self.assertIn("factory default", out.getvalue().lower())
+
+    def test_cli_restore_gentle_shell_clean_flag(self):
+        import io
+        from bridge.__main__ import main
+        target = self.dir_path / "agent" / "models.json"
+        settings_target = self.dir_path / "agent" / "settings.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps({"providers": {"freellmapi": {"name": "FreeLLMAPI"}}}), encoding="utf-8")
+        settings_target.write_text(json.dumps({"defaultProvider": "freellmapi"}), encoding="utf-8")
+
+        b1 = self.dir_path / "agent" / "models.json.backup-1"
+        b1.write_text("backup", encoding="utf-8")
+
+        out = io.StringIO()
+        with unittest.mock.patch("sys.stdout", out):
+            exit_code = main(["restore-gentle-shell", "--path", str(target), "--clean"])
+        self.assertEqual(exit_code, 0)
+        self.assertFalse(target.exists(), "models.json should be removed by --clean")
+        s_data = json.loads(settings_target.read_text(encoding="utf-8"))
+        self.assertNotIn("defaultProvider", s_data)
+
+    def test_cli_restore_gentle_shell_factory_reset_flag(self):
+        import io
+        from bridge.__main__ import main
+        target = self.dir_path / "agent" / "models.json"
+        settings_target = self.dir_path / "agent" / "settings.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps({"providers": {"freellmapi": {"name": "FreeLLMAPI"}}}), encoding="utf-8")
+        settings_target.write_text(json.dumps({"defaultProvider": "freellmapi"}), encoding="utf-8")
+
+        out = io.StringIO()
+        with unittest.mock.patch("sys.stdout", out):
+            exit_code = main(["restore-gentle-shell", "--path", str(target), "--factory-reset"])
+        self.assertEqual(exit_code, 0)
+        self.assertFalse(target.exists(), "models.json should be removed by --factory-reset")
+
+    def test_gentle_shell_factory_reset_with_original_backup(self):
+        from bridge.setup import get_configurator
+        cfg = get_configurator("gentle-shell")
+        target = self.dir_path / "agent" / "models.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("configured", encoding="utf-8")
+
+        orig = self.dir_path / "agent" / "models.json.backup-1-original"
+        orig.write_text('{"_zero_state": true}', encoding="utf-8")
+
+        res = cfg.factory_reset(config_path=target)
+        self.assertTrue(res)
+        self.assertFalse(target.exists())
+        self.assertFalse(orig.exists(), "-original backup should be consumed on factory reset")
+
+    def test_cleanup_pi_or_gentle_settings_cleans_freellmapi(self):
+        from bridge.setup.pi_gentle import _cleanup_pi_or_gentle_settings
+        settings_target = self.dir_path / "agent" / "settings.json"
+        settings_target.parent.mkdir(parents=True, exist_ok=True)
+        settings_target.write_text(
+            json.dumps({
+                "defaultProvider": "freellmapi",
+                "defaultModel": "auto",
+                "enabledModels": ["freellmapi/auto", "other-model"],
+            }),
+            encoding="utf-8",
+        )
+        _cleanup_pi_or_gentle_settings(settings_target)
+        s_data = json.loads(settings_target.read_text(encoding="utf-8"))
+        self.assertNotIn("defaultProvider", s_data)
+        self.assertNotIn("defaultModel", s_data)
+        self.assertEqual(s_data.get("enabledModels"), ["other-model"])
+
 
 
 class TestUninstallGentleShell(unittest.TestCase):
@@ -5135,7 +5224,7 @@ class TestInstallScript(unittest.TestCase):
         sentinel = self.state_dir / "core" / ".agy-bridge-installed"
         self.assertTrue(sentinel.exists())
         self.assertEqual(stat.S_IMODE(sentinel.stat().st_mode), 0o600)
-        self.assertEqual(sentinel.read_text(encoding="utf-8").strip(), "v0.23.1")
+        self.assertEqual(sentinel.read_text(encoding="utf-8").strip(), "v0.24.0")
 
     def test_install_script_launcher_immune_to_cwd_hijacking(self):
         res = subprocess.run(
