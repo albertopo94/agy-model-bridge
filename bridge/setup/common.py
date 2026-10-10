@@ -167,21 +167,33 @@ def describe_backup(backup_path: Path) -> str:
 
     # Gentle Shell models.json config inspection
     if ".gentle-shell" in str(path):
+        if '"freellmapi"' in content or ":31415" in content or "freellmapi/" in content:
+            if '"agy"' not in content and ":24980" not in content:
+                return "FreeLLMAPI"
         if '"agy"' in content or ":24980" in content or "agy/" in content:
             return "AGY Bridge"
         return "Gentle Shell Original"
 
     # Pi models.json config inspection
     if "models.json" in path.name:
+        if '"freellmapi"' in content or ":31415" in content or "freellmapi/" in content:
+            if '"agy"' not in content and ":24980" not in content:
+                return "FreeLLMAPI"
         if '"agy"' in content or ":24980" in content or "agy/" in content:
             return "AGY Bridge"
         return "Pi Original"
 
-    # Claude Code JSON settings inspection
+    # Claude Code / Gentle Shell / Pi JSON settings inspection
     if "settings.json" in path.name or content.lstrip().startswith("{"):
         try:
             data = json.loads(content)
             if isinstance(data, dict):
+                default_prov = str(data.get("defaultProvider", "")).lower()
+                if default_prov == "freellmapi":
+                    return "FreeLLMAPI"
+                if default_prov == "agy":
+                    return "AGY Bridge"
+
                 env = data.get("env")
                 if not isinstance(env, dict):
                     env = {}
