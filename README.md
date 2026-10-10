@@ -144,8 +144,11 @@ Typing `/model` inside Claude Code displays curated models ready to use:
 6. **Claude Opus 5.5 · High (AGY)** (`claude-opus-5-5-high`)
 7. **Claude Opus 5.5 · Medium (AGY)** (`claude-opus-5-5-medium`)
 8. **Claude Opus 5.5 · Low (AGY)** (`claude-opus-5-5-low`)
-9. **Gemini 2.5 Pro (AGY)** (`gemini-2.5-pro`)
-10. **Gemini 2.5 Flash (AGY)** (`gemini-2.5-flash`)
+9. **Claude Haiku 5.5 · High (AGY)** (`claude-haiku-5-5-high`)
+10. **Claude Haiku 5.5 · Medium (AGY)** (`claude-haiku-5-5-medium`)
+11. **Claude Haiku 5.5 · Low (AGY)** (`claude-haiku-5-5-low`)
+12. **Gemini 2.5 Pro (AGY)** (`gemini-2.5-pro`)
+13. **Gemini 2.5 Flash (AGY)** (`gemini-2.5-flash`)
 
 *(Alternative: set environment variables manually for a single session:)*
 ```bash
@@ -247,17 +250,25 @@ Or switch models inside Pi using `/model agy/gemini-3.8-flash-high`.
 
 ### 🎴 Gentle Shell
 
-Run the automated setup:
+Run the automated setup for AGY Bridge:
 ```bash
 agy-bridge setup-gentle-shell
 ```
+
+Or configure Gentle Shell to use FreeLLMAPI with automatic sandbox isolation and backup tracking:
+```bash
+agy-bridge setup-gentle-shell --provider freellmapi --api-key "<YOUR_KEY>"
+```
+
 This surgically configures `~/.gentle-shell/agent/models.json` with:
 - Provider: `agy` configured with OpenAI completions API
-- Models: `gemini-3.8-flash-high`, `gemini-3.8`, `claude-sonnet-5-5-high/medium/low`, `claude-opus-5-5-high/medium/low`, `gemini-2.5-pro`, `gemini-2.5-flash`
+- Models: `gemini-3.8-flash-high`, `gemini-3.8`, `claude-sonnet-5-5-high/medium/low`, `claude-opus-5-5-high/medium/low`, `claude-haiku-5-5-high/medium/low`, `gemini-2.5-pro`, `gemini-2.5-flash`
 - Base URL: `http://127.0.0.1:24980/v1`
 
 Options:
-- `--set-default`: Also sets `agy` and the default model as defaults in `~/.gentle-shell/agent/settings.json`.
+- `--provider <agy|freellmapi>`: Choose provider to configure (default: `agy`).
+- `--api-key <key>`: Provider API key (required for FreeLLMAPI).
+- `--set-default`: Also sets the provider and model as defaults in `~/.gentle-shell/agent/settings.json`.
 - `--model <name>`: Specify a default model (default: `gemini-3.8-flash-high`).
 
 Once configured, launch Gentle Shell or select an AGY model:
@@ -303,11 +314,14 @@ Backups disponibles para Claude Code:
   [1] settings.json.backup-2026-09-30T14-07-08  [AGY Bridge]  <-- Anterior inmediata
   [2] settings.json.backup-2026-09-30T13-43-12  [FreeLLMAPI]
   [3] settings.json.backup-2026-09-22T17-00-18-257Z  [Anthropic Original]
+  [0] Estado de fábrica original (Clean Reset)
 
-Ingrese un número (1-3), presione Enter para [1], o 'q' para cancelar:
+Ingrese un número (0-3), presione Enter para [1], o 'q' para cancelar:
 ```
 
-*Use `--latest` to restore the immediate previous backup directly without interactive prompts.*
+Flags:
+- `--latest`: Restore the immediate previous backup directly without interactive prompt.
+- `--clean` (or `--factory-reset`): Instantly restore factory clean defaults without prompting.
 
 ---
 
