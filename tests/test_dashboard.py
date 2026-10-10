@@ -779,7 +779,7 @@ class TestDashboardBilingual(unittest.TestCase):
 
         # FreeLLMAPI commands and tooltip
         self.assertIn(
-            html.escape('PI_CODING_AGENT_DIR="$HOME/.gentle-shell/agent" npx freellmapi setup-pi --url http://127.0.0.1:31415'),
+            html.escape('agy-bridge setup-gentle-shell --provider freellmapi --api-key "<YOUR_KEY>"'),
             html_en,
         )
         self.assertIn("Requires FreeLLMAPI gateway running on http://127.0.0.1:31415", html_en)

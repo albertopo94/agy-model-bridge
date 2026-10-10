@@ -5,6 +5,8 @@ from pathlib import Path
 import unittest
 from unittest.mock import MagicMock, patch
 
+import tests  # noqa: F401
+
 from bridge.cli.daemon import (
     handle_dashboard,
     handle_start,
@@ -95,14 +97,14 @@ class TestCliDaemonHandlers(unittest.TestCase):
 
 class TestCliLifecycleHandlers(unittest.TestCase):
     def test_handle_update_updated(self):
-        mock_update = MagicMock(return_value={"status": "updated", "version": "0.22.0", "restarted_daemon": True})
+        mock_update = MagicMock(return_value={"status": "updated", "version": "0.23.0", "restarted_daemon": True})
         with patch("sys.stdout", new=io.StringIO()) as out:
             ret = handle_update([], prog_base="agy-bridge", subcmd="update", update_fn=mock_update)
             self.assertEqual(ret, 0)
-            self.assertIn("0.22.0", out.getvalue())
+            self.assertIn("0.23.0", out.getvalue())
 
     def test_handle_update_already_up_to_date(self):
-        mock_update = MagicMock(return_value={"status": "already_up_to_date", "version": "0.22.0"})
+        mock_update = MagicMock(return_value={"status": "already_up_to_date", "version": "0.23.0"})
         with patch("sys.stdout", new=io.StringIO()):
             ret = handle_update([], prog_base="agy-bridge", subcmd="update", update_fn=mock_update)
             self.assertEqual(ret, 0)

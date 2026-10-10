@@ -355,7 +355,7 @@ curl -fsSL https://raw.githubusercontent.com/albertopo94/agy-model-bridge/main/u
 | `agy-bridge setup-cursor` | Setup guide for Cursor AI editor |
 | `agy-bridge setup-pi` | Surgically configures Pi Coding Agent (`~/.pi/agent/models.json`) |
 | `agy-bridge restore-pi` | Interactively restores a Pi configuration backup |
-| `agy-bridge setup-gentle-shell` | Surgically configures Gentle Shell (`~/.gentle-shell/agent/models.json`) |
+| `agy-bridge setup-gentle-shell` | Surgically configures Gentle Shell (`~/.gentle-shell/agent/models.json`; supports `--provider freellmapi --api-key`) |
 | `agy-bridge restore-gentle-shell` | Interactively restores a Gentle Shell configuration backup |
 | `agy-bridge setup-hermes` | Surgically configures Hermes Agent (`~/.hermes/config.yaml`) |
 | `agy-bridge restore-hermes` | Interactively restores a Hermes Agent configuration backup |
@@ -373,7 +373,7 @@ Execute the complete test suite:
 python3 -m unittest discover -s tests -v
 ```
 
-All 944 tests run in ~3-4 seconds locally with zero external dependencies and zero network access.
+All 956 tests run in ~3-4 seconds locally with zero external dependencies and zero network access.
 
 ### End-to-End Smoke Test
 

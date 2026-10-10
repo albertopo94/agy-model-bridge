@@ -25,11 +25,34 @@ except ImportError:
 
 from bridge import __version__
 
-DEFAULT_DAEMON_DIR = Path(os.environ.get("AGY_BRIDGE_STATE_DIR", Path.home() / ".agy-bridge"))
-DEFAULT_PID_FILE = DEFAULT_DAEMON_DIR / "bridge.pid"
-DEFAULT_INFO_FILE = DEFAULT_DAEMON_DIR / "bridge.json"
-DEFAULT_LOG_FILE = DEFAULT_DAEMON_DIR / "bridge.log"
-DEFAULT_LOCK_FILE = DEFAULT_DAEMON_DIR / "bridge.lock"
+def get_default_daemon_dir() -> Path:
+    state_dir = os.environ.get("AGY_BRIDGE_STATE_DIR")
+    if state_dir:
+        return Path(state_dir)
+    return Path.home() / ".agy-bridge"
+
+
+def get_default_pid_file() -> Path:
+    return get_default_daemon_dir() / "bridge.pid"
+
+
+def get_default_info_file() -> Path:
+    return get_default_daemon_dir() / "bridge.json"
+
+
+def get_default_log_file() -> Path:
+    return get_default_daemon_dir() / "bridge.log"
+
+
+def get_default_lock_file() -> Path:
+    return get_default_daemon_dir() / "bridge.lock"
+
+
+DEFAULT_DAEMON_DIR = get_default_daemon_dir()
+DEFAULT_PID_FILE = get_default_pid_file()
+DEFAULT_INFO_FILE = get_default_info_file()
+DEFAULT_LOG_FILE = get_default_log_file()
+DEFAULT_LOCK_FILE = get_default_lock_file()
 
 
 def is_pid_alive(pid: int | None) -> bool:
@@ -48,7 +71,7 @@ def is_pid_alive(pid: int | None) -> bool:
 
 def write_pid(pid: int, pid_file: Path | None = None) -> None:
     """Writes the process PID atomically to the PID file with 0o600 permissions."""
-    target = Path(pid_file) if pid_file is not None else DEFAULT_PID_FILE
+    target = Path(pid_file) if pid_file is not None else get_default_pid_file()
     parent = target.parent
     if not parent.exists():
         parent.mkdir(parents=True, exist_ok=True)
@@ -75,7 +98,7 @@ def write_pid(pid: int, pid_file: Path | None = None) -> None:
 
 def read_pid(pid_file: Path | None = None) -> int | None:
     """Reads and parses the PID from the PID file. Returns None if invalid or missing."""
-    target = Path(pid_file) if pid_file is not None else DEFAULT_PID_FILE
+    target = Path(pid_file) if pid_file is not None else get_default_pid_file()
     if not target.exists() or not target.is_file():
         return None
     try:
@@ -87,7 +110,7 @@ def read_pid(pid_file: Path | None = None) -> int | None:
 
 def remove_pid(pid_file: Path | None = None) -> None:
     """Removes the PID file if it exists."""
-    target = Path(pid_file) if pid_file is not None else DEFAULT_PID_FILE
+    target = Path(pid_file) if pid_file is not None else get_default_pid_file()
     try:
         target.unlink()
     except FileNotFoundError:
@@ -98,7 +121,7 @@ def remove_pid(pid_file: Path | None = None) -> None:
 
 def write_daemon_info(info: dict[str, Any], info_file: Path | None = None) -> None:
     """Writes the daemon descriptor JSON atomically with 0o600 permissions."""
-    target = Path(info_file) if info_file is not None else DEFAULT_INFO_FILE
+    target = Path(info_file) if info_file is not None else get_default_info_file()
     parent = target.parent
     if not parent.exists():
         parent.mkdir(parents=True, exist_ok=True)
@@ -126,7 +149,7 @@ def write_daemon_info(info: dict[str, Any], info_file: Path | None = None) -> No
 
 def read_daemon_info(info_file: Path | None = None) -> dict[str, Any] | None:
     """Reads and parses daemon info from bridge.json. Returns None if invalid or missing."""
-    target = Path(info_file) if info_file is not None else DEFAULT_INFO_FILE
+    target = Path(info_file) if info_file is not None else get_default_info_file()
     if not target.exists() or not target.is_file():
         return None
     try:
@@ -139,7 +162,7 @@ def read_daemon_info(info_file: Path | None = None) -> dict[str, Any] | None:
 
 def remove_daemon_info(info_file: Path | None = None) -> None:
     """Removes the daemon info JSON file if it exists."""
-    target = Path(info_file) if info_file is not None else DEFAULT_INFO_FILE
+    target = Path(info_file) if info_file is not None else get_default_info_file()
     try:
         target.unlink()
     except FileNotFoundError:
@@ -251,9 +274,9 @@ def start_daemon(
             ),
         }
 
-    target_pid_file = Path(pid_file) if pid_file is not None else DEFAULT_PID_FILE
-    target_info_file = Path(info_file) if info_file is not None else DEFAULT_INFO_FILE
-    target_log_file = Path(log_file) if log_file is not None else DEFAULT_LOG_FILE
+    target_pid_file = Path(pid_file) if pid_file is not None else get_default_pid_file()
+    target_info_file = Path(info_file) if info_file is not None else get_default_info_file()
+    target_log_file = Path(log_file) if log_file is not None else get_default_log_file()
     if lock_file is not None:
         target_lock_file = Path(lock_file)
     else:
@@ -410,8 +433,8 @@ def stop_daemon(
     timeout: float = 5.0,
 ) -> dict[str, Any]:
     """Gracefully terminates the background daemon process."""
-    target_pid_file = Path(pid_file) if pid_file is not None else DEFAULT_PID_FILE
-    target_info_file = Path(info_file) if info_file is not None else DEFAULT_INFO_FILE
+    target_pid_file = Path(pid_file) if pid_file is not None else get_default_pid_file()
+    target_info_file = Path(info_file) if info_file is not None else get_default_info_file()
     pid = read_pid(pid_file=target_pid_file)
 
     if not pid or not is_pid_alive(pid):
@@ -472,8 +495,8 @@ def get_daemon_status(
     info_file: Path | None = None,
 ) -> dict[str, Any]:
     """Returns active daemon runtime status."""
-    target_pid_file = Path(pid_file) if pid_file is not None else DEFAULT_PID_FILE
-    target_info_file = Path(info_file) if info_file is not None else DEFAULT_INFO_FILE
+    target_pid_file = Path(pid_file) if pid_file is not None else get_default_pid_file()
+    target_info_file = Path(info_file) if info_file is not None else get_default_info_file()
     pid = read_pid(pid_file=target_pid_file)
     daemon_info = read_daemon_info(info_file=target_info_file)
 

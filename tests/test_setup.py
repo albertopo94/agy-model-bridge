@@ -9,6 +9,8 @@ import unittest
 import unittest.mock
 from pathlib import Path
 
+import tests  # noqa: F401
+
 from bridge.setup import (
     BACKUP_TIMESTAMP_REGEX,
     CLIENT_CONFIGURATORS,
@@ -1477,7 +1479,7 @@ class TestUninstall(unittest.TestCase):
         core_dir.mkdir(parents=True, exist_ok=True)
         (core_dir / "bridge").mkdir(parents=True, exist_ok=True)
         (core_dir / "bridge" / "__init__.py").write_text("# core\n", encoding="utf-8")
-        (core_dir / ".agy-bridge-installed").write_text("v0.22.0\n", encoding="utf-8")
+        (core_dir / ".agy-bridge-installed").write_text("v0.23.0\n", encoding="utf-8")
 
         with unittest.mock.patch("bridge.daemon.stop_daemon", return_value={"status": "not_running"}):
             result = uninstall(
@@ -1619,8 +1621,16 @@ class TestUpdateInstallation(unittest.TestCase):
         self.repo_dir = Path(self.temp_dir.name) / "core"
         self.repo_dir.mkdir(parents=True)
         (self.repo_dir / ".git").mkdir()
+        self.state_dir = Path(self.temp_dir.name) / "state"
+        self.state_dir.mkdir(parents=True)
+        self._orig_state_dir = os.environ.get("AGY_BRIDGE_STATE_DIR")
+        os.environ["AGY_BRIDGE_STATE_DIR"] = str(self.state_dir)
 
     def tearDown(self):
+        if self._orig_state_dir is not None:
+            os.environ["AGY_BRIDGE_STATE_DIR"] = self._orig_state_dir
+        else:
+            os.environ.pop("AGY_BRIDGE_STATE_DIR", None)
         self.temp_dir.cleanup()
 
     @unittest.mock.patch("bridge.setup.subprocess.run")
@@ -1648,7 +1658,7 @@ class TestUpdateInstallation(unittest.TestCase):
 
         self.assertEqual(result["status"], "updated")
         self.assertTrue(result["restarted_daemon"])
-        self.assertEqual(result["version"], "0.22.0")
+        self.assertEqual(result["version"], "0.23.0")
         mock_run.assert_called_once_with(
             ["git", "-C", str(self.repo_dir), "pull", "--ff-only"],
             capture_output=True,
@@ -1746,6 +1756,45 @@ class TestUpdateInstallation(unittest.TestCase):
         self.assertFalse(result["restarted_daemon"])
         mock_stop.assert_not_called()
 
+    @unittest.mock.patch("bridge.setup.subprocess.run")
+    @unittest.mock.patch("bridge.daemon.start_daemon")
+    @unittest.mock.patch("bridge.daemon.stop_daemon")
+    @unittest.mock.patch("bridge.daemon.read_daemon_info")
+    @unittest.mock.patch("bridge.daemon.fetch_status_json")
+    @unittest.mock.patch("bridge.daemon.is_pid_alive")
+    @unittest.mock.patch("bridge.daemon.read_pid")
+    def test_update_already_up_to_date_restarts_daemon_when_running_version_outdated(
+        self, mock_read_pid, mock_is_alive, mock_fetch_status, mock_read_info, mock_stop, mock_start, mock_run
+    ):
+        mock_run.return_value = unittest.mock.MagicMock(
+            returncode=0,
+            stdout="Already up to date.\n",
+            stderr="",
+        )
+        mock_read_pid.return_value = 5555
+        mock_is_alive.return_value = True
+        mock_read_info.return_value = {"pid": 5555, "host": "127.0.0.1", "port": 24980}
+        mock_fetch_status.return_value = {"version": "0.21.3"}
+        mock_stop.return_value = {"status": "stopped", "pid": 5555}
+        mock_start.return_value = {"status": "started", "pid": 5556}
+
+        result = update_installation(
+            core_dir=self.repo_dir,
+            restart_daemon_if_running=True,
+        )
+
+        self.assertEqual(result["status"], "already_up_to_date")
+        self.assertTrue(result["restarted_daemon"])
+        mock_stop.assert_called_once()
+        mock_start.assert_called_once_with(
+            no_open=True,
+            host="127.0.0.1",
+            port=24980,
+            project=None,
+            base_url=None,
+            no_auth=False,
+        )
+
     def test_update_nonexistent_or_non_git_directory(self):
         non_git_dir = Path(self.temp_dir.name) / "not_a_repo"
         non_git_dir.mkdir()
@@ -1797,8 +1846,11 @@ class TestUpdateInstallation(unittest.TestCase):
         core_dir = fake_home / ".agy-bridge" / "core"
         (core_dir / ".git").mkdir(parents=True)
 
-        with unittest.mock.patch("pathlib.Path.home", return_value=fake_home):
-            result = update_installation(core_dir=None)
+        env_copy = os.environ.copy()
+        env_copy.pop("AGY_BRIDGE_STATE_DIR", None)
+        with unittest.mock.patch.dict(os.environ, env_copy, clear=True):
+            with unittest.mock.patch("pathlib.Path.home", return_value=fake_home):
+                result = update_installation(core_dir=None)
 
         self.assertEqual(result["status"], "already_up_to_date")
         mock_run.assert_called_once_with(
@@ -1937,7 +1989,7 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main([flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.22.0")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.23.0")
 
     def test_cli_subcommand_version_flags(self):
         from bridge.__main__ import main
@@ -1949,19 +2001,19 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main(["update", flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.22.0")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.23.0")
 
     def test_version_unification(self):
         import bridge
         from pathlib import Path
         import re
 
-        self.assertEqual(bridge.__version__, "0.22.0")
+        self.assertEqual(bridge.__version__, "0.23.0")
         pyproject_path = Path(__file__).resolve().parent.parent / "pyproject.toml"
         pyproject_text = pyproject_path.read_text(encoding="utf-8")
         match = re.search(r'version\s*=\s*"([^"]+)"', pyproject_text)
         self.assertIsNotNone(match)
-        self.assertEqual(match.group(1), "0.22.0")
+        self.assertEqual(match.group(1), "0.23.0")
 
     def test_config_path_instantiation_and_backup_attribute(self):
         from bridge.setup.base import ConfigPath
@@ -4648,6 +4700,85 @@ class TestGentleShellConfigurator(unittest.TestCase):
         self.assertTrue(success)
         self.assertFalse(target.exists())
 
+    def test_setup_freellmapi_missing_api_key_raises_value_error(self):
+        target = self.dir_path / "agent" / "models.json"
+        with self.assertRaises(ValueError):
+            self.configurator.setup(config_path=target, provider="freellmapi")
+
+    def test_setup_freellmapi_creates_backups_and_invokes_npx(self):
+        target = self.dir_path / "agent" / "models.json"
+        settings_target = self.dir_path / "agent" / "settings.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps({"providers": {"custom": {}}}), encoding="utf-8")
+        settings_target.write_text(json.dumps({"theme": "dark"}), encoding="utf-8")
+
+        mock_runner = unittest.mock.MagicMock()
+        mock_runner.return_value = unittest.mock.MagicMock(returncode=0, stdout="Updated\n", stderr="")
+
+        res = self.configurator.setup(
+            config_path=target,
+            provider="freellmapi",
+            api_key="freellm-secret-key",
+            runner=mock_runner,
+        )
+
+        self.assertEqual(res, target)
+        self.assertIsNotNone(res.backup_path)
+        self.assertTrue(res.backup_path.exists())
+        self.assertIn("custom", res.backup_path.read_text(encoding="utf-8"))
+
+        settings_backups = list(settings_target.parent.glob("settings.json.backup-*"))
+        self.assertEqual(len(settings_backups), 1)
+        self.assertIn("dark", settings_backups[0].read_text(encoding="utf-8"))
+
+        mock_runner.assert_called_once()
+        args, kwargs = mock_runner.call_args
+        self.assertEqual(
+            args[0],
+            ["npx", "freellmapi", "setup-pi", "--url", "http://127.0.0.1:31415", "--api-key", "freellm-secret-key"],
+        )
+        self.assertEqual(kwargs["env"]["PI_CODING_AGENT_DIR"], str(target.parent))
+
+    def test_setup_freellmapi_zero_state_creates_zero_state_backups(self):
+        target = self.dir_path / "agent" / "models.json"
+        mock_runner = unittest.mock.MagicMock()
+        mock_runner.return_value = unittest.mock.MagicMock(returncode=0, stdout="Updated\n", stderr="")
+
+        res = self.configurator.setup(
+            config_path=target,
+            provider="freellmapi",
+            api_key="freellm-secret-key",
+            runner=mock_runner,
+        )
+
+        self.assertEqual(res, target)
+        self.assertIsNotNone(res.backup_path)
+        self.assertTrue(res.backup_path.exists())
+        self.assertIn("_zero_state", res.backup_path.read_text(encoding="utf-8"))
+
+    def test_restore_freellmapi_auto_detects_provider_without_flag(self):
+        target = self.dir_path / "agent" / "models.json"
+        settings_target = self.dir_path / "agent" / "settings.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps({"providers": {"freellmapi": {"name": "FreeLLMAPI"}}}), encoding="utf-8")
+        settings_target.write_text(
+            json.dumps({"defaultProvider": "freellmapi", "defaultModel": "auto"}),
+            encoding="utf-8",
+        )
+        # Create FreeLLMAPI style backup of settings.json
+        b_settings = settings_target.parent / "settings.json.backup-2026-10-10T08-09-17-521Z"
+        b_settings.write_text(json.dumps({"theme": "original-theme"}), encoding="utf-8")
+
+        # Call restore without specifying provider="freellmapi"
+        success = self.configurator.restore(config_path=target)
+        self.assertTrue(success)
+        self.assertFalse(target.exists(), "models.json should be removed when empty")
+        # settings.json should be restored from backup
+        s_data = json.loads(settings_target.read_text(encoding="utf-8"))
+        self.assertEqual(s_data.get("theme"), "original-theme")
+        self.assertNotIn("defaultProvider", s_data)
+
+
 
 class TestCLIGentleShell(unittest.TestCase):
     def setUp(self):
@@ -4778,6 +4909,52 @@ class TestCLIGentleShell(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertFalse(target.exists())
         self.assertFalse(res.backup_path.exists())
+
+    def test_cli_setup_gentle_shell_freellmapi_requires_api_key(self):
+        import io
+        from bridge.__main__ import main
+        target = self.dir_path / "agent" / "models.json"
+        out = io.StringIO()
+        with unittest.mock.patch("sys.stdout", out):
+            exit_code = main(["setup-gentle-shell", "--path", str(target), "--provider", "freellmapi"])
+        self.assertEqual(exit_code, 1)
+        self.assertIn("--api-key", out.getvalue())
+
+    def test_cli_setup_gentle_shell_freellmapi_success(self):
+        import io
+        from bridge.__main__ import main
+        target = self.dir_path / "agent" / "models.json"
+        out = io.StringIO()
+
+        with unittest.mock.patch("subprocess.run") as mock_run:
+            mock_run.return_value = unittest.mock.MagicMock(returncode=0, stdout="Updated\n", stderr="")
+            with unittest.mock.patch("sys.stdout", out):
+                exit_code = main([
+                    "setup-gentle-shell",
+                    "--path", str(target),
+                    "--provider", "freellmapi",
+                    "--api-key", "my-test-key",
+                ])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Backup: ", out.getvalue())
+        self.assertIn(f"Gentle Shell configured successfully at {target}", out.getvalue())
+
+    def test_cli_restore_gentle_shell_without_backup_runs_surgical_clean_when_target_exists(self):
+        import io
+        from bridge.__main__ import main
+        target = self.dir_path / "agent" / "models.json"
+        settings_target = self.dir_path / "agent" / "settings.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps({"providers": {"freellmapi": {"name": "FreeLLMAPI"}}}), encoding="utf-8")
+        settings_target.write_text(json.dumps({"defaultProvider": "freellmapi"}), encoding="utf-8")
+
+        out = io.StringIO()
+        with unittest.mock.patch("sys.stdout", out):
+            exit_code = main(["restore-gentle-shell", "--path", str(target)])
+        self.assertEqual(exit_code, 0)
+        self.assertFalse(target.exists(), "models.json should be removed when empty")
+        self.assertIn("Gentle Shell ready at", out.getvalue())
+
 
 
 class TestUninstallGentleShell(unittest.TestCase):
@@ -4950,7 +5127,7 @@ class TestInstallScript(unittest.TestCase):
         sentinel = self.state_dir / "core" / ".agy-bridge-installed"
         self.assertTrue(sentinel.exists())
         self.assertEqual(stat.S_IMODE(sentinel.stat().st_mode), 0o600)
-        self.assertEqual(sentinel.read_text(encoding="utf-8").strip(), "v0.22.0")
+        self.assertEqual(sentinel.read_text(encoding="utf-8").strip(), "v0.23.0")
 
     def test_install_script_launcher_immune_to_cwd_hijacking(self):
         res = subprocess.run(

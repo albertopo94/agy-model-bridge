@@ -321,29 +321,40 @@ def update_installation(
             "version": _get_installed_version(target_dir),
         }
 
-    stdout_lower = res.stdout.lower()
-    if "already up to date" in stdout_lower or "already up-to-date" in stdout_lower:
-        return {
-            "status": "already_up_to_date",
-            "message": t("update_up_to_date"),
-            "restarted_daemon": False,
-            "version": _get_installed_version(target_dir),
-        }
-
+    new_ver = _get_installed_version(target_dir)
     installed_marker = target_dir / ".agy-bridge-installed"
     if installed_marker.is_file():
-        new_ver = _get_installed_version(target_dir)
         try:
             from bridge.security import write_secret_file
             write_secret_file(installed_marker, f"{new_ver}\n", mode=0o600)
         except OSError as err:
             sys.stderr.write(f"Warning: could not update marker file: {err}\n")
 
+    stdout_lower = res.stdout.lower()
+    is_up_to_date = "already up to date" in stdout_lower or "already up-to-date" in stdout_lower
+
+    pid = bridge.daemon.read_pid()
+    running_daemon_outdated = False
+    if pid is not None and bridge.daemon.is_pid_alive(pid):
+        info = bridge.daemon.read_daemon_info()
+        eff_host = info.get("host", "127.0.0.1") if info else "127.0.0.1"
+        eff_port = info.get("port", 24980) if info else 24980
+        status_data = bridge.daemon.fetch_status_json(eff_host, eff_port, timeout=1.0) or {}
+        running_ver = status_data.get("version")
+        if running_ver and running_ver != new_ver:
+            running_daemon_outdated = True
+
+    if is_up_to_date and not (restart_daemon_if_running and running_daemon_outdated):
+        return {
+            "status": "already_up_to_date",
+            "message": t("update_up_to_date"),
+            "restarted_daemon": False,
+            "version": new_ver,
+        }
+
     restarted_daemon = False
     if restart_daemon_if_running:
-        pid = bridge.daemon.read_pid()
         if pid is not None and bridge.daemon.is_pid_alive(pid):
-            info = bridge.daemon.read_daemon_info()
             bridge.daemon.stop_daemon()
             if info:
                 start_res = bridge.daemon.start_daemon(
@@ -360,8 +371,8 @@ def update_installation(
                 restarted_daemon = True
 
     return {
-        "status": "updated",
-        "message": t("update_completed"),
+        "status": "already_up_to_date" if is_up_to_date else "updated",
+        "message": t("update_up_to_date") if is_up_to_date else t("update_completed"),
         "restarted_daemon": restarted_daemon,
-        "version": _get_installed_version(target_dir),
+        "version": new_ver,
     }

@@ -2,6 +2,8 @@
 
 import json
 import unittest
+
+import tests  # noqa: F401
 from bridge.anthropic import (
     AnthropicProtocolAdapter,
     _extract_event_thought_signature,

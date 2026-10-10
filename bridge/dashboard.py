@@ -333,7 +333,7 @@ CLIENT_CARDS: list[dict[str, Any]] = [
                 "label_es": "FreeLLMAPI",
                 "warning_tip_en": "Requires FreeLLMAPI gateway running on http://127.0.0.1:31415",
                 "warning_tip_es": "Requiere el gateway de FreeLLMAPI corriendo en http://127.0.0.1:31415",
-                "auto_cmd": lambda addr: 'PI_CODING_AGENT_DIR="$HOME/.gentle-shell/agent" npx freellmapi setup-pi --url http://127.0.0.1:31415',
+                "auto_cmd": lambda addr: 'agy-bridge setup-gentle-shell --provider freellmapi --api-key "<YOUR_KEY>"',
                 "manual_snippet": lambda addr, api_key=None: 'BASE_URL=http://127.0.0.1:31415/v1\nAPI_KEY="<YOUR_KEY>"',
                 "restore_cmd": lambda addr: "agy-bridge restore-gentle-shell",
                 "docs_url": "https://github.com/tashfeenahmed/freellmapi",

@@ -4,6 +4,7 @@ import contextlib
 import json
 import os
 from pathlib import Path
+import subprocess
 from typing import Any, cast
 
 from bridge.setup.base import ClientConfigurator, ConfigPath, get_configurator
@@ -413,6 +414,43 @@ class GentleShellConfigurator(ClientConfigurator):
         **kwargs: Any,
     ) -> Path:
         target = self.get_config_path(config_path)
+        provider = kwargs.get("provider") or "agy"
+
+        if provider == "freellmapi":
+            api_key = kwargs.get("api_key") or kwargs.get("auth_token")
+            if not api_key:
+                raise ValueError("API key is required when configuring FreeLLMAPI.")
+
+            backup_path = None
+            if target.exists() and target.is_file():
+                backup_path = create_backup(target)
+            else:
+                backup_path = create_zero_state_backup(target)
+
+            settings_path = target.parent / "settings.json"
+            if settings_path.exists() and settings_path.is_file():
+                create_backup(settings_path)
+            else:
+                create_zero_state_backup(settings_path)
+
+            freellmapi_url = base_url or kwargs.get("freellmapi_url") or "http://127.0.0.1:31415"
+            cmd = [
+                "npx", "freellmapi", "setup-pi",
+                "--url", freellmapi_url,
+                "--api-key", api_key,
+            ]
+            env = os.environ.copy()
+            env["PI_CODING_AGENT_DIR"] = str(target.parent)
+            runner = kwargs.get("runner") or subprocess.run
+            proc = runner(cmd, env=env, capture_output=True, text=True, check=False)
+            if proc.returncode != 0:
+                err_msg = proc.stderr.strip() if proc.stderr else (proc.stdout.strip() if proc.stdout else "unknown error")
+                raise RuntimeError(f"FreeLLMAPI setup command failed: {err_msg}")
+
+            res = ConfigPath(target)
+            res.backup_path = backup_path
+            return res
+
         port = kwargs.get("port")
         auth_token = kwargs.get("auth_token") or get_active_api_key()
 
@@ -493,7 +531,23 @@ class GentleShellConfigurator(ClientConfigurator):
     ) -> bool:
         target = self.get_config_path(config_path)
         restored = False
-        provider = kwargs.get("provider") or "agy"
+        provider = kwargs.get("provider")
+
+        # Auto-detect provider if not explicitly specified
+        if not provider and target.exists() and target.is_file():
+            with contextlib.suppress(Exception):
+                raw_text = target.read_text(encoding="utf-8").strip()
+                if raw_text:
+                    config = json.loads(_strip_json_comments(raw_text))
+                    if isinstance(config, dict):
+                        prov = config.get("providers", {})
+                        if isinstance(prov, dict):
+                            if ("freellmapi" in prov or any(k.startswith("freellmapi-") for k in prov)) and "agy" not in prov:
+                                provider = "freellmapi"
+                            elif "agy" in prov:
+                                provider = "agy"
+        if not provider:
+            provider = "agy"
 
         if provider == "freellmapi":
             if not target.exists() or not target.is_file():
@@ -526,14 +580,18 @@ class GentleShellConfigurator(ClientConfigurator):
 
             if restored:
                 settings_path = target.parent / "settings.json"
-                if settings_path.exists() and settings_path.is_file():
+                settings_backups = list_backups(settings_path)
+                if settings_backups:
+                    try:
+                        restore_backup(settings_path, backup_path=settings_backups[0])
+                        settings_backups[0].unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                elif settings_path.exists() and settings_path.is_file():
                     with contextlib.suppress(Exception):
                         raw_s = settings_path.read_text(encoding="utf-8").strip()
                         if raw_s:
-                            try:
-                                s_data = json.loads(raw_s)
-                            except json.JSONDecodeError:
-                                s_data = json.loads(_strip_json_comments(raw_s))
+                            s_data = json.loads(_strip_json_comments(raw_s))
                             if isinstance(s_data, dict):
                                 def_p = s_data.get("defaultProvider")
                                 if def_p and (def_p == "freellmapi" or def_p.startswith("freellmapi-")):
@@ -547,13 +605,13 @@ class GentleShellConfigurator(ClientConfigurator):
                                     else:
                                         s_data.pop("defaultProvider", None)
 
-                                if str(s_data.get("defaultModel", "")).startswith("freellmapi/"):
+                                if str(s_data.get("defaultModel", "")).startswith("freellmapi/") or s_data.get("defaultModel") == "auto":
                                     s_data.pop("defaultModel", None)
 
                                 if "enabledModels" in s_data and isinstance(s_data["enabledModels"], list):
                                     s_data["enabledModels"] = [
                                         m for m in s_data["enabledModels"]
-                                        if not str(m).startswith("freellmapi/")
+                                        if not (str(m).startswith("freellmapi/") or m == "auto")
                                     ]
                                 atomic_write_file(settings_path, json.dumps(s_data, indent=2) + "\n", mode=0o600)
             return restored
@@ -663,8 +721,10 @@ def setup_gentle_shell(
     model: str = "gemini-3.8-flash-high",
     auth_token: str | None = None,
     set_default: bool = False,
+    provider: str = "agy",
+    api_key: str | None = None,
 ) -> ConfigPath:
-    """Configures Gentle Shell models.json for agy-model-bridge gateway."""
+    """Configures Gentle Shell models.json for agy-model-bridge gateway or FreeLLMAPI."""
     return cast(
         ConfigPath,
         get_configurator("gentle-shell").setup(
@@ -674,6 +734,8 @@ def setup_gentle_shell(
             port=port,
             auth_token=auth_token,
             set_default=set_default,
+            provider=provider,
+            api_key=api_key,
         ),
     )
 
@@ -681,7 +743,7 @@ def setup_gentle_shell(
 def restore_gentle_shell(
     config_path: Path | None = None,
     backup_path: Path | None = None,
-    provider: str = "agy",
+    provider: str | None = None,
 ) -> bool:
     """Restores Gentle Shell models.json from backup or surgically removes agy/freellmapi provider."""
     return get_configurator("gentle-shell").restore(
@@ -689,3 +751,4 @@ def restore_gentle_shell(
         backup_path=backup_path,
         provider=provider,
     )
+

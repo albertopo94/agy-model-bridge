@@ -9,6 +9,7 @@ from bridge.setup import (
     describe_backup,
     get_configurator,
     list_backups,
+    list_configurators,
     restore_backup,
     restore_gentle_shell,
     restore_pi,
@@ -76,6 +77,15 @@ def handle_restore_cli(
 
     backups = list_backups(target)
     if not backups:
+        cfg = None
+        for c in list_configurators():
+            if c.display_name == client_name or c.name == client_name:
+                cfg = c
+                break
+        if cfg is not None and target.exists() and target.is_file():
+            if cfg.restore(config_path=target):
+                print(t("restore_client_ready", client_name=client_name, target=target))
+                return 0
         print(t("restore_no_backups", client_name=client_name, parent=target.parent))
         return 1
 
@@ -566,8 +576,25 @@ def handle_setup_gentle_shell(
         default=None,
         help=f"Path to Gentle Shell models.json (default: {get_configurator('gentle-shell').default_config_path})",
     )
+    parser.add_argument(
+        "--provider",
+        choices=["agy", "freellmapi"],
+        default="agy",
+        help="Provider to configure (default: agy)",
+    )
+    parser.add_argument(
+        "--api-key",
+        type=str,
+        default=None,
+        help="API key for provider",
+    )
     parser.add_argument("--lang", type=str, default=None, help=t("cli_help_lang"))
     args = parser.parse_args(argv)
+
+    if args.provider == "freellmapi" and not args.api_key:
+        print("Error: --api-key is required when configuring FreeLLMAPI.")
+        return 1
+
     target = fn(
         config_path=args.path,
         base_url=args.base_url,
@@ -575,6 +602,8 @@ def handle_setup_gentle_shell(
         model=args.model,
         auth_token=args.auth_token,
         set_default=args.set_default,
+        provider=args.provider,
+        api_key=args.api_key,
     )
     if getattr(target, "backup_path", None):
         print(t("setup_backup_label", path=target.backup_path))
