@@ -9,6 +9,7 @@ import tests  # noqa: F401
 
 from bridge.cli.daemon import (
     handle_dashboard,
+    handle_restart,
     handle_start,
     handle_status,
     handle_stop,
@@ -73,6 +74,20 @@ class TestCliDaemonHandlers(unittest.TestCase):
             ret = handle_stop([], prog_base="agy-bridge", stop_fn=mock_stop)
             self.assertEqual(ret, 0)
 
+    def test_handle_restart_success(self):
+        mock_restart = MagicMock(return_value={"status": "started", "pid": 4321, "url": "http://127.0.0.1:24980/", "opened_browser": False})
+        with patch("sys.stdout", new=io.StringIO()) as out:
+            ret = handle_restart(["--no-open"], prog_base="agy-bridge", restart_fn=mock_restart)
+            self.assertEqual(ret, 0)
+            self.assertIn("4321", out.getvalue())
+
+    def test_handle_restart_error(self):
+        mock_restart = MagicMock(return_value={"status": "error", "error": "Restart failed"})
+        with patch("sys.stdout", new=io.StringIO()) as out:
+            ret = handle_restart([], prog_base="agy-bridge", restart_fn=mock_restart)
+            self.assertEqual(ret, 1)
+            self.assertIn("Restart failed", out.getvalue())
+
     def test_handle_status_running(self):
         mock_status = MagicMock(return_value={"running": True, "pid": 1234, "url": "http://127.0.0.1:24980/", "models_count": 8})
         with patch("sys.stdout", new=io.StringIO()) as out:
@@ -97,14 +112,14 @@ class TestCliDaemonHandlers(unittest.TestCase):
 
 class TestCliLifecycleHandlers(unittest.TestCase):
     def test_handle_update_updated(self):
-        mock_update = MagicMock(return_value={"status": "updated", "version": "0.24.1", "restarted_daemon": True})
+        mock_update = MagicMock(return_value={"status": "updated", "version": "0.25.0", "restarted_daemon": True})
         with patch("sys.stdout", new=io.StringIO()) as out:
             ret = handle_update([], prog_base="agy-bridge", subcmd="update", update_fn=mock_update)
             self.assertEqual(ret, 0)
-            self.assertIn("0.24.1", out.getvalue())
+            self.assertIn("0.25.0", out.getvalue())
 
     def test_handle_update_already_up_to_date(self):
-        mock_update = MagicMock(return_value={"status": "already_up_to_date", "version": "0.24.1"})
+        mock_update = MagicMock(return_value={"status": "already_up_to_date", "version": "0.25.0"})
         with patch("sys.stdout", new=io.StringIO()):
             ret = handle_update([], prog_base="agy-bridge", subcmd="update", update_fn=mock_update)
             self.assertEqual(ret, 0)

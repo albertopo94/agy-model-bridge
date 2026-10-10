@@ -2,6 +2,7 @@
 
 from bridge.cli.daemon import (
     handle_dashboard,
+    handle_restart,
     handle_start,
     handle_status,
     handle_stop,
@@ -25,6 +26,7 @@ from bridge.cli.setup import (
 
 __all__ = [
     "handle_dashboard",
+    "handle_restart",
     "handle_restore_cli",
     "handle_server",
     "handle_setup_claude",

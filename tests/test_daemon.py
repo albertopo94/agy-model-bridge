@@ -19,6 +19,7 @@ from bridge.daemon import (
     read_pid,
     remove_daemon_info,
     remove_pid,
+    restart_daemon,
     start_daemon,
     stop_daemon,
     write_daemon_info,
@@ -511,7 +512,7 @@ class TestHealthCheck(unittest.TestCase):
     def test_check_server_healthy_matches_valid_service_identity(self, mock_urlopen):
         resp = MagicMock()
         resp.status = 200
-        resp.read.return_value = b'{"status": "ok", "service": "agy-model-bridge", "version": "0.24.1"}'
+        resp.read.return_value = b'{"status": "ok", "service": "agy-model-bridge", "version": "0.25.0"}'
         resp.__enter__.return_value = resp
         mock_urlopen.return_value = resp
 
@@ -565,7 +566,7 @@ class TestDaemonDescriptorAndPortBinding(unittest.TestCase):
             "host": "127.0.0.1",
             "port": 24980,
             "service": "agy-model-bridge",
-            "version": "0.24.1",
+            "version": "0.25.0",
         }
         write_daemon_info(info_data, info_file=self.info_file)
         self.assertTrue(self.info_file.exists())
@@ -618,7 +619,7 @@ class TestDaemonDescriptorAndPortBinding(unittest.TestCase):
                 "host": "127.0.0.1",
                 "port": 24980,
                 "service": "agy-model-bridge",
-                "version": "0.24.1",
+                "version": "0.25.0",
             },
             info_file=self.info_file,
         )
@@ -657,7 +658,7 @@ class TestDaemonDescriptorAndPortBinding(unittest.TestCase):
                 "host": "127.0.0.1",
                 "port": 24980,
                 "service": "agy-model-bridge",
-                "version": "0.24.1",
+                "version": "0.25.0",
             },
             info_file=self.info_file,
         )
@@ -679,13 +680,13 @@ class TestDaemonDescriptorAndPortBinding(unittest.TestCase):
                 "host": "127.0.0.1",
                 "port": 24999,
                 "service": "agy-model-bridge",
-                "version": "0.24.1",
+                "version": "0.25.0",
             },
             info_file=self.info_file,
         )
         mock_fetch.return_value = {
             "service": "agy-model-bridge",
-            "version": "0.24.1",
+            "version": "0.25.0",
             "models_count": 5,
             "auth": {"status": "Valid"},
         }
@@ -788,7 +789,7 @@ class TestDaemonDescriptorAndPortBinding(unittest.TestCase):
                 "host": "127.0.0.1",
                 "port": 24980,
                 "service": "agy-model-bridge",
-                "version": "0.24.1",
+                "version": "0.25.0",
             },
             info_file=self.info_file,
         )
@@ -812,7 +813,7 @@ class TestDaemonDescriptorAndPortBinding(unittest.TestCase):
                 "host": "127.0.0.1",
                 "port": 24980,
                 "service": "agy-model-bridge",
-                "version": "0.24.1",
+                "version": "0.25.0",
             },
             info_file=self.info_file,
         )
@@ -836,7 +837,7 @@ class TestDaemonDescriptorAndPortBinding(unittest.TestCase):
                 "host": "127.0.0.1",
                 "port": 24980,
                 "service": "agy-model-bridge",
-                "version": "0.24.1",
+                "version": "0.25.0",
             },
             info_file=self.info_file,
         )
@@ -845,6 +846,158 @@ class TestDaemonDescriptorAndPortBinding(unittest.TestCase):
         with patch("bridge.daemon.is_pid_alive", side_effect=[True, False]), patch("bridge.daemon.is_bridge_process", return_value=True):
             res = stop_daemon(host="0.0.0.0", pid_file=self.pid_file, info_file=self.info_file)
         self.assertEqual(res["status"], "stopped")
+
+
+class TestRestartDaemon(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.dir_path = Path(self.temp_dir.name)
+        self.pid_file = self.dir_path / "bridge.pid"
+        self.info_file = self.dir_path / "bridge.json"
+        self.log_file = self.dir_path / "bridge.log"
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    @patch("bridge.daemon.stop_daemon")
+    @patch("bridge.daemon.start_daemon")
+    def test_restart_daemon_when_running_preserves_info(self, mock_start, mock_stop):
+        write_pid(55555, pid_file=self.pid_file)
+        write_daemon_info(
+            {
+                "pid": 55555,
+                "host": "127.0.0.1",
+                "port": 28000,
+                "project": "custom-prj",
+                "base_url": "https://custom.api",
+                "no_auth": True,
+            },
+            info_file=self.info_file,
+        )
+        mock_stop.return_value = {"status": "stopped", "pid": 55555}
+        mock_start.return_value = {
+            "status": "started",
+            "pid": 66666,
+            "port": 28000,
+            "host": "127.0.0.1",
+            "url": "http://127.0.0.1:28000/",
+            "opened_browser": False,
+        }
+
+        res = restart_daemon(
+            pid_file=self.pid_file,
+            info_file=self.info_file,
+            log_file=self.log_file,
+        )
+
+        self.assertEqual(res["status"], "started")
+        self.assertEqual(res["pid"], 66666)
+        mock_stop.assert_called_once_with(
+            pid_file=self.pid_file,
+            info_file=self.info_file,
+            timeout=5.0,
+        )
+        mock_start.assert_called_once_with(
+            port=28000,
+            host="127.0.0.1",
+            no_open=True,
+            project="custom-prj",
+            base_url="https://custom.api",
+            pid_file=self.pid_file,
+            info_file=self.info_file,
+            log_file=self.log_file,
+            lock_file=None,
+            health_timeout=5.0,
+            api_key=None,
+            no_auth=True,
+        )
+
+    @patch("bridge.daemon.stop_daemon")
+    @patch("bridge.daemon.start_daemon")
+    def test_restart_daemon_when_not_running_starts_clean(self, mock_start, mock_stop):
+        mock_stop.return_value = {"status": "not_running", "pid": None}
+        mock_start.return_value = {
+            "status": "started",
+            "pid": 77777,
+            "port": 24980,
+            "host": "127.0.0.1",
+            "url": "http://127.0.0.1:24980/",
+            "opened_browser": False,
+        }
+
+        res = restart_daemon(
+            pid_file=self.pid_file,
+            info_file=self.info_file,
+            log_file=self.log_file,
+        )
+
+        self.assertEqual(res["status"], "started")
+        self.assertEqual(res["pid"], 77777)
+        mock_stop.assert_called_once()
+        mock_start.assert_called_once_with(
+            port=24980,
+            host="127.0.0.1",
+            no_open=True,
+            project=None,
+            base_url=None,
+            pid_file=self.pid_file,
+            info_file=self.info_file,
+            log_file=self.log_file,
+            lock_file=None,
+            health_timeout=5.0,
+            api_key=None,
+            no_auth=False,
+        )
+
+    @patch("bridge.daemon.stop_daemon")
+    @patch("bridge.daemon.start_daemon")
+    def test_restart_daemon_overrides_parameters_if_provided(self, mock_start, mock_stop):
+        write_pid(55555, pid_file=self.pid_file)
+        write_daemon_info(
+            {
+                "pid": 55555,
+                "host": "127.0.0.1",
+                "port": 28000,
+                "project": "old-prj",
+                "no_auth": False,
+            },
+            info_file=self.info_file,
+        )
+        mock_stop.return_value = {"status": "stopped", "pid": 55555}
+        mock_start.return_value = {
+            "status": "started",
+            "pid": 88888,
+            "port": 29000,
+            "host": "0.0.0.0",
+            "url": "http://0.0.0.0:29000/",
+            "opened_browser": False,
+        }
+
+        res = restart_daemon(
+            port=29000,
+            host="0.0.0.0",
+            project="new-prj",
+            no_open=False,
+            pid_file=self.pid_file,
+            info_file=self.info_file,
+            log_file=self.log_file,
+        )
+
+        self.assertEqual(res["status"], "started")
+        mock_start.assert_called_once_with(
+            port=29000,
+            host="0.0.0.0",
+            no_open=False,
+            project="new-prj",
+            base_url=None,
+            pid_file=self.pid_file,
+            info_file=self.info_file,
+            log_file=self.log_file,
+            lock_file=None,
+            health_timeout=5.0,
+            api_key=None,
+            no_auth=False,
+        )
 
 
 if __name__ == "__main__":

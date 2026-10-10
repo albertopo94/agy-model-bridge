@@ -109,6 +109,9 @@ agy-bridge update
 # Check installed version
 agy-bridge --version
 
+# Restart the background daemon (preserving active port and configuration)
+agy-bridge restart
+
 # Stop the running background service
 agy-bridge stop
 ```
@@ -354,6 +357,7 @@ curl -fsSL https://raw.githubusercontent.com/albertopo94/agy-model-bridge/main/u
 |---|---|
 | `agy-bridge start` | Starts background daemon and opens web dashboard automatically |
 | `agy-bridge stop` | Stops the running background daemon |
+| `agy-bridge restart` | Restarts background daemon, preserving active port and flags |
 | `agy-bridge status` | Checks daemon status, port, models count, and auth |
 | `agy-bridge dashboard` (or `open`) | Opens the local dashboard in your default browser |
 | `agy-bridge update` (or `upgrade`) | Updates installation in-place via git pull and reloads daemon |
@@ -387,7 +391,7 @@ Execute the complete test suite:
 python3 -m unittest discover -s tests -v
 ```
 
-All 963 tests run in ~3-4 seconds locally with zero external dependencies and zero network access.
+All 969 tests run in ~3-4 seconds locally with zero external dependencies and zero network access.
 
 ### End-to-End Smoke Test
 

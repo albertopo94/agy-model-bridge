@@ -16,6 +16,7 @@ from bridge.cli import (
     handle_setup_openclaw,
     handle_setup_opencode,
     handle_setup_pi,
+    handle_restart,
     handle_start,
     handle_status,
     handle_stop,
@@ -25,6 +26,7 @@ from bridge.cli import (
 from bridge.daemon import (
     get_daemon_status,
     open_dashboard,
+    restart_daemon,
     start_daemon,
     stop_daemon,
 )
@@ -88,6 +90,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if argv and argv[0] == "stop":
         return handle_stop(argv[1:], prog_base, stop_fn=stop_daemon)
+
+    if argv and argv[0] == "restart":
+        return handle_restart(argv[1:], prog_base, restart_fn=restart_daemon)
 
     if argv and argv[0] == "status":
         return handle_status(argv[1:], prog_base, status_fn=get_daemon_status)

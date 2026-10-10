@@ -3,7 +3,13 @@
 import argparse
 from typing import Any
 
-from bridge.daemon import get_daemon_status, open_dashboard, start_daemon, stop_daemon
+from bridge.daemon import (
+    get_daemon_status,
+    open_dashboard,
+    restart_daemon,
+    start_daemon,
+    stop_daemon,
+)
 from bridge.i18n import t
 
 
@@ -76,6 +82,44 @@ def handle_stop(argv: list[str], prog_base: str, stop_fn: Any = None) -> int:
     else:
         print(t("daemon_not_running"))
         return 0
+
+
+def handle_restart(argv: list[str], prog_base: str, restart_fn: Any = None) -> int:
+    """Handles the 'restart' CLI subcommand."""
+    fn = restart_fn or restart_daemon
+    parser = argparse.ArgumentParser(
+        prog=f"{prog_base} restart",
+        description="Restart AGY Model Bridge daemon, preserving active configuration.",
+    )
+    parser.add_argument("--port", type=int, default=None, help="Gateway port (default: preserve active, or 24980)")
+    parser.add_argument("--host", type=str, default=None, help="Host address (default: preserve active, or 127.0.0.1)")
+    parser.add_argument("--no-open", action="store_true", help="Do not open web browser automatically")
+    parser.add_argument("--project", type=str, default=None, help="Google Cloud project ID override")
+    parser.add_argument("--base-url", type=str, default=None, help="Upstream API base URL override")
+    parser.add_argument("--api-key", type=str, default=None, help="Custom local API key")
+    parser.add_argument("--no-auth", action="store_true", default=None, help="Disable local API key authentication")
+    parser.add_argument("--lang", type=str, default=None, help=t("cli_help_lang"))
+    args = parser.parse_args(argv)
+
+    res = fn(
+        port=args.port,
+        host=args.host,
+        no_open=args.no_open,
+        project=args.project,
+        base_url=args.base_url,
+        api_key=args.api_key,
+        no_auth=args.no_auth,
+    )
+    st = res.get("status")
+    if st == "started":
+        browser_hint = t("daemon_browser_opened") if res.get("opened_browser") else ""
+        print(t("daemon_restarted", pid=res["pid"]))
+        print(t("daemon_dashboard_url", url=res["url"], browser_hint=browser_hint))
+        print(t("daemon_stop_hint", prog_base=prog_base))
+        return 0
+    else:
+        print(f"Error: {res.get('error', t('daemon_start_failed'))}")
+        return 1
 
 
 def handle_status(argv: list[str], prog_base: str, status_fn: Any = None) -> int:

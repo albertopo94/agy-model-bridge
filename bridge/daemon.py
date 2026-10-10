@@ -488,6 +488,65 @@ def stop_daemon(
     return {"status": "stopped", "pid": pid}
 
 
+def restart_daemon(
+    port: int | None = None,
+    host: str | None = None,
+    no_open: bool = True,
+    project: str | None = None,
+    base_url: str | None = None,
+    pid_file: Path | None = None,
+    info_file: Path | None = None,
+    log_file: Path | None = None,
+    lock_file: Path | None = None,
+    health_timeout: float = 5.0,
+    api_key: str | None = None,
+    no_auth: bool | None = None,
+    timeout: float = 5.0,
+) -> dict[str, Any]:
+    """Restarts the background daemon process, preserving active configuration by default.
+
+    Reads existing daemon info before stopping to preserve custom port, host, project,
+    base_url, and no_auth settings unless explicitly overridden by arguments.
+    """
+    target_pid_file = Path(pid_file) if pid_file is not None else get_default_pid_file()
+    target_info_file = Path(info_file) if info_file is not None else get_default_info_file()
+    target_log_file = Path(log_file) if log_file is not None else get_default_log_file()
+
+    existing_info = read_daemon_info(info_file=target_info_file)
+
+    eff_port = port if port is not None else (existing_info.get("port", 24980) if existing_info else 24980)
+    eff_host = host if host is not None else (existing_info.get("host", "127.0.0.1") if existing_info else "127.0.0.1")
+    eff_project = project if project is not None else (existing_info.get("project") if existing_info else None)
+    eff_base_url = base_url if base_url is not None else (existing_info.get("base_url") if existing_info else None)
+    eff_no_auth = no_auth if no_auth is not None else (existing_info.get("no_auth", False) if existing_info else False)
+
+    stop_res = stop_daemon(
+        pid_file=target_pid_file,
+        info_file=target_info_file,
+        timeout=timeout,
+    )
+    if stop_res.get("status") in ("port_mismatch", "host_mismatch"):
+        return stop_res
+
+    start_res = start_daemon(
+        port=eff_port,
+        host=eff_host,
+        no_open=no_open,
+        project=eff_project,
+        base_url=eff_base_url,
+        pid_file=target_pid_file,
+        info_file=target_info_file,
+        log_file=target_log_file,
+        lock_file=lock_file,
+        health_timeout=health_timeout,
+        api_key=api_key,
+        no_auth=eff_no_auth,
+    )
+    if stop_res.get("status") == "stopped":
+        start_res["restarted_from_pid"] = stop_res.get("pid")
+    return start_res
+
+
 def get_daemon_status(
     port: int = 24980,
     host: str = "127.0.0.1",
