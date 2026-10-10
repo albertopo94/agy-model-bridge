@@ -1,5 +1,6 @@
 """Unit tests for the embedded local gateway dashboard and status endpoints."""
 
+import html
 import unittest
 from bridge import __version__
 from bridge.dashboard import render_dashboard, get_status_data
@@ -184,7 +185,8 @@ class TestDashboardRendering(unittest.TestCase):
         self.assertIn('viewBox="0 0 24 24"', html)
         self.assertIn('viewBox="0 0 470 470"', html)
         self.assertIn('viewBox="0 0 64 64"', html)
-        self.assertNotIn("npx freellmapi setup", html)
+        self.assertNotIn("npx freellmapi setup-claude", html)
+        self.assertNotIn("npx freellmapi setup-codex", html)
         self.assertNotIn('id="freellmapi-auto"', html)
         self.assertIn("BASE_URL", html)
         self.assertIn("API_KEY", html)
@@ -762,6 +764,30 @@ class TestDashboardBilingual(unittest.TestCase):
             "La cuota se consume proporcionalmente al costo de los tokens",
             html,
         )
+
+    def test_gentle_shell_multi_provider_card(self):
+        auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
+        html_en = render_dashboard("127.0.0.1", 24980, auth_status, models_count=10, lang="en")
+
+        # Tabs container and buttons
+        self.assertIn('class="provider-tabs"', html_en)
+        self.assertIn('data-card="gentle-shell"', html_en)
+        self.assertIn('data-provider="agy"', html_en)
+        self.assertIn('data-provider="freellmapi"', html_en)
+        self.assertIn("AGY (Antigravity)", html_en)
+        self.assertIn("FreeLLMAPI", html_en)
+
+        # FreeLLMAPI commands and tooltip
+        self.assertIn(
+            html.escape('PI_CODING_AGENT_DIR="$HOME/.gentle-shell/agent" npx freellmapi setup-pi --url http://127.0.0.1:31415'),
+            html_en,
+        )
+        self.assertIn("Requires FreeLLMAPI gateway running on http://127.0.0.1:31415", html_en)
+        self.assertIn("switchProvider", html_en)
+
+        # Spanish localization
+        html_es = render_dashboard("127.0.0.1", 24980, auth_status, models_count=10, lang="es")
+        self.assertIn("Requiere el gateway de FreeLLMAPI corriendo en http://127.0.0.1:31415", html_es)
 
 
 if __name__ == "__main__":

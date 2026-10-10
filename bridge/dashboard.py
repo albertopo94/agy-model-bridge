@@ -313,6 +313,32 @@ CLIENT_CARDS: list[dict[str, Any]] = [
         "restore_cmd": lambda addr: "agy-bridge restore-gentle-shell",
         "manual_snippet": lambda addr, api_key='$(cat ~/.agy-bridge/api_key)': f'BASE_URL=http://{addr}/v1\nAPI_KEY="{api_key}"',
         "docs_url": "https://github.com/Gentleman-Programming/gentle-shell",
+        "providers": [
+            {
+                "id": "agy",
+                "label_en": "AGY (Antigravity)",
+                "label_es": "AGY (Antigravity)",
+                "auto_cmd": lambda addr: (
+                    f"agy-bridge setup-gentle-shell --port {addr.rsplit(':', 1)[1]}"
+                    if ":" in addr and addr.rsplit(":", 1)[1].isdigit() and addr.rsplit(":", 1)[1] != "24980"
+                    else "agy-bridge setup-gentle-shell"
+                ),
+                "manual_snippet": lambda addr, api_key='$(cat ~/.agy-bridge/api_key)': f'BASE_URL=http://{addr}/v1\nAPI_KEY="{api_key}"',
+                "restore_cmd": lambda addr: "agy-bridge restore-gentle-shell",
+                "docs_url": "https://github.com/Gentleman-Programming/gentle-shell",
+            },
+            {
+                "id": "freellmapi",
+                "label_en": "FreeLLMAPI",
+                "label_es": "FreeLLMAPI",
+                "warning_tip_en": "Requires FreeLLMAPI gateway running on http://127.0.0.1:31415",
+                "warning_tip_es": "Requiere el gateway de FreeLLMAPI corriendo en http://127.0.0.1:31415",
+                "auto_cmd": lambda addr: 'PI_CODING_AGENT_DIR="$HOME/.gentle-shell/agent" npx freellmapi setup-pi --url http://127.0.0.1:31415',
+                "manual_snippet": lambda addr, api_key=None: 'BASE_URL=http://127.0.0.1:31415/v1\nAPI_KEY="<YOUR_KEY>"',
+                "restore_cmd": lambda addr: "agy-bridge restore-gentle-shell",
+                "docs_url": "https://github.com/tashfeenahmed/freellmapi",
+            },
+        ],
     },
     {
         "id": "opencode",
@@ -441,6 +467,99 @@ def render_dashboard(
         card_id = card["id"]
         icon_html = card.get("icon_svg", "")
         desc_text = card.get("desc_es" if is_es else "desc_en", card.get("desc", ""))
+
+        if "providers" in card and card["providers"]:
+            tab_buttons = []
+            for idx, prov in enumerate(card["providers"]):
+                p_id = prov["id"]
+                is_active = (idx == 0)
+                active_cls = " active" if is_active else ""
+                aria_sel = "true" if is_active else "false"
+                p_label = prov.get("label_es" if is_es else "label_en", prov.get("id"))
+                tab_buttons.append(
+                    f'<button class="provider-tab-btn{active_cls}" role="tab" aria-selected="{aria_sel}" '
+                    f'data-card="{card_id}" data-provider="{p_id}" data-i18n="tab_{card_id}_{p_id}" '
+                    f'onclick="switchProvider(\'{card_id}\', \'{p_id}\')">{html.escape(p_label)}</button>'
+                )
+            tabs_html = f"""
+        <div class="provider-tabs" role="tablist">
+          {"".join(tab_buttons)}
+        </div>"""
+
+            panes_html = []
+            for idx, prov in enumerate(card["providers"]):
+                p_id = prov["id"]
+                is_active = (idx == 0)
+                display_style = "display: block;" if is_active else "display: none;"
+
+                p_warning_html = ""
+                w_text = prov.get("warning_tip_es" if is_es else "warning_tip_en")
+                if w_text:
+                    p_warning_html = f"""
+          <p class="card-warning-tip" data-i18n="tip_warning_{card_id}_{p_id}">⚠️ {html.escape(w_text)}</p>"""
+
+                elem_auto_id = f"{card_id}-auto" if p_id == "agy" else f"{card_id}-{p_id}-auto"
+                elem_manual_id = f"{card_id}-manual" if p_id == "agy" else f"{card_id}-{p_id}-manual"
+                elem_restore_id = f"{card_id}-restore" if p_id == "agy" else f"{card_id}-{p_id}-restore"
+
+                p_auto_html = ""
+                if "auto_cmd" in prov and prov["auto_cmd"]:
+                    p_auto_text = prov["auto_cmd"](snippet_address)
+                    p_auto_html = f"""
+          <div class="setup-block">
+            <div class="setup-header">
+              <span class="setup-title" data-i18n="setup_auto">{setup_auto_title}</span>
+              <button class="copy-btn" data-i18n="btn_copy" onclick="copySnippet(this, '{elem_auto_id}')">{copy_btn_title}</button>
+            </div>
+            <pre id="{elem_auto_id}"><code>{html.escape(p_auto_text)}</code></pre>
+          </div>"""
+
+                p_manual_text = ""
+                if "manual_snippet" in prov and prov["manual_snippet"]:
+                    try:
+                        p_manual_text = prov["manual_snippet"](snippet_address, active_key)
+                    except TypeError:
+                        p_manual_text = prov["manual_snippet"](snippet_address)
+
+                p_manual_html = f"""
+          <div class="setup-block">
+            <div class="setup-header">
+              <span class="setup-title" data-i18n="setup_manual">{setup_manual_title}</span>
+              <button class="copy-btn" data-i18n="btn_copy" onclick="copySnippet(this, '{elem_manual_id}')">{copy_btn_title}</button>
+            </div>
+            <pre id="{elem_manual_id}"><code>{html.escape(p_manual_text)}</code></pre>
+          </div>"""
+
+                p_restore_html = ""
+                if "restore_cmd" in prov and prov["restore_cmd"]:
+                    p_restore_text = prov["restore_cmd"](snippet_address)
+                    p_restore_html = f"""
+          <div class="setup-block">
+            <div class="setup-header">
+              <span class="setup-title" data-i18n="setup_restore">{setup_restore_title}</span>
+              <button class="copy-btn" data-i18n="btn_copy" onclick="copySnippet(this, '{elem_restore_id}')">{copy_btn_title}</button>
+            </div>
+            <pre id="{elem_restore_id}"><code>{html.escape(p_restore_text)}</code></pre>
+          </div>"""
+
+                p_docs_url = prov.get("docs_url", card.get("docs_url", ""))
+                p_footer_html = f"""
+          <div class="card-footer">
+            <a href="{html.escape(p_docs_url)}" target="_blank" rel="noopener noreferrer" class="docs-link" data-i18n="docs_link">{docs_link_title}</a>
+          </div>"""
+
+                panes_html.append(f"""        <div class="provider-pane" id="pane-{card_id}-{p_id}" data-card="{card_id}" data-provider="{p_id}" style="{display_style}">
+{p_warning_html}{p_auto_html}{p_manual_html}{p_restore_html}{p_footer_html}
+        </div>""")
+
+            cards_html_parts.append(f"""      <section class="card" id="card-{card_id}">
+        <div class="card-header">
+          <h2 class="card-title">{icon_html}{html.escape(card["title"])}</h2>
+        </div>
+        <p class="card-desc" data-i18n="desc_{card_id}">{html.escape(desc_text)}</p>{tabs_html}
+{"".join(panes_html)}
+      </section>""")
+            continue
 
         auto_block_html = ""
         if "auto_cmd" in card and card["auto_cmd"]:
@@ -893,6 +1012,47 @@ def render_dashboard(
       margin-top: 0.6rem;
       line-height: 1.4;
     }}
+    .card-warning-tip {{
+      font-size: 0.78rem;
+      color: var(--amber);
+      background: rgba(245, 158, 11, 0.08);
+      border: 1px solid rgba(245, 158, 11, 0.25);
+      border-radius: 8px;
+      padding: 0.45rem 0.65rem;
+      margin-top: 0.6rem;
+      line-height: 1.4;
+    }}
+    .provider-tabs {{
+      display: flex;
+      gap: 0.35rem;
+      background: #181818;
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 3px;
+      margin-top: 0.25rem;
+      margin-bottom: 0.5rem;
+    }}
+    .provider-tab-btn {{
+      flex: 1;
+      border: none;
+      background: transparent;
+      color: var(--text-secondary);
+      font-size: 0.78rem;
+      font-weight: 500;
+      padding: 0.35rem 0.65rem;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      text-align: center;
+    }}
+    .provider-tab-btn:hover {{
+      color: var(--text-primary);
+    }}
+    .provider-tab-btn.active {{
+      background: #282828;
+      color: var(--text-primary);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+    }}
     .setup-block {{
       margin-top: 0.75rem;
     }}
@@ -1060,6 +1220,9 @@ def render_dashboard(
         tip_pi: "💡 Tip: Run agy-bridge setup-pi --set-default to make AGY the default provider in settings.json.",
         desc_gentle_shell: "An isolated terminal companion for Pi with focused subagents, review mode, and ODD harness.",
         "desc_gentle-shell": "An isolated terminal companion for Pi with focused subagents, review mode, and ODD harness.",
+        "tab_gentle-shell_agy": "AGY (Antigravity)",
+        "tab_gentle-shell_freellmapi": "FreeLLMAPI",
+        "tip_warning_gentle-shell_freellmapi": "⚠️ Requires FreeLLMAPI gateway running on http://127.0.0.1:31415",
         desc_freellmapi: "Custom Provider & Aider integration (Base URL with /v1)",
         footer: "AGY Model Bridge &bull; v{__version__} &bull; Local Gateway",
         quota_title: "Antigravity",
@@ -1103,6 +1266,9 @@ def render_dashboard(
         tip_pi: "💡 Tip: Ejecut\u00e1 agy-bridge setup-pi --set-default para fijar AGY como proveedor por defecto en settings.json.",
         desc_gentle_shell: "Un entorno de terminal aislado para Pi con subagentes enfocados, modo review y arn\u00e9s ODD.",
         "desc_gentle-shell": "Un entorno de terminal aislado para Pi con subagentes enfocados, modo review y arn\u00e9s ODD.",
+        "tab_gentle-shell_agy": "AGY (Antigravity)",
+        "tab_gentle-shell_freellmapi": "FreeLLMAPI",
+        "tip_warning_gentle-shell_freellmapi": "⚠️ Requiere el gateway de FreeLLMAPI corriendo en http://127.0.0.1:31415",
         desc_freellmapi: "Integraci\u00f3n para Custom Provider y Aider (URL base con /v1)",
         footer: "AGY Model Bridge &bull; v{__version__} &bull; Gateway local",
         quota_title: "Antigravity",
@@ -1448,6 +1614,28 @@ def render_dashboard(
     setInterval(function() {{
       fetchQuota(false);
     }}, 300000);
+
+    function switchProvider(cardId, providerId) {{
+      var card = document.getElementById("card-" + cardId);
+      if (!card) return;
+      var btns = card.querySelectorAll(".provider-tab-btn");
+      for (var i = 0; i < btns.length; i++) {{
+        var btn = btns[i];
+        var match = btn.getAttribute("data-provider") === providerId;
+        if (match) {{
+          btn.classList.add("active");
+          btn.setAttribute("aria-selected", "true");
+        }} else {{
+          btn.classList.remove("active");
+          btn.setAttribute("aria-selected", "false");
+        }}
+      }}
+      var panes = card.querySelectorAll(".provider-pane");
+      for (var j = 0; j < panes.length; j++) {{
+        var pane = panes[j];
+        pane.style.display = (pane.getAttribute("data-provider") === providerId) ? "block" : "none";
+      }}
+    }}
 
     function copySnippet(btn, elementId) {{
       var el = document.getElementById(elementId);

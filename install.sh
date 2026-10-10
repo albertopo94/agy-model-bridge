@@ -69,7 +69,7 @@ fi
 
 # 3. Clone or update repository
 mkdir -p "$(dirname "$INSTALL_DIR")"
-PINNED_VERSION="v0.21.3"
+PINNED_VERSION="v0.22.0"
 TARGET_REF="${AGY_BRIDGE_VERSION:-$PINNED_VERSION}"
 
 if [ -d "$INSTALL_DIR/.git" ]; then

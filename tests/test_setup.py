@@ -1477,7 +1477,7 @@ class TestUninstall(unittest.TestCase):
         core_dir.mkdir(parents=True, exist_ok=True)
         (core_dir / "bridge").mkdir(parents=True, exist_ok=True)
         (core_dir / "bridge" / "__init__.py").write_text("# core\n", encoding="utf-8")
-        (core_dir / ".agy-bridge-installed").write_text("v0.21.3\n", encoding="utf-8")
+        (core_dir / ".agy-bridge-installed").write_text("v0.22.0\n", encoding="utf-8")
 
         with unittest.mock.patch("bridge.daemon.stop_daemon", return_value={"status": "not_running"}):
             result = uninstall(
@@ -1648,7 +1648,7 @@ class TestUpdateInstallation(unittest.TestCase):
 
         self.assertEqual(result["status"], "updated")
         self.assertTrue(result["restarted_daemon"])
-        self.assertEqual(result["version"], "0.21.3")
+        self.assertEqual(result["version"], "0.22.0")
         mock_run.assert_called_once_with(
             ["git", "-C", str(self.repo_dir), "pull", "--ff-only"],
             capture_output=True,
@@ -1937,7 +1937,7 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main([flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.21.3")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.22.0")
 
     def test_cli_subcommand_version_flags(self):
         from bridge.__main__ import main
@@ -1949,19 +1949,19 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main(["update", flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.21.3")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.22.0")
 
     def test_version_unification(self):
         import bridge
         from pathlib import Path
         import re
 
-        self.assertEqual(bridge.__version__, "0.21.3")
+        self.assertEqual(bridge.__version__, "0.22.0")
         pyproject_path = Path(__file__).resolve().parent.parent / "pyproject.toml"
         pyproject_text = pyproject_path.read_text(encoding="utf-8")
         match = re.search(r'version\s*=\s*"([^"]+)"', pyproject_text)
         self.assertIsNotNone(match)
-        self.assertEqual(match.group(1), "0.21.3")
+        self.assertEqual(match.group(1), "0.22.0")
 
     def test_config_path_instantiation_and_backup_attribute(self):
         from bridge.setup.base import ConfigPath
@@ -4558,6 +4558,68 @@ class TestGentleShellConfigurator(unittest.TestCase):
         settings_backups = list(settings_target.parent.glob("settings.json.backup-*"))
         self.assertEqual(len(settings_backups), 0)
 
+    def test_restore_gentle_shell_freellmapi_prunes_provider_and_cleans_settings(self):
+        target = self.dir_path / "agent" / "models.json"
+        settings_target = self.dir_path / "agent" / "settings.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+
+        target.write_text(
+            json.dumps({
+                "providers": {
+                    "agy": {"name": "AGY Bridge", "baseUrl": "http://127.0.0.1:24980/v1"},
+                    "freellmapi": {"name": "FreeLLMAPI", "baseUrl": "http://127.0.0.1:31415/v1"},
+                    "freellmapi-fast": {"name": "FreeLLMAPI Fast", "baseUrl": "http://127.0.0.1:31415/v1"},
+                }
+            }),
+            encoding="utf-8",
+        )
+        settings_target.write_text(
+            json.dumps({
+                "defaultProvider": "freellmapi",
+                "defaultModel": "freellmapi/deepseek-r1",
+                "enabledModels": ["agy/gemini-3.8", "freellmapi/deepseek-r1"],
+                "theme": "dark",
+            }),
+            encoding="utf-8",
+        )
+
+        success = self.configurator.restore(config_path=target, provider="freellmapi")
+        self.assertTrue(success)
+        self.assertTrue(target.exists())
+
+        models_data = json.loads(target.read_text(encoding="utf-8"))
+        self.assertIn("agy", models_data["providers"])
+        self.assertNotIn("freellmapi", models_data["providers"])
+        self.assertNotIn("freellmapi-fast", models_data["providers"])
+
+        settings_data = json.loads(settings_target.read_text(encoding="utf-8"))
+        self.assertEqual(settings_data["defaultProvider"], "agy")
+        self.assertNotIn("defaultModel", settings_data)
+        self.assertEqual(settings_data["enabledModels"], ["agy/gemini-3.8"])
+        self.assertEqual(settings_data["theme"], "dark")
+
+    def test_restore_gentle_shell_freellmapi_when_only_freellmapi_removes_file(self):
+        target = self.dir_path / "agent" / "models.json"
+        settings_target = self.dir_path / "agent" / "settings.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+
+        target.write_text(
+            json.dumps({"providers": {"freellmapi": {"name": "FreeLLMAPI"}}}),
+            encoding="utf-8",
+        )
+        settings_target.write_text(
+            json.dumps({"defaultProvider": "freellmapi", "theme": "dark"}),
+            encoding="utf-8",
+        )
+
+        success = self.configurator.restore(config_path=target, provider="freellmapi")
+        self.assertTrue(success)
+        self.assertFalse(target.exists())
+
+        settings_data = json.loads(settings_target.read_text(encoding="utf-8"))
+        self.assertNotIn("defaultProvider", settings_data)
+        self.assertEqual(settings_data["theme"], "dark")
+
     def test_restore_zero_state_surgical_settings_when_no_settings_backup(self):
         target = self.dir_path / "agent" / "models.json"
         settings_target = self.dir_path / "agent" / "settings.json"
@@ -4888,7 +4950,7 @@ class TestInstallScript(unittest.TestCase):
         sentinel = self.state_dir / "core" / ".agy-bridge-installed"
         self.assertTrue(sentinel.exists())
         self.assertEqual(stat.S_IMODE(sentinel.stat().st_mode), 0o600)
-        self.assertEqual(sentinel.read_text(encoding="utf-8").strip(), "v0.21.3")
+        self.assertEqual(sentinel.read_text(encoding="utf-8").strip(), "v0.22.0")
 
     def test_install_script_launcher_immune_to_cwd_hijacking(self):
         res = subprocess.run(

@@ -1,5 +1,6 @@
 """Configurator strategies and setup functions for Pi and Gentle Shell."""
 
+import contextlib
 import json
 import os
 from pathlib import Path
@@ -492,6 +493,70 @@ class GentleShellConfigurator(ClientConfigurator):
     ) -> bool:
         target = self.get_config_path(config_path)
         restored = False
+        provider = kwargs.get("provider") or "agy"
+
+        if provider == "freellmapi":
+            if not target.exists() or not target.is_file():
+                return False
+            try:
+                raw_text = target.read_text(encoding="utf-8").strip()
+                if raw_text:
+                    try:
+                        config = json.loads(raw_text)
+                    except json.JSONDecodeError:
+                        cleaned = _strip_json_comments(raw_text)
+                        config = json.loads(cleaned)
+
+                    if isinstance(config, dict):
+                        prov = config.get("providers")
+                        if isinstance(prov, dict):
+                            keys_to_remove = [k for k in prov if k == "freellmapi" or k.startswith("freellmapi-")]
+                            for k in keys_to_remove:
+                                prov.pop(k, None)
+
+                        providers_empty = not prov
+                        if providers_empty and set(config.keys()) <= {"providers"}:
+                            target.unlink(missing_ok=True)
+                        else:
+                            formatted_json = json.dumps(config, indent=2) + "\n"
+                            atomic_write_file(target, formatted_json, mode=0o600)
+                        restored = True
+            except (json.JSONDecodeError, OSError):
+                return False
+
+            if restored:
+                settings_path = target.parent / "settings.json"
+                if settings_path.exists() and settings_path.is_file():
+                    with contextlib.suppress(Exception):
+                        raw_s = settings_path.read_text(encoding="utf-8").strip()
+                        if raw_s:
+                            try:
+                                s_data = json.loads(raw_s)
+                            except json.JSONDecodeError:
+                                s_data = json.loads(_strip_json_comments(raw_s))
+                            if isinstance(s_data, dict):
+                                def_p = s_data.get("defaultProvider")
+                                if def_p and (def_p == "freellmapi" or def_p.startswith("freellmapi-")):
+                                    has_agy = False
+                                    if target.exists():
+                                        with contextlib.suppress(Exception):
+                                            m_data = json.loads(target.read_text(encoding="utf-8"))
+                                            has_agy = "agy" in m_data.get("providers", {})
+                                    if has_agy:
+                                        s_data["defaultProvider"] = "agy"
+                                    else:
+                                        s_data.pop("defaultProvider", None)
+
+                                if str(s_data.get("defaultModel", "")).startswith("freellmapi/"):
+                                    s_data.pop("defaultModel", None)
+
+                                if "enabledModels" in s_data and isinstance(s_data["enabledModels"], list):
+                                    s_data["enabledModels"] = [
+                                        m for m in s_data["enabledModels"]
+                                        if not str(m).startswith("freellmapi/")
+                                    ]
+                                atomic_write_file(settings_path, json.dumps(s_data, indent=2) + "\n", mode=0o600)
+            return restored
 
         chosen_backup = None
         if backup_path is not None:
@@ -616,9 +681,11 @@ def setup_gentle_shell(
 def restore_gentle_shell(
     config_path: Path | None = None,
     backup_path: Path | None = None,
+    provider: str = "agy",
 ) -> bool:
-    """Restores Gentle Shell models.json from backup or surgically removes agy provider."""
+    """Restores Gentle Shell models.json from backup or surgically removes agy/freellmapi provider."""
     return get_configurator("gentle-shell").restore(
         config_path=config_path,
         backup_path=backup_path,
+        provider=provider,
     )
