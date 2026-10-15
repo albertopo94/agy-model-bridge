@@ -14,7 +14,8 @@ Zero-dependency, pure Python 3 local AI gateway that bridges the Google Cloud Co
   - `POST /v1/responses` — OpenAI Responses API shim for Codex CLI (`wire_api = "responses"`).
   - `POST /v1/messages` — Anthropic Messages API shim with dynamic SSE stream mapping (`thinking_delta`, `text_delta`, `tool_use`, `input_json_delta`), recursive OpenAPI 3.0 schema sanitization, and full tool calling for Claude Code CLI across both Antigravity and Cursor models.
 - **Multi-Provider Upstream Gateway (Antigravity & Cursor)**:
-  - Bridges both **Google Antigravity** and local **Cursor CLI (`agent -p`)** into a unified local gateway.
+  - Bridges both **Google Antigravity** and local **Cursor CLI** into a unified local gateway.
+  - **Instant Agent Client Protocol (ACP) Streaming**: Integrates Cursor's official `agent acp` server mode over stdio JSON-RPC 2.0, keeping a warm background process alive. This eliminates the 20-40s cold start overhead of standalone CLI calls, delivering responses in **1-3 seconds** (10-20x speedup).
   - Transparently routes `cursor/*` and exclusive Cursor models (`gpt-5.3-codex`, `composer-2.5`, `grok-4.7`, etc.) to Cursor while serving Google models (`gemini-*`, `claude-*`) via Antigravity.
   - On Cursor Free tier, defaults to `cursor/auto` with clear notices, while supporting named models on Pro/Business tiers.
 - **Built-in Setup CLI**: Native subcommands (`setup-claude`, `setup-codex`, `setup-hermes`, `setup-opencode`, `setup-openclaw`, `setup-cursor`, `setup-pi`, `setup-gentle-shell`) that surgically configure client environments with atomic writes, file permissions `0o600`, automatic timestamped backups, and multi-provider selection (`--provider agy|cursor|all`).

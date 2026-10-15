@@ -26,4 +26,4 @@ Cursor CLI `agent -p` mode suffers from a ~20-40 second cold start overhead per 
 ### 4. Release v0.27.0 & Documentation
 - [x] 4.1 Synchronize version `0.27.0` across `bridge/__init__.py`, `pyproject.toml`, `install.sh`, and tests.
 - [x] 4.2 Document Cursor ACP instant execution in `README.md`.
-- [ ] 4.3 Create work-unit commits, merge to `main`, create tag `v0.27.0`, push, and publish GitHub Release.
+- [x] 4.3 Create work-unit commits, merge to `main`, create tag `v0.27.0`, push, and publish GitHub Release (`a64c720`).
