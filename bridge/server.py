@@ -53,6 +53,13 @@ from bridge.responses import (
 )
 from bridge.quota import AgyCliQuotaProvider, QuotaProvider
 from bridge.cursor_quota import CursorQuotaProvider
+from bridge.cursor_backend import (
+    CursorBackend,
+    extract_text_content,
+    is_cursor_model,
+    messages_to_prompt,
+    resolve_cursor_model,
+)
 
 SAFE_REQUEST_ID_REGEX = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 
@@ -82,6 +89,7 @@ class ServerContext:
     initial_retry_delay: float = 0.5
     quota_provider: QuotaProvider | None = None
     cursor_quota_provider: CursorQuotaProvider | None = None
+    cursor_backend: Any | None = None
 
 
 @dataclass
@@ -96,6 +104,7 @@ class CollectedStreamData:
 
 _default_quota_provider: QuotaProvider | None = None
 _default_cursor_quota_provider: CursorQuotaProvider | None = None
+_default_cursor_backend: CursorBackend | None = None
 
 
 class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
@@ -108,6 +117,7 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
     api_key: str | None = None
     quota_provider: QuotaProvider | None = None
     cursor_quota_provider: CursorQuotaProvider | None = None
+    cursor_backend: Any | None = None
     server: Any = None
     request_id: str = ""
     command: str = ""
@@ -180,6 +190,21 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
         if _default_cursor_quota_provider is None:
             _default_cursor_quota_provider = CursorQuotaProvider()
         return _default_cursor_quota_provider
+
+    def _get_cursor_backend(self) -> CursorBackend:
+        if self.cursor_backend is not None:
+            return self.cursor_backend
+        if self.context is not None and self.context.cursor_backend is not None:
+            return self.context.cursor_backend
+        if self.server is not None:
+            if hasattr(self.server, "context") and getattr(self.server.context, "cursor_backend", None) is not None:
+                return self.server.context.cursor_backend
+            if hasattr(self.server, "cursor_backend") and self.server.cursor_backend is not None:
+                return self.server.cursor_backend
+        global _default_cursor_backend
+        if _default_cursor_backend is None:
+            _default_cursor_backend = CursorBackend()
+        return _default_cursor_backend
 
     @contextlib.contextmanager
     def _acquire_concurrency(self) -> Iterator[bool]:
@@ -473,7 +498,13 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                 self._send_json(code, err)
                 return
             try:
-                models = self.client.fetch_available_models(self.project)
+                models = list(self.client.fetch_available_models(self.project))
+                try:
+                    c_backend = self._get_cursor_backend()
+                    if c_backend is not None:
+                        models.extend(c_backend.list_models())
+                except Exception as c_err:
+                    sys.stderr.write(f"Warning: failed to query Cursor models: {c_err}\n")
                 resp_data = build_openai_model_list(models)
                 self._send_json(200, resp_data)
             except Exception as exc:
@@ -615,6 +646,193 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
             self._handle_anthropic_messages(payload)
         elif path == "/v1/responses":
             self._handle_responses(payload)
+
+    def _handle_cursor_chat_completion(self, payload: dict[str, Any]) -> None:
+        self._ensure_request_id()
+        model = str(payload.get("model") or "auto")
+        messages = payload.get("messages", [])
+        if not isinstance(messages, list):
+            self._send_json(400, {"error": {"message": "Invalid messages: expected list", "type": "invalid_request_error", "code": 400}})
+            return
+
+        prompt = messages_to_prompt(messages)
+        stream = bool(payload.get("stream", False))
+        completion_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
+        backend = self._get_cursor_backend()
+        target_model = resolve_cursor_model(model)
+
+        if stream:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "close")
+            self.send_header("X-Request-ID", self.request_id)
+            self.end_headers()
+
+            try:
+                for chunk in backend.stream_chat(prompt, model=target_model):
+                    chunk_payload = {
+                        "id": completion_id,
+                        "object": "chat.completion.chunk",
+                        "created": int(time.time()),
+                        "model": model,
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {"content": chunk},
+                                "finish_reason": None,
+                            }
+                        ],
+                    }
+                    self.wfile.write(f"data: {json.dumps(chunk_payload)}\n\n".encode("utf-8"))
+                    self.wfile.flush()
+
+                final_payload = {
+                    "id": completion_id,
+                    "object": "chat.completion.chunk",
+                    "created": int(time.time()),
+                    "model": model,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                }
+                self.wfile.write(f"data: {json.dumps(final_payload)}\n\n".encode("utf-8"))
+                self.wfile.write(b"data: [DONE]\n\n")
+                self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            except Exception as exc:
+                sys.stderr.write(f"Error during Cursor stream: {exc}\n")
+                sys.stderr.flush()
+            finally:
+                self.close_connection = True
+        else:
+            try:
+                answer = backend.generate_chat(prompt, model=target_model)
+                resp = {
+                    "id": completion_id,
+                    "object": "chat.completion",
+                    "created": int(time.time()),
+                    "model": model,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": answer,
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": len(prompt.split()),
+                        "completion_tokens": len(answer.split()),
+                        "total_tokens": len(prompt.split()) + len(answer.split()),
+                    },
+                }
+                self._send_json(200, resp)
+            except Exception as exc:
+                self._send_error(exc)
+
+    def _handle_cursor_messages(self, payload: dict[str, Any]) -> None:
+        self._ensure_request_id()
+        model = str(payload.get("model") or "auto")
+        raw_messages = payload.get("messages", [])
+        system = payload.get("system")
+        messages: list[dict[str, Any]] = []
+        if system:
+            system_text = extract_text_content(system)
+            if system_text:
+                messages.append({"role": "system", "content": system_text})
+        if isinstance(raw_messages, list):
+            messages.extend(raw_messages)
+
+        prompt = messages_to_prompt(messages)
+        stream = bool(payload.get("stream", False))
+        msg_id = f"msg_{uuid.uuid4().hex[:12]}"
+        backend = self._get_cursor_backend()
+        target_model = resolve_cursor_model(model)
+
+        if stream:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "close")
+            self.send_header("X-Request-ID", self.request_id)
+            self.end_headers()
+
+            def emit(event: str, data: dict[str, Any]) -> None:
+                payload_str = json.dumps(data)
+                self.wfile.write(f"event: {event}\ndata: {payload_str}\n\n".encode("utf-8"))
+                self.wfile.flush()
+
+            try:
+                emit("message_start", {
+                    "type": "message_start",
+                    "message": {
+                        "id": msg_id,
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [],
+                        "model": model,
+                        "stop_reason": None,
+                        "stop_sequence": None,
+                        "usage": {"input_tokens": len(prompt.split()), "output_tokens": 0},
+                    },
+                })
+                emit("content_block_start", {
+                    "type": "content_block_start",
+                    "index": 0,
+                    "content_block": {"type": "text", "text": ""},
+                })
+                total_out = 0
+                for chunk in backend.stream_chat(prompt, model=target_model):
+                    total_out += len(chunk.split())
+                    emit("content_block_delta", {
+                        "type": "content_block_delta",
+                        "index": 0,
+                        "delta": {"type": "text_delta", "text": chunk},
+                    })
+                emit("content_block_stop", {
+                    "type": "content_block_stop",
+                    "index": 0,
+                })
+                emit("message_delta", {
+                    "type": "message_delta",
+                    "delta": {"stop_reason": "end_turn", "stop_sequence": None},
+                    "usage": {"output_tokens": total_out},
+                })
+                emit("message_stop", {"type": "message_stop"})
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            except Exception as exc:
+                sys.stderr.write(f"Error during Cursor Anthropic stream: {exc}\n")
+                sys.stderr.flush()
+            finally:
+                self.close_connection = True
+        else:
+            try:
+                answer = backend.generate_chat(prompt, model=target_model)
+                resp = {
+                    "id": msg_id,
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": answer}],
+                    "model": model,
+                    "stop_reason": "end_turn",
+                    "stop_sequence": None,
+                    "usage": {
+                        "input_tokens": len(prompt.split()),
+                        "output_tokens": len(answer.split()),
+                    },
+                }
+                self._send_json(200, resp)
+            except Exception as exc:
+                self._send_anthropic_error(exc)
 
     def _send_anthropic_error(self, exc: Exception) -> None:
         self._ensure_request_id()
@@ -855,6 +1073,11 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                 error_sender(exc)
 
     def _handle_anthropic_messages(self, payload: dict[str, Any]) -> None:
+        model = str(payload.get("model") or "")
+        if is_cursor_model(model):
+            self._handle_cursor_messages(payload)
+            return
+
         try:
             stream = bool(payload.get("stream", False))
             req = AnthropicProtocolAdapter.transform_request(payload, self.project)
@@ -969,6 +1192,11 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
             )
 
     def _handle_chat_completion(self, payload: dict[str, Any]) -> None:
+        model = str(payload.get("model") or "")
+        if is_cursor_model(model):
+            self._handle_cursor_chat_completion(payload)
+            return
+
         try:
             stream = bool(payload.get("stream", False))
             req = OpenAIProtocolAdapter.transform_request(payload, self.project)
@@ -1067,6 +1295,7 @@ def create_server(
     initial_retry_delay: float = 0.5,
     quota_provider: QuotaProvider | None = None,
     cursor_quota_provider: CursorQuotaProvider | None = None,
+    cursor_backend: Any | None = None,
 ) -> http.server.ThreadingHTTPServer:
     """Instantiates and configures a ThreadingHTTPServer instance."""
     if no_auth and not is_loopback_host(host):
@@ -1110,6 +1339,8 @@ def create_server(
         quota_provider = AgyCliQuotaProvider()
     if cursor_quota_provider is None:
         cursor_quota_provider = CursorQuotaProvider()
+    if cursor_backend is None:
+        cursor_backend = CursorBackend()
 
     concurrency_semaphore = threading.Semaphore(max_concurrency)
 
@@ -1124,6 +1355,7 @@ def create_server(
         initial_retry_delay=initial_retry_delay,
         quota_provider=quota_provider,
         cursor_quota_provider=cursor_quota_provider,
+        cursor_backend=cursor_backend,
     )
 
     class ConfiguredHandler(OpenAIRequestHandler):
@@ -1138,6 +1370,7 @@ def create_server(
     ConfiguredHandler.initial_retry_delay = initial_retry_delay
     ConfiguredHandler.quota_provider = quota_provider
     ConfiguredHandler.cursor_quota_provider = cursor_quota_provider
+    ConfiguredHandler.cursor_backend = cursor_backend
 
     server = http.server.ThreadingHTTPServer((host, port), ConfiguredHandler)
     server.daemon_threads = True
@@ -1149,6 +1382,7 @@ def create_server(
     server.initial_retry_delay = initial_retry_delay  # type: ignore[attr-defined]
     server.quota_provider = quota_provider  # type: ignore[attr-defined]
     server.cursor_quota_provider = cursor_quota_provider  # type: ignore[attr-defined]
+    server.cursor_backend = cursor_backend  # type: ignore[attr-defined]
     return server
 
 
@@ -1164,6 +1398,7 @@ def run_server(
     initial_retry_delay: float = 0.5,
     quota_provider: QuotaProvider | None = None,
     cursor_quota_provider: CursorQuotaProvider | None = None,
+    cursor_backend: Any | None = None,
 ) -> None:
     """Starts the ThreadingHTTPServer serving OpenAI-compatible endpoints."""
     server = create_server(
@@ -1178,6 +1413,7 @@ def run_server(
         initial_retry_delay=initial_retry_delay,
         quota_provider=quota_provider,
         cursor_quota_provider=cursor_quota_provider,
+        cursor_backend=cursor_backend,
     )
     actual_port = server.server_address[1]
     print(f"Antigravity Model Bridge listening on http://{host}:{actual_port}")

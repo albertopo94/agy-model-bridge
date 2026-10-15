@@ -936,16 +936,27 @@ def build_openai_model_list(upstream_models: list[Any]) -> dict[str, Any]:
             raw_id = str(raw_id)
         if raw_id.startswith("models/"):
             raw_id = raw_id[7:]
+        owner = "google"
+        slug = raw_id
+        display_name = raw_id
+        if isinstance(item, dict):
+            if "owned_by" in item and item["owned_by"]:
+                owner = str(item["owned_by"])
+            if "slug" in item and item["slug"]:
+                slug = str(item["slug"])
+            if "display_name" in item and item["display_name"]:
+                display_name = str(item["display_name"])
+
         if raw_id and raw_id not in seen_ids:
             seen_ids.add(raw_id)
             models_data.append(
                 {
                     "id": raw_id,
-                    "slug": raw_id,
-                    "display_name": raw_id,
+                    "slug": slug,
+                    "display_name": display_name,
                     "object": "model",
                     "created": created,
-                    "owned_by": "google",
+                    "owned_by": owner,
                 }
             )
 

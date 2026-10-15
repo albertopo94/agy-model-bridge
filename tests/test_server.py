@@ -2,6 +2,7 @@ import io
 import json
 import threading
 import time
+from typing import Any
 import unittest
 from unittest.mock import MagicMock, patch
 import urllib.error
@@ -95,6 +96,27 @@ class MockCursorQuotaProvider:
         return self.snapshot
 
 
+class MockCursorBackend:
+    def __init__(self, models: list[dict[str, Any]] | None = None):
+        self.models = models if models is not None else [
+            {"id": "cursor/gpt-5.3-codex", "slug": "cursor/gpt-5.3-codex", "display_name": "gpt-5.3-codex (Cursor)", "owned_by": "cursor"},
+            {"id": "cursor/composer-2.5", "slug": "cursor/composer-2.5", "display_name": "composer-2.5 (Cursor)", "owned_by": "cursor"},
+        ]
+        self.chat_calls: list[dict[str, Any]] = []
+
+    def list_models(self, force: bool = False) -> list[dict[str, Any]]:
+        return list(self.models)
+
+    def stream_chat(self, prompt: str, model: str = "auto", timeout: float = 300.0, **kwargs: Any):
+        self.chat_calls.append({"prompt": prompt, "model": model, "timeout": timeout, "stream": True})
+        yield "Hello from "
+        yield f"Cursor {model}!"
+
+    def generate_chat(self, prompt: str, model: str = "auto", timeout: float = 300.0, **kwargs: Any) -> str:
+        self.chat_calls.append({"prompt": prompt, "model": model, "timeout": timeout, "stream": False})
+        return f"Hello from Cursor {model}!"
+
+
 class MockCloudCodeClient:
     def __init__(self):
         self.models = [{"name": "models/gemini-2.5-pro"}, {"id": "gemini-2.5-flash"}]
@@ -140,6 +162,7 @@ class TestServerEndpoints(unittest.TestCase):
         cls.mock_client = MockCloudCodeClient()
         cls.mock_quota_provider = MockQuotaProvider()
         cls.mock_cursor_quota_provider = MockCursorQuotaProvider()
+        cls.mock_cursor_backend = MockCursorBackend()
         cls.server = create_server(
             host="127.0.0.1",
             port=0,
@@ -148,6 +171,7 @@ class TestServerEndpoints(unittest.TestCase):
             no_auth=True,
             quota_provider=cls.mock_quota_provider,
             cursor_quota_provider=cls.mock_cursor_quota_provider,
+            cursor_backend=cls.mock_cursor_backend,
         )
         cls.port = cls.server.server_address[1]
         cls.base_url = f"http://127.0.0.1:{cls.port}"
@@ -206,9 +230,13 @@ class TestServerEndpoints(unittest.TestCase):
         status, headers, body = self._http_get("/v1/models")
         self.assertEqual(status, 200)
         self.assertEqual(body["object"], "list")
-        self.assertEqual(len(body["data"]), 2)
-        self.assertEqual(body["data"][0]["id"], "gemini-2.5-pro")
-        self.assertEqual(body["data"][0]["owned_by"], "google")
+        self.assertEqual(len(body["data"]), 4)
+        ids = [m["id"] for m in body["data"]]
+        self.assertIn("gemini-2.5-pro", ids)
+        self.assertIn("cursor/gpt-5.3-codex", ids)
+        self.assertIn("cursor/composer-2.5", ids)
+        cursor_model = next(m for m in body["data"] if m["id"] == "cursor/gpt-5.3-codex")
+        self.assertEqual(cursor_model["owned_by"], "cursor")
 
     def test_chat_completions_non_streaming(self):
         payload = {
@@ -1144,12 +1172,74 @@ class TestServerEndpoints(unittest.TestCase):
         self.assertIn("summary", body)
         self.assertEqual(body["summary"]["membership_type"], "free")
 
-    def test_api_cursor_quota_refresh_flag(self):
-        status, headers, body = self._http_get("/api/cursor/quota?refresh=1")
+    def test_cursor_chat_completions_non_streaming(self):
+        payload = {
+            "model": "cursor/gpt-5.3-codex",
+            "messages": [{"role": "user", "content": "Write hello world in python"}],
+            "stream": False,
+        }
+        status, headers, body = self._http_post("/v1/chat/completions", payload)
         self.assertEqual(status, 200)
-        self.assertEqual(headers.get_content_type(), "application/json")
-        self.assertEqual(body["status"], "ok")
-        self.assertTrue(self.mock_cursor_quota_provider.last_force)
+        self.assertEqual(body["object"], "chat.completion")
+        self.assertEqual(body["model"], "cursor/gpt-5.3-codex")
+        self.assertIn("Hello from Cursor gpt-5.3-codex!", body["choices"][0]["message"]["content"])
+        self.assertEqual(body["choices"][0]["finish_reason"], "stop")
+
+    def test_cursor_chat_completions_streaming(self):
+        payload = {
+            "model": "gpt-5.3-codex",  # exclusive model routed without prefix
+            "messages": [{"role": "user", "content": "Say hi"}],
+            "stream": True,
+        }
+        resp = self._http_post("/v1/chat/completions", payload, stream=True)
+        self.assertEqual(resp.status, 200)
+        self.assertEqual(resp.headers.get_content_type(), "text/event-stream")
+
+        lines = []
+        for raw in resp:
+            line = raw.decode("utf-8").strip()
+            if line.startswith("data: ") and line != "data: [DONE]":
+                chunk = json.loads(line[6:])
+                lines.append(chunk)
+
+        self.assertTrue(len(lines) >= 2)
+        full_text = "".join(c["choices"][0]["delta"].get("content", "") for c in lines)
+        self.assertIn("Hello from Cursor gpt-5.3-codex!", full_text)
+
+    def test_cursor_anthropic_messages_non_streaming(self):
+        payload = {
+            "model": "cursor/composer-2.5",
+            "messages": [{"role": "user", "content": "Explain async"}],
+        }
+        status, headers, body = self._http_post("/v1/messages", payload)
+        self.assertEqual(status, 200)
+        self.assertEqual(body["type"], "message")
+        self.assertEqual(body["role"], "assistant")
+        self.assertEqual(body["model"], "cursor/composer-2.5")
+        text = "".join(b["text"] for b in body["content"] if b.get("type") == "text")
+        self.assertIn("Hello from Cursor composer-2.5!", text)
+
+    def test_cursor_anthropic_messages_streaming(self):
+        payload = {
+            "model": "cursor/composer-2.5",
+            "messages": [{"role": "user", "content": "Stream me"}],
+            "stream": True,
+        }
+        resp = self._http_post("/v1/messages", payload, stream=True)
+        self.assertEqual(resp.status, 200)
+        self.assertEqual(resp.headers.get_content_type(), "text/event-stream")
+
+        events = []
+        for raw in resp:
+            line = raw.decode("utf-8").strip()
+            if line.startswith("data: "):
+                event_data = json.loads(line[6:])
+                events.append(event_data)
+
+        types = [e.get("type") for e in events]
+        self.assertIn("message_start", types)
+        self.assertIn("content_block_delta", types)
+        self.assertIn("message_stop", types)
 
     def test_api_status_does_not_call_quota_provider(self):
         initial_count = self.mock_quota_provider.call_count
@@ -1678,6 +1768,7 @@ class TestServerAuthenticationAndCORS(unittest.TestCase):
     def setUpClass(cls):
         cls.mock_client = MockCloudCodeClient()
         cls.mock_quota_provider = MockQuotaProvider()
+        cls.mock_cursor_backend = MockCursorBackend()
         cls.api_key = "secure-test-token-777"
         cls.server = create_server(
             host="127.0.0.1",
@@ -1686,6 +1777,7 @@ class TestServerAuthenticationAndCORS(unittest.TestCase):
             project="test-project",
             api_key=cls.api_key,
             quota_provider=cls.mock_quota_provider,
+            cursor_backend=cls.mock_cursor_backend,
         )
         cls.port = cls.server.server_address[1]
         cls.base_url = f"http://127.0.0.1:{cls.port}"
