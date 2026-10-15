@@ -23,9 +23,54 @@ CODEX_ROOT_CONFLICT_REGEX = re.compile(
 )
 
 
-def build_codex_block(model: str, base_url: str, auth_token: str | None = None) -> str:
+def build_codex_block(
+    model: str,
+    base_url: str,
+    auth_token: str | None = None,
+    provider: str = "agy",
+) -> str:
     """Constructs the delimited agy configuration block for Codex config.toml."""
     headers_line = f'http_headers = {{ Authorization = "Bearer {auth_token}" }}\n' if auth_token else ""
+    p = provider.lower()
+    if p == "cursor":
+        def_model = model if model != "gemini-3.8-flash-high" else "cursor/auto"
+        return (
+            "# agy:start\n"
+            f'model = "{def_model}"\n'
+            'model_provider = "cursor"\n'
+            "model_context_window = 200000\n"
+            "model_auto_compact_token_limit = 180000\n\n"
+            "[model_providers.cursor]\n"
+            'name = "cursor"\n'
+            f'base_url = "{base_url}"\n'
+            'wire_api = "responses"\n'
+            "requires_openai_auth = false\n"
+            f"{headers_line}"
+            "# agy:end"
+        )
+    elif p in ("all", "todos"):
+        def_model = model if model.startswith("cursor/") else "gemini-3.8-flash-high"
+        def_prov = "cursor" if model.startswith("cursor/") else "agy"
+        return (
+            "# agy:start\n"
+            f'model = "{def_model}"\n'
+            f'model_provider = "{def_prov}"\n'
+            "model_context_window = 1048576\n"
+            "model_auto_compact_token_limit = 943718\n\n"
+            "[model_providers.agy]\n"
+            'name = "agy"\n'
+            f'base_url = "{base_url}"\n'
+            'wire_api = "responses"\n'
+            "requires_openai_auth = false\n"
+            f"{headers_line}\n"
+            "[model_providers.cursor]\n"
+            'name = "cursor"\n'
+            f'base_url = "{base_url}"\n'
+            'wire_api = "responses"\n'
+            "requires_openai_auth = false\n"
+            f"{headers_line}"
+            "# agy:end"
+        )
     return (
         "# agy:start\n"
         f'model = "{model}"\n'
@@ -88,7 +133,8 @@ class CodexConfigurator(ClientConfigurator):
             resolved_url = "http://127.0.0.1:24980/v1"
 
         auth_token = kwargs.get("auth_token") or get_active_api_key()
-        block = build_codex_block(model=model, base_url=resolved_url, auth_token=auth_token)
+        provider = str(kwargs.get("provider") or "agy").lower()
+        block = build_codex_block(model=model, base_url=resolved_url, auth_token=auth_token, provider=provider)
 
         backup_path = None
         if target.exists():
@@ -169,6 +215,7 @@ def setup_codex(
     port: int | None = None,
     model: str = "gemini-3.8-flash-high",
     auth_token: str | None = None,
+    provider: str = "agy",
 ) -> ConfigPath:
     """Configures Codex CLI config.toml with delimited agy configuration block."""
     return cast(
@@ -179,6 +226,7 @@ def setup_codex(
             config_path=config_path,
             port=port,
             auth_token=auth_token,
+            provider=provider,
         ),
     )
 

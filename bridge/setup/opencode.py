@@ -14,6 +14,34 @@ from bridge.setup.common import (
 )
 
 
+DEFAULT_CURSOR_OPENCODE_MODELS: dict[str, Any] = {
+    "cursor/auto": {
+        "name": "Auto [Cursor - Free]",
+        "limit": {"context": 200000, "output": 32000},
+    },
+    "cursor/gpt-5.3-codex": {
+        "name": "Codex 5.3 [Cursor - Pro]",
+        "limit": {"context": 200000, "output": 32000},
+    },
+    "cursor/composer-2.5": {
+        "name": "Composer 2.5 [Cursor - Pro]",
+        "limit": {"context": 200000, "output": 32000},
+    },
+    "cursor/claude-opus-5-5-high": {
+        "name": "Claude Opus 5.5 High [Cursor - Pro]",
+        "limit": {"context": 1000000, "output": 64000},
+    },
+    "cursor/claude-sonnet-5-5-high": {
+        "name": "Claude Sonnet 5.5 High [Cursor - Pro]",
+        "limit": {"context": 1000000, "output": 64000},
+    },
+    "cursor/grok-4.7-high": {
+        "name": "Grok 4.7 High [Cursor - Pro]",
+        "limit": {"context": 256000, "output": 32000},
+    },
+}
+
+
 class OpenCodeConfigurator(ClientConfigurator):
     """Configurator strategy for OpenCode CLI."""
 
@@ -113,21 +141,40 @@ class OpenCodeConfigurator(ClientConfigurator):
         if "$schema" not in config:
             config["$schema"] = "https://opencode.ai/config.json"
 
-        config["model"] = f"agy/{model}"
+        provider = str(kwargs.get("provider") or "agy").lower()
+        if provider == "cursor":
+            def_model = model if model != "gemini-3.8-flash-high" else "cursor/auto"
+            config["model"] = def_model if def_model.startswith("cursor/") else f"cursor/{def_model}"
+        elif provider in ("all", "todos"):
+            config["model"] = model if model.startswith("cursor/") else f"agy/{model or 'gemini-3.8-flash-high'}"
+        else:
+            config["model"] = f"agy/{model}"
 
         provider_map = config.get("provider")
         if not isinstance(provider_map, dict):
             provider_map = {}
             config["provider"] = provider_map
 
-        provider_map["agy"] = {
-            "npm": "@ai-sdk/openai-compatible",
-            "name": "AGY Bridge",
-            "options": {
-                "baseURL": resolved_url,
-                "apiKey": auth_token,
-            },
-            "models": {
+        if provider in ("cursor", "all", "todos"):
+            provider_map["cursor"] = {
+                "npm": "@ai-sdk/openai-compatible",
+                "name": "Cursor Agent",
+                "options": {
+                    "baseURL": resolved_url,
+                    "apiKey": auth_token,
+                },
+                "models": dict(DEFAULT_CURSOR_OPENCODE_MODELS),
+            }
+
+        if provider in ("agy", "all", "todos"):
+            provider_map["agy"] = {
+                "npm": "@ai-sdk/openai-compatible",
+                "name": "AGY Bridge",
+                "options": {
+                    "baseURL": resolved_url,
+                    "apiKey": auth_token,
+                },
+                "models": {
                 "gemini-3.8-flash-high": {
                     "name": "Gemini 3.8 Flash (High)",
                     "limit": {
@@ -254,9 +301,17 @@ class OpenCodeConfigurator(ClientConfigurator):
 
                     if isinstance(config, dict):
                         prov = config.get("provider")
+                        provider = kwargs.get("provider")
                         if isinstance(prov, dict):
-                            prov.pop("agy", None)
-                        if str(config.get("model", "")).startswith("agy/"):
+                            if provider == "cursor":
+                                prov.pop("cursor", None)
+                            elif provider in ("all", "todos"):
+                                prov.pop("agy", None)
+                                prov.pop("cursor", None)
+                            else:
+                                prov.pop("agy", None)
+                        m_str = str(config.get("model", ""))
+                        if m_str.startswith("agy/") or m_str.startswith("cursor/"):
                             config.pop("model", None)
 
                         formatted_json = json.dumps(config, indent=2) + "\n"
@@ -273,6 +328,7 @@ def setup_opencode(
     port: int | None = None,
     model: str = "gemini-3.8-flash-high",
     auth_token: str | None = None,
+    provider: str = "agy",
 ) -> ConfigPath:
     """Configures OpenCode opencode.json with agy provider and models."""
     return cast(
@@ -283,6 +339,7 @@ def setup_opencode(
             config_path=config_path,
             port=port,
             auth_token=auth_token,
+            provider=provider,
         ),
     )
 
@@ -290,9 +347,11 @@ def setup_opencode(
 def restore_opencode(
     config_path: Path | None = None,
     backup_path: Path | None = None,
+    provider: str | None = None,
 ) -> bool:
-    """Restores OpenCode opencode.json from backup or surgically removes agy provider."""
+    """Restores OpenCode opencode.json from backup or surgically removes agy/cursor provider."""
     return get_configurator("opencode").restore(
         config_path=config_path,
         backup_path=backup_path,
+        provider=provider,
     )

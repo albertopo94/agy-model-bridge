@@ -125,6 +125,73 @@ DEFAULT_PI_AND_GENTLE_MODELS: list[dict[str, Any]] = [
     },
 ]
 
+DEFAULT_CURSOR_MODELS: list[dict[str, Any]] = [
+    {
+        "id": "cursor/auto",
+        "name": "Auto [Cursor - Free]",
+        "reasoning": False,
+        "input": ["text"],
+        "contextWindow": 200000,
+        "maxTokens": 32000,
+    },
+    {
+        "id": "cursor/gpt-5.3-codex",
+        "name": "Codex 5.3 [Cursor - Pro]",
+        "reasoning": True,
+        "input": ["text"],
+        "contextWindow": 200000,
+        "maxTokens": 32000,
+    },
+    {
+        "id": "cursor/composer-2.5",
+        "name": "Composer 2.5 [Cursor - Pro]",
+        "reasoning": False,
+        "input": ["text"],
+        "contextWindow": 200000,
+        "maxTokens": 32000,
+    },
+    {
+        "id": "cursor/claude-opus-5-5-high",
+        "name": "Claude Opus 5.5 High [Cursor - Pro]",
+        "reasoning": True,
+        "input": ["text"],
+        "contextWindow": 1000000,
+        "maxTokens": 64000,
+    },
+    {
+        "id": "cursor/claude-sonnet-5-5-high",
+        "name": "Claude Sonnet 5.5 High [Cursor - Pro]",
+        "reasoning": True,
+        "input": ["text"],
+        "contextWindow": 1000000,
+        "maxTokens": 64000,
+    },
+    {
+        "id": "cursor/claude-haiku-5-5-high",
+        "name": "Claude Haiku 5.5 High [Cursor - Pro]",
+        "reasoning": True,
+        "input": ["text"],
+        "contextWindow": 1000000,
+        "maxTokens": 64000,
+    },
+    {
+        "id": "cursor/gpt-5.6-sol-high",
+        "name": "GPT-5.6 Sol High [Cursor - Pro]",
+        "reasoning": True,
+        "input": ["text"],
+        "contextWindow": 1000000,
+        "maxTokens": 64000,
+    },
+    {
+        "id": "cursor/grok-4.7-high",
+        "name": "Grok 4.7 High [Cursor - Pro]",
+        "reasoning": True,
+        "input": ["text"],
+        "contextWindow": 256000,
+        "maxTokens": 32000,
+    },
+]
+
 
 def _cleanup_pi_or_gentle_settings(settings_path: Path) -> None:
     """Restores settings.json from backup or surgically cleans agy provider and models."""
@@ -147,15 +214,17 @@ def _cleanup_pi_or_gentle_settings(settings_path: Path) -> None:
                 if isinstance(s_data, dict):
                     modified = False
                     agy_model_ids = {m["id"] for m in DEFAULT_PI_AND_GENTLE_MODELS} | {"gemini-3.8-flash-high", "gemini-3.8"}
+                    cursor_model_ids = {m["id"] for m in DEFAULT_CURSOR_MODELS} | {"auto", "cursor/auto"}
                     def_p = s_data.get("defaultProvider")
-                    if def_p in ("agy", "freellmapi") or (isinstance(def_p, str) and def_p.startswith("freellmapi-")):
+                    if def_p in ("agy", "cursor", "freellmapi") or (isinstance(def_p, str) and def_p.startswith("freellmapi-")):
                         s_data.pop("defaultProvider", None)
                         modified = True
                         def_model = s_data.get("defaultModel")
                         if (
                             def_model in agy_model_ids
+                            or def_model in cursor_model_ids
                             or def_model == "auto"
-                            or (isinstance(def_model, str) and (def_model.startswith("agy/") or def_model.startswith("freellmapi/")))
+                            or (isinstance(def_model, str) and (def_model.startswith("agy/") or def_model.startswith("cursor/") or def_model.startswith("freellmapi/")))
                         ):
                             s_data.pop("defaultModel", None)
                             modified = True
@@ -164,8 +233,9 @@ def _cleanup_pi_or_gentle_settings(settings_path: Path) -> None:
                             m for m in s_data["enabledModels"]
                             if not (
                                 m in agy_model_ids
+                                or m in cursor_model_ids
                                 or m == "auto"
-                                or (isinstance(m, str) and (m.startswith("agy/") or m.startswith("freellmapi/")))
+                                or (isinstance(m, str) and (m.startswith("agy/") or m.startswith("cursor/") or m.startswith("freellmapi/")))
                             )
                         ]
                         if len(new_models) != len(s_data["enabledModels"]):
@@ -209,11 +279,11 @@ class PiConfigurator(ClientConfigurator):
                     pass
             if isinstance(data, dict):
                 providers = data.get("providers")
-                if isinstance(providers, dict) and "agy" in providers:
+                if isinstance(providers, dict) and ("agy" in providers or "cursor" in providers):
                     return True
             if ":24980" in content:
                 return True
-            if '"providers"' in content and '"agy"' in content:
+            if '"providers"' in content and ('"agy"' in content or '"cursor"' in content):
                 return True
             return False
         except OSError:
@@ -259,14 +329,26 @@ class PiConfigurator(ClientConfigurator):
             backup_path = create_zero_state_backup(target)
 
         providers = config.setdefault("providers", {})
-        providers["agy"] = {
-            "name": "AGY Bridge",
-            "baseUrl": resolved_url,
-            "api": "openai-completions",
-            "apiKey": auth_token,
-            "headers": {"User-Agent": "pi-coding-agent"},
-            "models": [dict(m) for m in DEFAULT_PI_AND_GENTLE_MODELS],
-        }
+        provider = str(kwargs.get("provider") or "agy").lower()
+
+        if provider in ("cursor", "all", "todos"):
+            providers["cursor"] = {
+                "name": "Cursor Agent",
+                "baseUrl": resolved_url,
+                "api": "openai-completions",
+                "apiKey": auth_token,
+                "headers": {"User-Agent": "pi-coding-agent"},
+                "models": [dict(m) for m in DEFAULT_CURSOR_MODELS],
+            }
+        if provider in ("agy", "all", "todos"):
+            providers["agy"] = {
+                "name": "AGY Bridge",
+                "baseUrl": resolved_url,
+                "api": "openai-completions",
+                "apiKey": auth_token,
+                "headers": {"User-Agent": "pi-coding-agent"},
+                "models": [dict(m) for m in DEFAULT_PI_AND_GENTLE_MODELS],
+            }
 
         if kwargs.get("set_default"):
             settings_path = target.parent / "settings.json"
@@ -285,8 +367,14 @@ class PiConfigurator(ClientConfigurator):
                             settings_config = s_loaded
                 except (json.JSONDecodeError, OSError):
                     settings_config = {}
-            settings_config["defaultProvider"] = "agy"
-            settings_config["defaultModel"] = model
+
+            if provider == "cursor" or (provider in ("all", "todos") and (model.startswith("cursor/") or model == "auto")):
+                settings_config["defaultProvider"] = "cursor"
+                def_model = model if model not in ("gemini-3.8-flash-high", "auto") else "cursor/auto"
+                settings_config["defaultModel"] = def_model
+            else:
+                settings_config["defaultProvider"] = "agy"
+                settings_config["defaultModel"] = model
             if "enabledModels" in settings_config and isinstance(settings_config["enabledModels"], list):
                 scoped_name = f"agy/{model}"
                 if scoped_name not in settings_config["enabledModels"]:
@@ -411,11 +499,11 @@ class GentleShellConfigurator(ClientConfigurator):
                     pass
             if isinstance(data, dict):
                 providers = data.get("providers")
-                if isinstance(providers, dict) and "agy" in providers:
+                if isinstance(providers, dict) and ("agy" in providers or "cursor" in providers):
                     return True
             if ":24980" in content:
                 return True
-            if '"providers"' in content and '"agy"' in content:
+            if '"providers"' in content and ('"agy"' in content or '"cursor"' in content):
                 return True
             return False
         except OSError:
@@ -498,14 +586,26 @@ class GentleShellConfigurator(ClientConfigurator):
             backup_path = create_zero_state_backup(target)
 
         providers = config.setdefault("providers", {})
-        providers["agy"] = {
-            "name": "AGY Bridge",
-            "baseUrl": resolved_url,
-            "api": "openai-completions",
-            "apiKey": auth_token,
-            "headers": {"User-Agent": "gentle-shell"},
-            "models": [dict(m) for m in DEFAULT_PI_AND_GENTLE_MODELS],
-        }
+        provider = str(kwargs.get("provider") or "agy").lower()
+
+        if provider in ("cursor", "all", "todos"):
+            providers["cursor"] = {
+                "name": "Cursor Agent",
+                "baseUrl": resolved_url,
+                "api": "openai-completions",
+                "apiKey": auth_token,
+                "headers": {"User-Agent": "gentle-shell"},
+                "models": [dict(m) for m in DEFAULT_CURSOR_MODELS],
+            }
+        if provider in ("agy", "all", "todos"):
+            providers["agy"] = {
+                "name": "AGY Bridge",
+                "baseUrl": resolved_url,
+                "api": "openai-completions",
+                "apiKey": auth_token,
+                "headers": {"User-Agent": "gentle-shell"},
+                "models": [dict(m) for m in DEFAULT_PI_AND_GENTLE_MODELS],
+            }
 
         if kwargs.get("set_default"):
             settings_path = target.parent / "settings.json"
@@ -524,8 +624,14 @@ class GentleShellConfigurator(ClientConfigurator):
                             settings_config = s_loaded
                 except (json.JSONDecodeError, OSError):
                     settings_config = {}
-            settings_config["defaultProvider"] = "agy"
-            settings_config["defaultModel"] = model
+
+            if provider == "cursor" or (provider in ("all", "todos") and (model.startswith("cursor/") or model == "auto")):
+                settings_config["defaultProvider"] = "cursor"
+                def_model = model if model not in ("gemini-3.8-flash-high", "auto") else "cursor/auto"
+                settings_config["defaultModel"] = def_model
+            else:
+                settings_config["defaultProvider"] = "agy"
+                settings_config["defaultModel"] = model
             if "enabledModels" in settings_config and isinstance(settings_config["enabledModels"], list):
                 scoped_name = f"agy/{model}"
                 if scoped_name not in settings_config["enabledModels"]:
@@ -709,6 +815,7 @@ def setup_pi(
     model: str = "gemini-3.8-flash-high",
     auth_token: str | None = None,
     set_default: bool = False,
+    provider: str = "agy",
 ) -> ConfigPath:
     """Configures Pi models.json for agy-model-bridge gateway."""
     return cast(
@@ -720,6 +827,7 @@ def setup_pi(
             port=port,
             auth_token=auth_token,
             set_default=set_default,
+            provider=provider,
         ),
     )
 
@@ -727,11 +835,13 @@ def setup_pi(
 def restore_pi(
     config_path: Path | None = None,
     backup_path: Path | None = None,
+    provider: str | None = None,
 ) -> bool:
-    """Restores Pi models.json from backup or surgically removes agy provider."""
+    """Restores Pi models.json from backup or surgically removes agy/cursor provider."""
     return get_configurator("pi").restore(
         config_path=config_path,
         backup_path=backup_path,
+        provider=provider,
     )
 
 

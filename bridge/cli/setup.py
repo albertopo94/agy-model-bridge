@@ -201,6 +201,12 @@ def handle_setup_claude(argv: list[str], prog_base: str, setup_fn: Any = None) -
         default=None,
         help="Path to Claude settings.json (default: ~/.claude/settings.json)",
     )
+    parser.add_argument(
+        "--provider",
+        choices=["agy", "cursor", "all"],
+        default="agy",
+        help="Provider to configure (default: agy)",
+    )
     parser.add_argument("--lang", type=str, default=None, help=t("cli_help_lang"))
     args = parser.parse_args(argv)
     target = fn(
@@ -209,6 +215,7 @@ def handle_setup_claude(argv: list[str], prog_base: str, setup_fn: Any = None) -
         port=args.port,
         model=args.model,
         auth_token=args.auth_token,
+        provider=args.provider,
     )
     if getattr(target, "backup_path", None):
         print(t("setup_backup_label", path=target.backup_path))
@@ -254,6 +261,12 @@ def handle_setup_codex(argv: list[str], prog_base: str, setup_fn: Any = None) ->
         default=None,
         help="Path to Codex config.toml (default: ~/.codex/config.toml)",
     )
+    parser.add_argument(
+        "--provider",
+        choices=["agy", "cursor", "all"],
+        default="agy",
+        help="Provider to configure (default: agy)",
+    )
     parser.add_argument("--lang", type=str, default=None, help=t("cli_help_lang"))
     args = parser.parse_args(argv)
     target = fn(
@@ -262,6 +275,7 @@ def handle_setup_codex(argv: list[str], prog_base: str, setup_fn: Any = None) ->
         port=args.port,
         model=args.model,
         auth_token=args.auth_token,
+        provider=args.provider,
     )
     if getattr(target, "backup_path", None):
         print(t("setup_backup_label", path=target.backup_path))
@@ -307,6 +321,12 @@ def handle_setup_hermes(argv: list[str], prog_base: str, setup_fn: Any = None) -
         default=None,
         help="Path to Hermes config.yaml (default: ~/.hermes/config.yaml)",
     )
+    parser.add_argument(
+        "--provider",
+        choices=["agy", "cursor", "all"],
+        default="agy",
+        help="Provider to configure (default: agy)",
+    )
     parser.add_argument("--lang", type=str, default=None, help=t("cli_help_lang"))
     args = parser.parse_args(argv)
     target = fn(
@@ -315,6 +335,7 @@ def handle_setup_hermes(argv: list[str], prog_base: str, setup_fn: Any = None) -
         port=args.port,
         model=args.model,
         auth_token=args.auth_token,
+        provider=args.provider,
     )
     if getattr(target, "backup_path", None):
         print(t("setup_backup_label", path=target.backup_path))
@@ -360,6 +381,12 @@ def handle_setup_opencode(argv: list[str], prog_base: str, setup_fn: Any = None)
         default=None,
         help="Path to OpenCode config (default: ~/.config/opencode/opencode.json)",
     )
+    parser.add_argument(
+        "--provider",
+        choices=["agy", "cursor", "all"],
+        default="agy",
+        help="Provider to configure (default: agy)",
+    )
     parser.add_argument("--lang", type=str, default=None, help=t("cli_help_lang"))
     args = parser.parse_args(argv)
     target = fn(
@@ -368,6 +395,7 @@ def handle_setup_opencode(argv: list[str], prog_base: str, setup_fn: Any = None)
         port=args.port,
         model=args.model,
         auth_token=args.auth_token,
+        provider=args.provider,
     )
     if getattr(target, "backup_path", None):
         print(t("setup_backup_label", path=target.backup_path))
@@ -413,6 +441,12 @@ def handle_setup_openclaw(argv: list[str], prog_base: str, setup_fn: Any = None)
         default=None,
         help=f"Path to OpenClaw config (default: {get_configurator('openclaw').default_config_path})",
     )
+    parser.add_argument(
+        "--provider",
+        choices=["agy", "cursor", "all"],
+        default="agy",
+        help="Provider to configure (default: agy)",
+    )
     parser.add_argument("--lang", type=str, default=None, help=t("cli_help_lang"))
     args = parser.parse_args(argv)
     target = fn(
@@ -421,6 +455,7 @@ def handle_setup_openclaw(argv: list[str], prog_base: str, setup_fn: Any = None)
         port=args.port,
         model=args.model,
         auth_token=args.auth_token,
+        provider=args.provider,
     )
     if getattr(target, "backup_path", None):
         print(t("setup_backup_label", path=target.backup_path))
@@ -533,6 +568,12 @@ def handle_setup_pi(argv: list[str], prog_base: str, setup_fn: Any = None) -> in
         default=None,
         help=f"Path to Pi models.json (default: {get_configurator('pi').default_config_path})",
     )
+    parser.add_argument(
+        "--provider",
+        choices=["agy", "cursor", "all"],
+        default="agy",
+        help="Provider to configure (default: agy)",
+    )
     parser.add_argument("--lang", type=str, default=None, help=t("cli_help_lang"))
     args = parser.parse_args(argv)
     target = fn(
@@ -542,6 +583,7 @@ def handle_setup_pi(argv: list[str], prog_base: str, setup_fn: Any = None) -> in
         model=args.model,
         auth_token=args.auth_token,
         set_default=args.set_default,
+        provider=args.provider,
     )
     if getattr(target, "backup_path", None):
         print(t("setup_backup_label", path=target.backup_path))
@@ -603,7 +645,7 @@ def handle_setup_gentle_shell(
     )
     parser.add_argument(
         "--provider",
-        choices=["agy", "freellmapi"],
+        choices=["agy", "cursor", "all", "freellmapi"],
         default="agy",
         help="Provider to configure (default: agy)",
     )

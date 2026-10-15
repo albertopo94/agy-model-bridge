@@ -23,12 +23,15 @@ def build_hermes_block(
     model: str = "gemini-3.8-flash-high",
     auth_token: str = "local-bridge",
     port: int = 24980,
+    provider: str = "agy",
 ) -> str:
     """Constructs the delimited agy configuration block for Hermes config.yaml."""
+    p = provider.lower()
+    def_model = model if p != "cursor" else (model if model != "gemini-3.8-flash-high" else "cursor/auto")
     return (
         "# agy:start\n"
         "model:\n"
-        f'  default: "{model}"\n'
+        f'  default: "{def_model}"\n'
         f'  provider: "custom:local-(127.0.0.1:{port})"\n'
         f'  base_url: "{base_url}"\n'
         '  api_mode: "chat_completions"\n'
@@ -115,11 +118,13 @@ class HermesConfigurator(ClientConfigurator):
             m = re.search(r":(\d+)", resolved_url)
             resolved_port = int(m.group(1)) if m else 24980
 
+        provider = str(kwargs.get("provider") or "agy").lower()
         block = build_hermes_block(
             base_url=resolved_url,
             model=model,
             auth_token=auth_token,
             port=resolved_port,
+            provider=provider,
         )
 
         backup_path = None
@@ -189,6 +194,7 @@ def setup_hermes(
     port: int | None = None,
     model: str = "gemini-3.8-flash-high",
     auth_token: str | None = None,
+    provider: str = "agy",
 ) -> ConfigPath:
     """Configures Hermes Agent config.yaml with delimited agy configuration block."""
     return cast(
@@ -199,6 +205,7 @@ def setup_hermes(
             config_path=config_path,
             port=port,
             auth_token=auth_token,
+            provider=provider,
         ),
     )
 

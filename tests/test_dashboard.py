@@ -799,6 +799,34 @@ class TestDashboardBilingual(unittest.TestCase):
         html_es = render_dashboard("127.0.0.1", 24980, auth_status, models_count=10, lang="es")
         self.assertIn("Requiere el gateway de FreeLLMAPI corriendo en http://127.0.0.1:31415", html_es)
 
+    def test_all_cards_multi_provider_and_cursor_free_notice(self):
+        auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
+        html_en = render_dashboard("127.0.0.1", 24980, auth_status, models_count=10, lang="en")
+
+        # Gentle shell has all 4 tabs
+        self.assertIn('data-card="gentle-shell" data-provider="agy"', html_en)
+        self.assertIn('data-card="gentle-shell" data-provider="cursor"', html_en)
+        self.assertIn('data-card="gentle-shell" data-provider="all"', html_en)
+        self.assertIn('data-card="gentle-shell" data-provider="freellmapi"', html_en)
+
+        # Pi card has 3 tabs
+        self.assertIn('data-card="pi" data-provider="agy"', html_en)
+        self.assertIn('data-card="pi" data-provider="cursor"', html_en)
+        self.assertIn('data-card="pi" data-provider="all"', html_en)
+
+        # Claude Code card has 3 tabs
+        self.assertIn('data-card="claude" data-provider="agy"', html_en)
+        self.assertIn('data-card="claude" data-provider="cursor"', html_en)
+        self.assertIn('data-card="claude" data-provider="all"', html_en)
+
+        # Cursor tabs show free tier notice
+        self.assertIn("On Cursor's Free plan, only 'cursor/auto' is available", html_en)
+
+        # Spanish translation
+        html_es = render_dashboard("127.0.0.1", 24980, auth_status, models_count=10, lang="es")
+        self.assertIn("En el plan Free de Cursor solo está disponible el modelo 'cursor/auto'", html_es)
+        self.assertIn("Todos (AGY + Cursor)", html_es)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -8,16 +8,20 @@ Zero-dependency, pure Python 3 local AI gateway that bridges the Google Cloud Co
 
 - **Zero External Dependencies**: Built entirely using the Python 3 standard library (`http.server`, `urllib.request`, `subprocess`, `json`, `base64`, `threading`, `time`). No `pip install`, no virtual environment, no Node.js required.
 - **Multi-Protocol Gateway**:
-  - `GET /` — Self-contained dark-mode dashboard (Geist/Vercel styling) with live Keychain auth badges, model count, and one-click copyable setup cards.
-  - `GET /v1/models` — Dynamic model catalog discovered directly from upstream Cloud Code Assist with Codex serde compatibility (`data`, `models`, `slug`, `display_name`).
-  - `POST /v1/chat/completions` — OpenAI Chat Completions API with full streaming (SSE `text/event-stream`) and non-streaming support (for FreeLLMAPI, Hermes Agent, OpenCode, OpenClaw, Cursor, Pi, Gentle Shell, Aider).
+  - `GET /` — Self-contained dark-mode dashboard (Geist/Vercel styling) with live Keychain auth badges, model count, real-time Antigravity & Cursor quota cards, and one-click copyable multi-provider setup cards.
+  - `GET /v1/models` — Dynamic model catalog discovered directly from upstream Cloud Code Assist and Cursor CLI (`agent models`) with Codex serde compatibility (`data`, `models`, `slug`, `display_name`).
+  - `POST /v1/chat/completions` — OpenAI Chat Completions API with full streaming (SSE `text/event-stream`) and non-streaming support (for FreeLLMAPI, Hermes Agent, OpenCode, OpenClaw, Cursor, Pi, Gentle Shell, Aider). Routes models automatically to Antigravity or Cursor.
   - `POST /v1/responses` — OpenAI Responses API shim for Codex CLI (`wire_api = "responses"`).
-  - `POST /v1/messages` — Anthropic Messages API shim with dynamic SSE stream mapping (`thinking_delta`, `text_delta`, `tool_use`, `input_json_delta`), recursive OpenAPI 3.0 schema sanitization, and full tool calling for Claude Code CLI.
-- **Built-in Setup CLI**: Native subcommands (`setup-claude`, `setup-codex`, `setup-hermes`, `setup-opencode`, `setup-openclaw`, `setup-cursor`, `setup-pi`, `setup-gentle-shell`) that surgically configure client environments with atomic writes, file permissions `0o600`, and automatic timestamped backups.
+  - `POST /v1/messages` — Anthropic Messages API shim with dynamic SSE stream mapping (`thinking_delta`, `text_delta`, `tool_use`, `input_json_delta`), recursive OpenAPI 3.0 schema sanitization, and full tool calling for Claude Code CLI across both Antigravity and Cursor models.
+- **Multi-Provider Upstream Gateway (Antigravity & Cursor)**:
+  - Bridges both **Google Antigravity** and local **Cursor CLI (`agent -p`)** into a unified local gateway.
+  - Transparently routes `cursor/*` and exclusive Cursor models (`gpt-5.3-codex`, `composer-2.5`, `grok-4.7`, etc.) to Cursor while serving Google models (`gemini-*`, `claude-*`) via Antigravity.
+  - On Cursor Free tier, defaults to `cursor/auto` with clear notices, while supporting named models on Pro/Business tiers.
+- **Built-in Setup CLI**: Native subcommands (`setup-claude`, `setup-codex`, `setup-hermes`, `setup-opencode`, `setup-openclaw`, `setup-cursor`, `setup-pi`, `setup-gentle-shell`) that surgically configure client environments with atomic writes, file permissions `0o600`, automatic timestamped backups, and multi-provider selection (`--provider agy|cursor|all`).
 - **Automatic Local API Key Security**: Automatically generates a persistent random API key stored at `~/.agy-bridge/api_key` (`0600` permissions) to protect `/v1/*` gateway endpoints against cross-origin access.
-- **macOS Keychain OAuth Integration**: Seamlessly extracts Google OAuth credentials stored by Antigravity in Keychain (`service="gemini"`, `account="antigravity"`) with thread-safe TTL caching and automatic 401 re-read.
-- **Antigravity Model Quota Tracking**: Real-time quota monitoring on the dashboard and `GET /api/quota` JSON endpoint. Queries the local Antigravity CLI (`agy -p /usage --output-format json`) with zero token spend, 60-second TTL cache, single-flight locking, stale-on-error resilience, and visual usage bars for Gemini and 3P pools (requires `agy >= 1.1.11`).
-- **Adaptive Thinking & Model Aliasing**: Intelligently resolves `gemini-3.8-flash-high` / `auto` to upstream `gemini-3.8-flash-tiered`, automatically configuring reasoning levels (`HIGH`, `MEDIUM`, `LOW`) and token budgets.
+- **macOS Keychain OAuth Integration**: Seamlessly extracts Google OAuth credentials (`service="gemini"`, `account="antigravity"`) and Cursor session JWTs (`service="cursor-access-token"`, `account="cursor-user"`) directly from macOS Keychain with thread-safe TTL caching.
+- **Antigravity & Cursor Model Quota Tracking**: Real-time quota monitoring on the dashboard and JSON endpoints (`GET /api/quota` and `GET /api/cursor/quota`). Displays visual usage bars and reset countdowns for Antigravity pools (Gemini and 3P) and Cursor buckets (`Cursor Models`, `Other Models`, `Plan`).
+- **Extended 300s HTTP Timeout & Deep Reasoning**: 300-second upstream timeout allows models with deep reasoning chains (`gemini-3.8-flash-high`, `claude-opus-5-5-high`) to complete complex thinking steps without connection resets.
 
 ---
 
@@ -232,24 +236,35 @@ Follow the on-screen guide to:
 
 ### 🎴 Pi Coding Agent
 
-Run the automated setup:
+Run the automated setup for AGY:
 ```bash
 agy-bridge setup-pi
 ```
+Or configure Pi for Cursor models or both providers:
+```bash
+# Configure Cursor models (defaults to cursor/auto on Free plans)
+agy-bridge setup-pi --provider cursor --set-default
+
+# Configure both AGY and Cursor side-by-side
+agy-bridge setup-pi --provider all
+```
 This surgically configures `~/.pi/agent/models.json` with:
-- Provider: `agy` configured with OpenAI completions API
-- Models: `gemini-3.8-flash-high`, `gemini-3.8`, `claude-sonnet-5-5-high/medium/low`, `claude-opus-5-5-high/medium/low`, `gemini-2.5-pro`, `gemini-2.5-flash`
+- Providers: `agy` and/or `cursor` configured with OpenAI completions API
+- Models: `gemini-3.8-flash-high`, `claude-sonnet-5-5-high`, `cursor/auto`, `cursor/gpt-5.3-codex`, etc.
 - Base URL: `http://127.0.0.1:24980/v1`
 
 Options:
-- `--set-default`: Also sets `agy` and the default model as defaults in `~/.pi/agent/settings.json` (and synchronizes `enabledModels` if scoped).
-- `--model <name>`: Specify a default model (default: `gemini-3.8-flash-high`).
+- `--provider <agy|cursor|all>`: Choose provider to configure (default: `agy`).
+- `--set-default`: Also sets the provider and default model in `~/.pi/agent/settings.json`.
+- `--model <name>`: Specify a default model (default: `gemini-3.8-flash-high` for AGY, `cursor/auto` for Cursor).
 
-Once configured, launch Pi or select an AGY model:
+Once configured, launch Pi or select a model:
 ```bash
 pi --model agy/gemini-3.8-flash-high
+# Or switch to Cursor
+pi --model cursor/auto
 ```
-Or switch models inside Pi using `/model agy/gemini-3.8-flash-high`.
+Or switch models inside Pi using `/model`.
 
 ### 🎴 Gentle Shell
 
@@ -258,27 +273,36 @@ Run the automated setup for AGY Bridge:
 agy-bridge setup-gentle-shell
 ```
 
+Configure Gentle Shell for Cursor models or both providers:
+```bash
+# Configure Cursor models
+agy-bridge setup-gentle-shell --provider cursor --set-default
+
+# Configure both AGY and Cursor simultaneously
+agy-bridge setup-gentle-shell --provider all
+```
+
 Or configure Gentle Shell to use FreeLLMAPI with automatic sandbox isolation and backup tracking:
 ```bash
 agy-bridge setup-gentle-shell --provider freellmapi --api-key "<YOUR_KEY>"
 ```
 
 This surgically configures `~/.gentle-shell/agent/models.json` with:
-- Provider: `agy` configured with OpenAI completions API
-- Models: `gemini-3.8-flash-high`, `gemini-3.8`, `claude-sonnet-5-5-high/medium/low`, `claude-opus-5-5-high/medium/low`, `claude-haiku-5-5-high/medium/low`, `gemini-2.5-pro`, `gemini-2.5-flash`
+- Providers: `agy` and/or `cursor` configured with OpenAI completions API
+- Models: Google and Cursor models with friendly tags (`[AGY]`, `[Cursor - Free]`, `[Cursor - Pro]`)
 - Base URL: `http://127.0.0.1:24980/v1`
 
 Options:
-- `--provider <agy|freellmapi>`: Choose provider to configure (default: `agy`).
+- `--provider <agy|cursor|all|freellmapi>`: Choose provider to configure (default: `agy`).
 - `--api-key <key>`: Provider API key (required for FreeLLMAPI).
 - `--set-default`: Also sets the provider and model as defaults in `~/.gentle-shell/agent/settings.json`.
-- `--model <name>`: Specify a default model (default: `gemini-3.8-flash-high`).
+- `--model <name>`: Specify a default model (default: `gemini-3.8-flash-high` for AGY, `cursor/auto` for Cursor).
 
-Once configured, launch Gentle Shell or select an AGY model:
+Once configured, launch Gentle Shell or select a model:
 ```bash
 gentle-shell --model agy/gemini-3.8-flash-high
 ```
-Or switch models inside Gentle Shell using `/model agy/gemini-3.8-flash-high`.
+Or switch models inside Gentle Shell using `/model`.
 
 ### 🎴 FreeLLMAPI
 Register this bridge as an OpenAI-compatible Custom Provider in FreeLLMAPI:

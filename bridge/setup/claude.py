@@ -65,6 +65,44 @@ DEFAULT_CLAUDE_MODEL_PICKER_OPTIONS: list[dict[str, str]] = [
     },
 ]
 
+DEFAULT_CURSOR_CLAUDE_MODEL_PICKER_OPTIONS: list[dict[str, str]] = [
+    {
+        "model": "cursor/auto",
+        "label": "Auto [Cursor - Free]",
+        "behavesAs": "claude-3-7-sonnet",
+    },
+    {
+        "model": "cursor/gpt-5.3-codex",
+        "label": "Codex 5.3 [Cursor - Pro]",
+        "behavesAs": "claude-3-7-sonnet",
+    },
+    {
+        "model": "cursor/composer-2.5",
+        "label": "Composer 2.5 [Cursor - Pro]",
+        "behavesAs": "claude-3-7-sonnet",
+    },
+    {
+        "model": "cursor/claude-opus-5-5-high",
+        "label": "Claude Opus 5.5 High [Cursor - Pro]",
+        "behavesAs": "claude-3-7-sonnet",
+    },
+    {
+        "model": "cursor/claude-sonnet-5-5-high",
+        "label": "Claude Sonnet 5.5 High [Cursor - Pro]",
+        "behavesAs": "claude-3-7-sonnet",
+    },
+    {
+        "model": "cursor/claude-haiku-5-5-high",
+        "label": "Claude Haiku 5.5 High [Cursor - Pro]",
+        "behavesAs": "claude-3-7-sonnet",
+    },
+    {
+        "model": "cursor/grok-4.7-high",
+        "label": "Grok 4.7 High [Cursor - Pro]",
+        "behavesAs": "claude-3-7-sonnet",
+    },
+]
+
 
 class ClaudeConfigurator(ClientConfigurator):
     """Configurator strategy for Claude Code CLI."""
@@ -148,6 +186,23 @@ class ClaudeConfigurator(ClientConfigurator):
             except (json.JSONDecodeError, OSError):
                 settings = {}
 
+        provider = str(kwargs.get("provider") or "agy").lower()
+        effective_model = model
+        if provider == "cursor":
+            if model == "gemini-3.8-flash-high" or not model:
+                effective_model = "cursor/auto"
+            model_options = [dict(opt) for opt in DEFAULT_CURSOR_CLAUDE_MODEL_PICKER_OPTIONS]
+        elif provider in ("all", "todos"):
+            if model.startswith("cursor/"):
+                effective_model = model
+            else:
+                effective_model = model or "gemini-3.8-flash-high"
+            model_options = [dict(opt) for opt in DEFAULT_CLAUDE_MODEL_PICKER_OPTIONS] + [
+                dict(opt) for opt in DEFAULT_CURSOR_CLAUDE_MODEL_PICKER_OPTIONS
+            ]
+        else:
+            model_options = [dict(opt) for opt in DEFAULT_CLAUDE_MODEL_PICKER_OPTIONS]
+
         env_dict = settings.get("env")
         if not isinstance(env_dict, dict):
             env_dict = {}
@@ -155,20 +210,19 @@ class ClaudeConfigurator(ClientConfigurator):
 
         env_dict["ANTHROPIC_BASE_URL"] = resolved_url
         env_dict["ANTHROPIC_AUTH_TOKEN"] = auth_token
-        env_dict["ANTHROPIC_MODEL"] = model
-        env_dict["ANTHROPIC_DEFAULT_SONNET_MODEL"] = model
-        env_dict["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = model
-        env_dict["ANTHROPIC_DEFAULT_OPUS_MODEL"] = model
+        env_dict["ANTHROPIC_MODEL"] = effective_model
+        env_dict["ANTHROPIC_DEFAULT_SONNET_MODEL"] = effective_model
+        env_dict["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = effective_model
+        env_dict["ANTHROPIC_DEFAULT_OPUS_MODEL"] = effective_model
         env_dict["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = "1048576"
         env_dict["CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"] = "1"
 
-        model_options = [dict(opt) for opt in DEFAULT_CLAUDE_MODEL_PICKER_OPTIONS]
-        if not any(opt.get("model") == model for opt in model_options):
+        if not any(opt.get("model") == effective_model for opt in model_options):
             model_options.insert(
                 0,
                 {
-                    "model": model,
-                    "label": f"Custom ({model})",
+                    "model": effective_model,
+                    "label": f"Custom ({effective_model})",
                     "behavesAs": "claude-3-7-sonnet",
                 },
             )
@@ -276,6 +330,7 @@ def setup_claude(
     port: int | None = None,
     model: str = "gemini-3.8-flash-high",
     auth_token: str | None = None,
+    provider: str = "agy",
 ) -> ConfigPath:
     """Configures Claude Code settings.json with agy-model-bridge environment variables."""
     return cast(
@@ -286,6 +341,7 @@ def setup_claude(
             config_path=settings_path,
             port=port,
             auth_token=auth_token,
+            provider=provider,
         ),
     )
 

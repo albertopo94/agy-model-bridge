@@ -15,6 +15,64 @@ from bridge.setup.common import (
 )
 
 
+DEFAULT_CURSOR_OPENCLAW_MODELS: list[dict[str, Any]] = [
+    {
+        "id": "cursor/auto",
+        "name": "Auto [Cursor - Free]",
+        "reasoning": False,
+        "input": ["text"],
+        "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+        "contextWindow": 200000,
+        "maxTokens": 32000,
+    },
+    {
+        "id": "cursor/gpt-5.3-codex",
+        "name": "Codex 5.3 [Cursor - Pro]",
+        "reasoning": True,
+        "input": ["text"],
+        "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+        "contextWindow": 200000,
+        "maxTokens": 32000,
+    },
+    {
+        "id": "cursor/composer-2.5",
+        "name": "Composer 2.5 [Cursor - Pro]",
+        "reasoning": False,
+        "input": ["text"],
+        "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+        "contextWindow": 200000,
+        "maxTokens": 32000,
+    },
+    {
+        "id": "cursor/claude-opus-5-5-high",
+        "name": "Claude Opus 5.5 High [Cursor - Pro]",
+        "reasoning": True,
+        "input": ["text"],
+        "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+        "contextWindow": 1000000,
+        "maxTokens": 64000,
+    },
+    {
+        "id": "cursor/claude-sonnet-5-5-high",
+        "name": "Claude Sonnet 5.5 High [Cursor - Pro]",
+        "reasoning": True,
+        "input": ["text"],
+        "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+        "contextWindow": 1000000,
+        "maxTokens": 64000,
+    },
+    {
+        "id": "cursor/grok-4.7-high",
+        "name": "Grok 4.7 High [Cursor - Pro]",
+        "reasoning": True,
+        "input": ["text"],
+        "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+        "contextWindow": 256000,
+        "maxTokens": 32000,
+    },
+]
+
+
 class OpenClawConfigurator(ClientConfigurator):
     """Configurator strategy for OpenClaw."""
 
@@ -120,12 +178,24 @@ class OpenClawConfigurator(ClientConfigurator):
 
         models_dict = config.setdefault("models", {})
         providers = models_dict.setdefault("providers", {})
-        providers["agy"] = {
-            "baseUrl": resolved_url,
-            "apiKey": auth_token,
-            "api": "openai-completions",
-            "headers": {"User-Agent": "openclaw"},
-            "models": [
+        provider = str(kwargs.get("provider") or "agy").lower()
+
+        if provider in ("cursor", "all", "todos"):
+            providers["cursor"] = {
+                "baseUrl": resolved_url,
+                "apiKey": auth_token,
+                "api": "openai-completions",
+                "headers": {"User-Agent": "openclaw"},
+                "models": [dict(m) for m in DEFAULT_CURSOR_OPENCLAW_MODELS],
+            }
+
+        if provider in ("agy", "all", "todos"):
+            providers["agy"] = {
+                "baseUrl": resolved_url,
+                "apiKey": auth_token,
+                "api": "openai-completions",
+                "headers": {"User-Agent": "openclaw"},
+                "models": [
                 {
                     "id": "gemini-3.8-flash-high",
                     "name": "Gemini 3.8 Flash (High)",
@@ -276,17 +346,25 @@ class OpenClawConfigurator(ClientConfigurator):
 
                     if isinstance(config, dict):
                         models_dict = config.get("models")
+                        provider = kwargs.get("provider")
                         if isinstance(models_dict, dict):
                             prov = models_dict.get("providers")
                             if isinstance(prov, dict):
-                                prov.pop("agy", None)
+                                if provider == "cursor":
+                                    prov.pop("cursor", None)
+                                elif provider in ("all", "todos"):
+                                    prov.pop("agy", None)
+                                    prov.pop("cursor", None)
+                                else:
+                                    prov.pop("agy", None)
                         agents = config.get("agents")
                         if isinstance(agents, dict):
                             defaults = agents.get("defaults")
                             if isinstance(defaults, dict):
                                 model_dict = defaults.get("model")
                                 if isinstance(model_dict, dict):
-                                    if str(model_dict.get("primary", "")).startswith("agy/"):
+                                    prim = str(model_dict.get("primary", ""))
+                                    if prim.startswith("agy/") or prim.startswith("cursor/"):
                                         model_dict.pop("primary", None)
 
                         formatted_json = json.dumps(config, indent=2) + "\n"
@@ -303,6 +381,7 @@ def setup_openclaw(
     port: int | None = None,
     model: str = "gemini-3.8-flash-high",
     auth_token: str | None = None,
+    provider: str = "agy",
 ) -> ConfigPath:
     """Configures OpenClaw openclaw.json with agy provider and models."""
     return cast(
@@ -313,6 +392,7 @@ def setup_openclaw(
             config_path=config_path,
             port=port,
             auth_token=auth_token,
+            provider=provider,
         ),
     )
 
@@ -320,9 +400,11 @@ def setup_openclaw(
 def restore_openclaw(
     config_path: Path | None = None,
     backup_path: Path | None = None,
+    provider: str | None = None,
 ) -> bool:
-    """Restores OpenClaw openclaw.json from backup or surgically removes agy provider."""
+    """Restores OpenClaw openclaw.json from backup or surgically removes agy/cursor provider."""
     return get_configurator("openclaw").restore(
         config_path=config_path,
         backup_path=backup_path,
+        provider=provider,
     )

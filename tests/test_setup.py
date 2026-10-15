@@ -5407,6 +5407,72 @@ class TestUninstallScriptFallback(unittest.TestCase):
         self.assertTrue(user_file.exists(), "User file in state dir must be preserved by fallback")
         self.assertTrue(self.state_dir.exists())
 
+class TestMultiProviderSetup(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.dir_path = Path(self.temp_dir.name)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_gentle_shell_setup_cursor(self):
+        cfg = GentleShellConfigurator()
+        target = self.dir_path / "models.json"
+        res = cfg.setup(config_path=target, provider="cursor", set_default=True)
+        self.assertTrue(target.exists())
+        data = json.loads(target.read_text(encoding="utf-8"))
+        self.assertIn("cursor", data["providers"])
+        self.assertNotIn("agy", data["providers"])
+        cursor_models = [m["id"] for m in data["providers"]["cursor"]["models"]]
+        self.assertIn("cursor/auto", cursor_models)
+        self.assertIn("cursor/gpt-5.3-codex", cursor_models)
+
+        settings = json.loads((target.parent / "settings.json").read_text(encoding="utf-8"))
+        self.assertEqual(settings["defaultProvider"], "cursor")
+        self.assertEqual(settings["defaultModel"], "cursor/auto")
+
+    def test_gentle_shell_setup_all(self):
+        cfg = GentleShellConfigurator()
+        target = self.dir_path / "models.json"
+        res = cfg.setup(config_path=target, provider="all", set_default=True)
+        self.assertTrue(target.exists())
+        data = json.loads(target.read_text(encoding="utf-8"))
+        self.assertIn("cursor", data["providers"])
+        self.assertIn("agy", data["providers"])
+
+        settings = json.loads((target.parent / "settings.json").read_text(encoding="utf-8"))
+        self.assertEqual(settings["defaultProvider"], "agy")
+        self.assertEqual(settings["defaultModel"], "gemini-3.8-flash-high")
+
+    def test_pi_setup_cursor(self):
+        cfg = PiConfigurator()
+        target = self.dir_path / "models.json"
+        res = cfg.setup(config_path=target, provider="cursor", set_default=True)
+        self.assertTrue(target.exists())
+        data = json.loads(target.read_text(encoding="utf-8"))
+        self.assertIn("cursor", data["providers"])
+        self.assertNotIn("agy", data["providers"])
+
+        settings = json.loads((target.parent / "settings.json").read_text(encoding="utf-8"))
+        self.assertEqual(settings["defaultProvider"], "cursor")
+        self.assertEqual(settings["defaultModel"], "cursor/auto")
+
+    def test_claude_setup_cursor_and_all(self):
+        cfg = ClaudeConfigurator()
+        target = self.dir_path / "settings.json"
+        cfg.setup(config_path=target, provider="cursor")
+        data = json.loads(target.read_text(encoding="utf-8"))
+        self.assertEqual(data["env"]["ANTHROPIC_MODEL"], "cursor/auto")
+        opts = [o["model"] for o in data["modelPicker"]["options"]]
+        self.assertIn("cursor/auto", opts)
+        self.assertNotIn("gemini-3.8-flash-high", opts)
+
+        cfg.setup(config_path=target, provider="all")
+        data_all = json.loads(target.read_text(encoding="utf-8"))
+        opts_all = [o["model"] for o in data_all["modelPicker"]["options"]]
+        self.assertIn("cursor/auto", opts_all)
+        self.assertIn("gemini-3.8-flash-high", opts_all)
+
 
 if __name__ == "__main__":
     unittest.main()

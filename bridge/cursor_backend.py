@@ -45,6 +45,40 @@ CURSOR_EXCLUSIVE_MODELS: set[str] = {
 }
 
 
+CURSOR_KNOWN_DISPLAY_NAMES: dict[str, str] = {
+    "auto": "Auto",
+    "gpt-5.3-codex": "Codex 5.3",
+    "composer-2.5": "Composer 2.5",
+    "composer-1.5": "Composer 1.5",
+    "composer-1": "Composer 1",
+    "gpt-5.2": "GPT-5.2",
+    "claude-opus-5-5-high": "Claude Opus 5.5 High",
+    "claude-sonnet-5-5-high": "Claude Sonnet 5.5 High",
+    "claude-haiku-5-5-high": "Claude Haiku 5.5 High",
+    "gpt-5.6-sol-high": "GPT-5.6 Sol High",
+    "grok-4.7-high": "Grok 4.7 High",
+    "gemini-3.7-flash-high": "Gemini 3.7 Flash High",
+    "gemini-3.8-flash-high": "Gemini 3.8 Flash High",
+}
+
+
+def format_cursor_model_display_name(model_id: str) -> str:
+    """Formats a user-facing display name with [Cursor - Free] or [Cursor - Pro] tags."""
+    clean = resolve_cursor_model(model_id).lower()
+    if clean == "auto":
+        return "Auto [Cursor - Free]"
+
+    base_name = CURSOR_KNOWN_DISPLAY_NAMES.get(clean)
+    if not base_name:
+        parts = clean.split("-")
+        capitalized = [
+            p.capitalize() if not p.startswith("gpt") and not p.startswith("claude") else p.upper()
+            for p in parts
+        ]
+        base_name = " ".join(capitalized)
+    return f"{base_name} [Cursor - Pro]"
+
+
 def find_agent_binary() -> str:
     """Discovers the absolute path to the cursor 'agent' executable."""
     found = shutil.which("agent")
@@ -299,12 +333,15 @@ class CursorBackend:
 
         if not discovered:
             discovered = sorted(m for m in CURSOR_EXCLUSIVE_MODELS if m != "auto")
+            discovered.insert(0, "auto")
+        elif "auto" not in discovered:
+            discovered.insert(0, "auto")
 
         result = [
             {
                 "id": f"cursor/{m}",
                 "slug": f"cursor/{m}",
-                "display_name": f"{m} (Cursor)",
+                "display_name": format_cursor_model_display_name(m),
                 "owned_by": "cursor",
             }
             for m in discovered

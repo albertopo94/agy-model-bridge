@@ -218,6 +218,59 @@ FREELLMAPI_ICON_SVG = (
 )
 
 
+CURSOR_FREE_TIP_EN = "On Cursor's Free plan, only 'cursor/auto' is available due to Cursor restrictions (upgrade to Pro for named models)."
+CURSOR_FREE_TIP_ES = "En el plan Free de Cursor solo está disponible el modelo 'cursor/auto' por restricciones de Cursor (los modelos específicos requieren plan Pro)."
+
+
+def _make_client_providers(
+    client_id: str,
+    agy_auto_cmd: Any,
+    agy_snippet: Any,
+    agy_restore: Any,
+    docs_url: str,
+    cursor_snippet: Any = None,
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "id": "agy",
+            "label_en": "AGY (Antigravity)",
+            "label_es": "AGY (Antigravity)",
+            "auto_cmd": agy_auto_cmd,
+            "manual_snippet": agy_snippet,
+            "restore_cmd": agy_restore,
+            "docs_url": docs_url,
+        },
+        {
+            "id": "cursor",
+            "label_en": "Cursor (Agent)",
+            "label_es": "Cursor (Agent)",
+            "warning_tip_en": CURSOR_FREE_TIP_EN,
+            "warning_tip_es": CURSOR_FREE_TIP_ES,
+            "auto_cmd": lambda addr: (
+                f"agy-bridge setup-{client_id} --provider cursor --model cursor/auto --port {addr.rsplit(':', 1)[1]}"
+                if ":" in addr and addr.rsplit(":", 1)[1].isdigit() and addr.rsplit(":", 1)[1] != "24980"
+                else f"agy-bridge setup-{client_id} --provider cursor --model cursor/auto"
+            ),
+            "manual_snippet": cursor_snippet if cursor_snippet is not None else agy_snippet,
+            "restore_cmd": lambda addr: f"agy-bridge restore-{client_id} --provider cursor",
+            "docs_url": "https://cursor.com/docs/cli/overview",
+        },
+        {
+            "id": "all",
+            "label_en": "All (AGY + Cursor)",
+            "label_es": "Todos (AGY + Cursor)",
+            "auto_cmd": lambda addr: (
+                f"agy-bridge setup-{client_id} --provider all --port {addr.rsplit(':', 1)[1]}"
+                if ":" in addr and addr.rsplit(":", 1)[1].isdigit() and addr.rsplit(":", 1)[1] != "24980"
+                else f"agy-bridge setup-{client_id} --provider all"
+            ),
+            "manual_snippet": agy_snippet,
+            "restore_cmd": lambda addr: f"agy-bridge restore-{client_id} --provider all",
+            "docs_url": docs_url,
+        },
+    ]
+
+
 CLIENT_CARDS: list[dict[str, Any]] = [
     {
         "id": "claude",
@@ -234,6 +287,18 @@ CLIENT_CARDS: list[dict[str, Any]] = [
         "restore_cmd": lambda addr: "agy-bridge restore-claude",
         "manual_snippet": lambda addr, api_key='$(cat ~/.agy-bridge/api_key)': f'export ANTHROPIC_BASE_URL="http://{addr}"\nexport ANTHROPIC_AUTH_TOKEN="{api_key}"',
         "docs_url": "https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview",
+        "providers": _make_client_providers(
+            "claude",
+            lambda addr: (
+                f"agy-bridge setup-claude --port {addr.rsplit(':', 1)[1]}"
+                if ":" in addr and addr.rsplit(":", 1)[1].isdigit() and addr.rsplit(":", 1)[1] != "24980"
+                else "agy-bridge setup-claude"
+            ),
+            lambda addr, api_key='$(cat ~/.agy-bridge/api_key)': f'export ANTHROPIC_BASE_URL="http://{addr}"\nexport ANTHROPIC_AUTH_TOKEN="{api_key}"',
+            lambda addr: "agy-bridge restore-claude",
+            "https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview",
+            cursor_snippet=lambda addr, api_key='$(cat ~/.agy-bridge/api_key)': f'export ANTHROPIC_BASE_URL="http://{addr}"\nexport ANTHROPIC_AUTH_TOKEN="{api_key}"\nexport ANTHROPIC_MODEL="cursor/auto"',
+        ),
     },
     {
         "id": "codex",
@@ -263,6 +328,43 @@ CLIENT_CARDS: list[dict[str, Any]] = [
             f'http_headers = {{ Authorization = "Bearer {api_key if not str(api_key).startswith("$(") else "<YOUR_API_KEY>"}" }}'
         ),
         "docs_url": "https://github.com/openai/codex",
+        "providers": _make_client_providers(
+            "codex",
+            lambda addr: (
+                f"agy-bridge setup-codex --port {addr.rsplit(':', 1)[1]}"
+                if ":" in addr and addr.rsplit(":", 1)[1].isdigit() and addr.rsplit(":", 1)[1] != "24980"
+                else "agy-bridge setup-codex"
+            ),
+            lambda addr, api_key='<YOUR_API_KEY>': (
+                f'# ~/.codex/config.toml\n'
+                f'# Replace <YOUR_API_KEY> with key from ~/.agy-bridge/api_key\n'
+                f'model = "gemini-3.8-flash-high"\n'
+                f'model_provider = "agy"\n'
+                f'model_context_window = 1048576\n'
+                f'model_auto_compact_token_limit = 943718\n\n'
+                f'[model_providers.agy]\n'
+                f'name = "agy"\n'
+                f'base_url = "http://{addr}/v1"\n'
+                f'wire_api = "responses"\n'
+                f'requires_openai_auth = false\n'
+                f'http_headers = {{ Authorization = "Bearer {api_key if not str(api_key).startswith("$(") else "<YOUR_API_KEY>"}" }}'
+            ),
+            lambda addr: "agy-bridge restore-codex",
+            "https://github.com/openai/codex",
+            cursor_snippet=lambda addr, api_key='<YOUR_API_KEY>': (
+                f'# ~/.codex/config.toml\n'
+                f'model = "cursor/auto"\n'
+                f'model_provider = "cursor"\n'
+                f'model_context_window = 200000\n'
+                f'model_auto_compact_token_limit = 180000\n\n'
+                f'[model_providers.cursor]\n'
+                f'name = "cursor"\n'
+                f'base_url = "http://{addr}/v1"\n'
+                f'wire_api = "responses"\n'
+                f'requires_openai_auth = false\n'
+                f'http_headers = {{ Authorization = "Bearer {api_key if not str(api_key).startswith("$(") else "<YOUR_API_KEY>"}" }}'
+            ),
+        ),
     },
     {
         "id": "hermes",
@@ -279,6 +381,17 @@ CLIENT_CARDS: list[dict[str, Any]] = [
         "restore_cmd": lambda addr: "agy-bridge restore-hermes",
         "manual_snippet": lambda addr, api_key='$(cat ~/.agy-bridge/api_key)': f'BASE_URL=http://{addr}/v1\nAPI_KEY="{api_key}"',
         "docs_url": "https://hermes-agent.nousresearch.com",
+        "providers": _make_client_providers(
+            "hermes",
+            lambda addr: (
+                f"agy-bridge setup-hermes --port {addr.rsplit(':', 1)[1]}"
+                if ":" in addr and addr.rsplit(":", 1)[1].isdigit() and addr.rsplit(":", 1)[1] != "24980"
+                else "agy-bridge setup-hermes"
+            ),
+            lambda addr, api_key='$(cat ~/.agy-bridge/api_key)': f'BASE_URL=http://{addr}/v1\nAPI_KEY="{api_key}"',
+            lambda addr: "agy-bridge restore-hermes",
+            "https://hermes-agent.nousresearch.com",
+        ),
     },
     {
         "id": "pi",
@@ -297,6 +410,17 @@ CLIENT_CARDS: list[dict[str, Any]] = [
         "restore_cmd": lambda addr: "agy-bridge restore-pi",
         "manual_snippet": lambda addr, api_key='$(cat ~/.agy-bridge/api_key)': f'BASE_URL=http://{addr}/v1\nAPI_KEY="{api_key}"',
         "docs_url": "https://pi.dev/docs/latest",
+        "providers": _make_client_providers(
+            "pi",
+            lambda addr: (
+                f"agy-bridge setup-pi --port {addr.rsplit(':', 1)[1]}"
+                if ":" in addr and addr.rsplit(":", 1)[1].isdigit() and addr.rsplit(":", 1)[1] != "24980"
+                else "agy-bridge setup-pi"
+            ),
+            lambda addr, api_key='$(cat ~/.agy-bridge/api_key)': f'BASE_URL=http://{addr}/v1\nAPI_KEY="{api_key}"',
+            lambda addr: "agy-bridge restore-pi",
+            "https://pi.dev/docs/latest",
+        ),
     },
     {
         "id": "gentle-shell",
@@ -313,20 +437,17 @@ CLIENT_CARDS: list[dict[str, Any]] = [
         "restore_cmd": lambda addr: "agy-bridge restore-gentle-shell",
         "manual_snippet": lambda addr, api_key='$(cat ~/.agy-bridge/api_key)': f'BASE_URL=http://{addr}/v1\nAPI_KEY="{api_key}"',
         "docs_url": "https://github.com/Gentleman-Programming/gentle-shell",
-        "providers": [
-            {
-                "id": "agy",
-                "label_en": "AGY (Antigravity)",
-                "label_es": "AGY (Antigravity)",
-                "auto_cmd": lambda addr: (
-                    f"agy-bridge setup-gentle-shell --port {addr.rsplit(':', 1)[1]}"
-                    if ":" in addr and addr.rsplit(":", 1)[1].isdigit() and addr.rsplit(":", 1)[1] != "24980"
-                    else "agy-bridge setup-gentle-shell"
-                ),
-                "manual_snippet": lambda addr, api_key='$(cat ~/.agy-bridge/api_key)': f'BASE_URL=http://{addr}/v1\nAPI_KEY="{api_key}"',
-                "restore_cmd": lambda addr: "agy-bridge restore-gentle-shell",
-                "docs_url": "https://github.com/Gentleman-Programming/gentle-shell",
-            },
+        "providers": _make_client_providers(
+            "gentle-shell",
+            lambda addr: (
+                f"agy-bridge setup-gentle-shell --port {addr.rsplit(':', 1)[1]}"
+                if ":" in addr and addr.rsplit(":", 1)[1].isdigit() and addr.rsplit(":", 1)[1] != "24980"
+                else "agy-bridge setup-gentle-shell"
+            ),
+            lambda addr, api_key='$(cat ~/.agy-bridge/api_key)': f'BASE_URL=http://{addr}/v1\nAPI_KEY="{api_key}"',
+            lambda addr: "agy-bridge restore-gentle-shell",
+            "https://github.com/Gentleman-Programming/gentle-shell",
+        ) + [
             {
                 "id": "freellmapi",
                 "label_en": "FreeLLMAPI",
@@ -355,6 +476,17 @@ CLIENT_CARDS: list[dict[str, Any]] = [
         "restore_cmd": lambda addr: "agy-bridge restore-opencode",
         "manual_snippet": lambda addr, api_key='$(cat ~/.agy-bridge/api_key)': f'BASE_URL=http://{addr}/v1\nAPI_KEY="{api_key}"',
         "docs_url": "https://opencode.ai/docs",
+        "providers": _make_client_providers(
+            "opencode",
+            lambda addr: (
+                f"agy-bridge setup-opencode --port {addr.rsplit(':', 1)[1]}"
+                if ":" in addr and addr.rsplit(":", 1)[1].isdigit() and addr.rsplit(":", 1)[1] != "24980"
+                else "agy-bridge setup-opencode"
+            ),
+            lambda addr, api_key='$(cat ~/.agy-bridge/api_key)': f'BASE_URL=http://{addr}/v1\nAPI_KEY="{api_key}"',
+            lambda addr: "agy-bridge restore-opencode",
+            "https://opencode.ai/docs",
+        ),
     },
     {
         "id": "openclaw",
@@ -371,6 +503,17 @@ CLIENT_CARDS: list[dict[str, Any]] = [
         "restore_cmd": lambda addr: "agy-bridge restore-openclaw",
         "manual_snippet": lambda addr, api_key='$(cat ~/.agy-bridge/api_key)': f'BASE_URL=http://{addr}/v1\nAPI_KEY="{api_key}"',
         "docs_url": "https://docs.openclaw.ai/gateway/config-tools/custom-providers",
+        "providers": _make_client_providers(
+            "openclaw",
+            lambda addr: (
+                f"agy-bridge setup-openclaw --port {addr.rsplit(':', 1)[1]}"
+                if ":" in addr and addr.rsplit(":", 1)[1].isdigit() and addr.rsplit(":", 1)[1] != "24980"
+                else "agy-bridge setup-openclaw"
+            ),
+            lambda addr, api_key='$(cat ~/.agy-bridge/api_key)': f'BASE_URL=http://{addr}/v1\nAPI_KEY="{api_key}"',
+            lambda addr: "agy-bridge restore-openclaw",
+            "https://docs.openclaw.ai/gateway/config-tools/custom-providers",
+        ),
     },
     {
         "id": "cursor",
@@ -552,11 +695,15 @@ def render_dashboard(
 {p_warning_html}{p_auto_html}{p_manual_html}{p_restore_html}{p_footer_html}
         </div>""")
 
+            tip_text = card.get("tip_es" if is_es else "tip_en", card.get("tip", ""))
+            tip_html = f"""
+        <p class="card-tip" data-i18n="tip_{card_id}">💡 {html.escape(tip_text)}</p>""" if tip_text else ""
+
             cards_html_parts.append(f"""      <section class="card" id="card-{card_id}">
         <div class="card-header">
           <h2 class="card-title">{icon_html}{html.escape(card["title"])}</h2>
         </div>
-        <p class="card-desc" data-i18n="desc_{card_id}">{html.escape(desc_text)}</p>{tabs_html}
+        <p class="card-desc" data-i18n="desc_{card_id}">{html.escape(desc_text)}</p>{tip_html}{tabs_html}
 {"".join(panes_html)}
       </section>""")
             continue
@@ -1246,8 +1393,15 @@ def render_dashboard(
         desc_gentle_shell: "An isolated terminal companion for Pi with focused subagents, review mode, and ODD harness.",
         "desc_gentle-shell": "An isolated terminal companion for Pi with focused subagents, review mode, and ODD harness.",
         "tab_gentle-shell_agy": "AGY (Antigravity)",
+        "tab_gentle-shell_cursor": "Cursor (Agent)",
+        "tab_gentle-shell_all": "All (AGY + Cursor)",
         "tab_gentle-shell_freellmapi": "FreeLLMAPI",
+        "tab_agy": "AGY (Antigravity)",
+        "tab_cursor": "Cursor (Agent)",
+        "tab_all": "All (AGY + Cursor)",
+        "tab_freellmapi": "FreeLLMAPI",
         "tip_warning_gentle-shell_freellmapi": "⚠️ Requires FreeLLMAPI gateway running on http://127.0.0.1:31415",
+        "tip_warning_cursor_free": "On Cursor's Free plan, only 'cursor/auto' is available due to Cursor restrictions (upgrade to Pro for named models).",
         desc_freellmapi: "Custom Provider & Aider integration (Base URL with /v1)",
         footer: "AGY Model Bridge &bull; v{__version__} &bull; Local Gateway",
         quota_title: "Antigravity",
@@ -1295,8 +1449,15 @@ def render_dashboard(
         desc_gentle_shell: "Un entorno de terminal aislado para Pi con subagentes enfocados, modo review y arn\u00e9s ODD.",
         "desc_gentle-shell": "Un entorno de terminal aislado para Pi con subagentes enfocados, modo review y arn\u00e9s ODD.",
         "tab_gentle-shell_agy": "AGY (Antigravity)",
+        "tab_gentle-shell_cursor": "Cursor (Agent)",
+        "tab_gentle-shell_all": "Todos (AGY + Cursor)",
         "tab_gentle-shell_freellmapi": "FreeLLMAPI",
+        "tab_agy": "AGY (Antigravity)",
+        "tab_cursor": "Cursor (Agent)",
+        "tab_all": "Todos (AGY + Cursor)",
+        "tab_freellmapi": "FreeLLMAPI",
         "tip_warning_gentle-shell_freellmapi": "⚠️ Requiere el gateway de FreeLLMAPI corriendo en http://127.0.0.1:31415",
+        "tip_warning_cursor_free": "En el plan Free de Cursor solo está disponible el modelo 'cursor/auto' por restricciones de Cursor (los modelos específicos requieren plan Pro).",
         desc_freellmapi: "Integraci\u00f3n para Custom Provider y Aider (URL base con /v1)",
         footer: "AGY Model Bridge &bull; v{__version__} &bull; Gateway local",
         quota_title: "Antigravity",
@@ -1372,6 +1533,10 @@ def render_dashboard(
           if (!el.classList.contains("copied")) {{
             el.innerText = dict.btn_copy || "Copy";
           }}
+        }} else if (key && key.indexOf("tab_") === 0 && dict["tab_" + key.split("_").pop()]) {{
+          el.innerHTML = dict["tab_" + key.split("_").pop()];
+        }} else if (key && key.indexOf("tip_warning_") === 0 && key.indexOf("_cursor") !== -1 && dict.tip_warning_cursor_free) {{
+          el.innerHTML = "⚠️ " + dict.tip_warning_cursor_free;
         }} else if (dict[key]) {{
           el.innerHTML = dict[key];
         }}

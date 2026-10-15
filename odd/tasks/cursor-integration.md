@@ -3,7 +3,8 @@
 ## Context
 Integrate Cursor CLI (`agent`) into AGY Model Bridge.
 - **Phase 1**: Account usage tracking via macOS Keychain (`service="cursor-access-token"`), `/api/cursor/quota` endpoint, and dashboard card under Antigravity. (COMPLETED)
-- **Phase 2**: Cursor Upstream Model Gateway. Expose models from Cursor subscription (`gpt-5.3-codex`, `composer-2.5`, `claude-opus-5-5-high`, `grok-4.7`, etc.) via standard `/v1/chat/completions`, `/v1/messages`, and `/v1/models` using `agent -p` in background.
+- **Phase 2**: Cursor Upstream Model Gateway via `agent -p` in background for `/v1/chat/completions` and `/v1/messages`. (COMPLETED)
+- **Phase 3**: Multi-Provider Client Setup, Model Labeling (`[Cursor - Free]`, `[Cursor - Pro]`), Tooltip Note for Free Tier, and Dashboard Multi-Provider Tabs. (IN PROGRESS)
 
 ---
 
@@ -21,24 +22,36 @@ Integrate Cursor CLI (`agent`) into AGY Model Bridge.
 
 ---
 
-## Phase 2: Cursor Upstream Model Gateway (In Progress)
+## Phase 2: Cursor Upstream Model Gateway (Completed)
+- [x] 6.1 [RED] Write unit tests in `tests/test_cursor_backend.py`
+- [x] 6.2 [GREEN] Implement `bridge/cursor_backend.py`
+- [x] 7.1 [RED] Write unit tests for model catalog discovery
+- [x] 7.2 [GREEN] Wire `CursorBackend.list_models()` into `GET /v1/models`
+- [x] 8.1 [RED] Write unit tests in `tests/test_server.py` for `/v1/chat/completions` & `/v1/messages`
+- [x] 8.2 [GREEN] Implement request dispatch in `bridge/server.py`
+- [x] 9.1 Run full test suite (`1004 tests passing`)
+- [x] 9.2 Work-unit commit `4a0f7d3`
 
-### 6. Prompt & Message Converter and Cursor Subprocess Runner (TDD)
-- [x] 6.1 [RED] Write unit tests in `tests/test_cursor_backend.py` for:
-  - `messages_to_prompt` (single user message, multi-turn `[System]`/`[User]`/`[Assistant]`, list content parts).
-  - `resolve_cursor_model` (`cursor/gpt-5.3-codex` -> `gpt-5.3-codex`, `cursor-gpt-5.3-codex` -> `gpt-5.3-codex`, `auto`).
-  - Parsing Cursor CLI `stream-json` messages (`system`, `assistant` text diffs, `result`).
-  - Subprocess runner invoking `agent -p --output-format stream-json --stream-partial-output --yolo` with prompt piped via stdin.
-- [x] 6.2 [GREEN] Implement `bridge/cursor_backend.py` with pure standard library (`subprocess`, `threading`, `json`).
+---
 
-### 7. Model Discovery & Combined Catalog in `GET /v1/models` (TDD)
-- [x] 7.1 [RED] Write unit tests for model catalog discovery via `agent models` with static fallback, asserting Cursor models appear in `GET /v1/models` with `owned_by: "cursor"`.
-- [x] 7.2 [GREEN] Wire `CursorBackend.list_models()` into `GET /v1/models` in `bridge/server.py`.
+## Phase 3: Multi-Provider Setup CLI, Model Labels & Dashboard Tabs (In Progress)
 
-### 8. Server Upstream Routing to Cursor (`/v1/chat/completions` & `/v1/messages`) (TDD)
-- [x] 8.1 [RED] Write unit tests in `tests/test_server.py` verifying requests with `cursor/*` or Cursor-specific models route to `CursorBackend` in streaming SSE and non-streaming modes.
-- [x] 8.2 [GREEN] Implement request dispatch in `bridge/server.py` for chat completions and messages.
+### 10. Model Labels & Free Tier Notice in `bridge/cursor_backend.py` & Dashboard (TDD)
+- [ ] 10.1 [RED] Write unit tests in `tests/test_cursor_backend.py` for model display names: `cursor/auto` -> `Auto [Cursor - Free]`, named models -> `<Name> [Cursor - Pro]`.
+- [ ] 10.2 [GREEN] Update `bridge/cursor_backend.py` with friendly display labels and free/pro badge tags.
+- [ ] 10.3 [GREEN] Add Free tier tooltip / notice in `bridge/dashboard.py` on Cursor tabs explaining that Cursor Free plan only allows `auto`.
 
-### 9. Verification & Work-Unit Commit
-- [x] 9.1 Run full test suite, linter, typecheck.
-- [x] 9.2 Create work-unit commit on `albertopo94/hammerhead` (`2d0cb7e`).
+### 11. Multi-Provider Client Setup CLI Integration (`setup-*`) (TDD)
+- [ ] 11.1 [RED] Write unit tests in `tests/test_setup.py` for `GentleShellConfigurator` and `PiConfigurator` supporting `provider` (`"agy"`, `"cursor"`, `"all"`), verifying `models.json` registers `DEFAULT_CURSOR_MODELS` alongside AGY.
+- [ ] 11.2 [GREEN] Implement `DEFAULT_CURSOR_MODELS` in `bridge/setup/pi_gentle.py` and support multi-provider setup in `PiConfigurator` and `GentleShellConfigurator`.
+- [ ] 11.3 [RED] Write unit tests in `tests/test_setup.py` for `ClaudeConfigurator`, `CodexConfigurator`, `OpenCodeConfigurator`, `OpenClawConfigurator`, `HermesConfigurator` supporting `provider` (`"agy"`, `"cursor"`, `"all"`).
+- [ ] 11.4 [GREEN] Implement multi-provider support in client configurators and add `--provider` choices to `bridge/cli/setup.py`.
+
+### 12. Dashboard Cards Segmented Provider Controls (TDD)
+- [ ] 12.1 [RED] Write unit tests in `tests/test_dashboard.py` asserting Gentle Shell has 4 tabs (`AGY`, `Cursor`, `Todos`, `FreeLLMAPI`), and other cards have 3 tabs (`AGY`, `Cursor`, `Todos`).
+- [ ] 12.2 [GREEN] Update `CLIENT_CARDS` in `bridge/dashboard.py` with segmented provider tabs, auto commands, and manual snippets.
+
+### 13. Documentation, Verification & Work-Unit Commit
+- [x] 13.1 Update `README.md` with complete documentation for Cursor quota, upstream model gateway, and multi-provider client setups.
+- [x] 13.2 Run full test suite, linter, typecheck.
+- [x] 13.3 Create clean work-unit commit on `albertopo94/hammerhead` (`9be0865`).

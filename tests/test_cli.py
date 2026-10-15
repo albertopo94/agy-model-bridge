@@ -150,9 +150,10 @@ class TestCliSetupHandlers(unittest.TestCase):
     def test_handle_setup_claude(self):
         mock_setup = MagicMock(return_value=Path("/tmp/settings.json"))
         with patch("sys.stdout", new=io.StringIO()):
-            ret = handle_setup_claude(["--port", "24980"], prog_base="agy-bridge", setup_fn=mock_setup)
+            ret = handle_setup_claude(["--port", "24980", "--provider", "cursor"], prog_base="agy-bridge", setup_fn=mock_setup)
             self.assertEqual(ret, 0)
             mock_setup.assert_called_once()
+            self.assertEqual(mock_setup.call_args.kwargs.get("provider"), "cursor")
 
     def test_handle_setup_codex(self):
         mock_setup = MagicMock(return_value=Path("/tmp/config.toml"))
@@ -192,16 +193,18 @@ class TestCliSetupHandlers(unittest.TestCase):
     def test_handle_setup_pi(self):
         mock_setup = MagicMock(return_value=Path("/tmp/models.json"))
         with patch("sys.stdout", new=io.StringIO()):
-            ret = handle_setup_pi([], prog_base="agy-bridge", setup_fn=mock_setup)
+            ret = handle_setup_pi(["--provider", "all"], prog_base="agy-bridge", setup_fn=mock_setup)
             self.assertEqual(ret, 0)
             mock_setup.assert_called_once()
+            self.assertEqual(mock_setup.call_args.kwargs.get("provider"), "all")
 
     def test_handle_setup_gentle_shell(self):
         mock_setup = MagicMock(return_value=Path("/tmp/models.json"))
         with patch("sys.stdout", new=io.StringIO()):
-            ret = handle_setup_gentle_shell([], prog_base="agy-bridge", subcmd="setup-gentle", setup_fn=mock_setup)
+            ret = handle_setup_gentle_shell(["--provider", "cursor"], prog_base="agy-bridge", subcmd="setup-gentle", setup_fn=mock_setup)
             self.assertEqual(ret, 0)
             mock_setup.assert_called_once()
+            self.assertEqual(mock_setup.call_args.kwargs.get("provider"), "cursor")
 
     def test_handle_restore_cli_no_backups(self):
         with patch("bridge.cli.setup.list_backups", return_value=[]), patch("sys.stdout", new=io.StringIO()):

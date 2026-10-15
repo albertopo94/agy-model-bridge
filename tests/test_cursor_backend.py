@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 from bridge.cursor_backend import (
     CursorBackend,
     extract_text_content,
+    format_cursor_model_display_name,
     is_cursor_model,
     messages_to_prompt,
     resolve_cursor_model,
@@ -144,6 +145,13 @@ class TestCursorBackend(unittest.TestCase):
             list(backend.stream_chat("Hello"))
         self.assertIn("Error: Not logged in", str(ctx.exception))
 
+    def test_format_cursor_model_display_name(self) -> None:
+        self.assertEqual(format_cursor_model_display_name("auto"), "Auto [Cursor - Free]")
+        self.assertEqual(format_cursor_model_display_name("gpt-5.3-codex"), "Codex 5.3 [Cursor - Pro]")
+        self.assertEqual(format_cursor_model_display_name("composer-2.5"), "Composer 2.5 [Cursor - Pro]")
+        self.assertEqual(format_cursor_model_display_name("claude-opus-5-5-high"), "Claude Opus 5.5 High [Cursor - Pro]")
+        self.assertEqual(format_cursor_model_display_name("grok-4.7-high"), "Grok 4.7 High [Cursor - Pro]")
+
     @patch("subprocess.run")
     def test_list_models_discovered(self, mock_run: MagicMock) -> None:
         mock_run.return_value = MagicMock(
@@ -153,9 +161,11 @@ class TestCursorBackend(unittest.TestCase):
         )
         backend = CursorBackend(binary_path="agent")
         models = backend.list_models(force=True)
-        model_ids = [m["id"] for m in models]
-        self.assertIn("cursor/gpt-5.3-codex", model_ids)
-        self.assertIn("cursor/composer-2.5", model_ids)
+        by_id = {m["id"]: m for m in models}
+        self.assertIn("cursor/auto", by_id)
+        self.assertEqual(by_id["cursor/auto"]["display_name"], "Auto [Cursor - Free]")
+        self.assertIn("cursor/gpt-5.3-codex", by_id)
+        self.assertEqual(by_id["cursor/gpt-5.3-codex"]["display_name"], "Codex 5.3 [Cursor - Pro]")
         self.assertEqual(models[0]["owned_by"], "cursor")
 
     @patch("subprocess.run")
