@@ -14,7 +14,6 @@ import shutil
 import subprocess
 import threading
 import time
-from typing import Any
 import urllib.parse
 
 from bridge.errors import AuthenticationError

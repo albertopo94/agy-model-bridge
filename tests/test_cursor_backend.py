@@ -1,8 +1,6 @@
 """Unit tests for Cursor backend adapter, message conversion, and subprocess execution."""
 
 import json
-import subprocess
-import time
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -14,7 +12,7 @@ from bridge.cursor_backend import (
     messages_to_prompt,
     resolve_cursor_model,
 )
-from bridge.errors import BridgeError, ModelNotFoundError, UpstreamTimeoutError
+from bridge.errors import BridgeError
 
 
 class TestCursorBackend(unittest.TestCase):

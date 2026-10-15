@@ -5418,7 +5418,7 @@ class TestMultiProviderSetup(unittest.TestCase):
     def test_gentle_shell_setup_cursor(self):
         cfg = GentleShellConfigurator()
         target = self.dir_path / "models.json"
-        res = cfg.setup(config_path=target, provider="cursor", set_default=True)
+        cfg.setup(config_path=target, provider="cursor", set_default=True)
         self.assertTrue(target.exists())
         data = json.loads(target.read_text(encoding="utf-8"))
         self.assertIn("cursor", data["providers"])
@@ -5434,7 +5434,7 @@ class TestMultiProviderSetup(unittest.TestCase):
     def test_gentle_shell_setup_all(self):
         cfg = GentleShellConfigurator()
         target = self.dir_path / "models.json"
-        res = cfg.setup(config_path=target, provider="all", set_default=True)
+        cfg.setup(config_path=target, provider="all", set_default=True)
         self.assertTrue(target.exists())
         data = json.loads(target.read_text(encoding="utf-8"))
         self.assertIn("cursor", data["providers"])
@@ -5447,7 +5447,7 @@ class TestMultiProviderSetup(unittest.TestCase):
     def test_pi_setup_cursor(self):
         cfg = PiConfigurator()
         target = self.dir_path / "models.json"
-        res = cfg.setup(config_path=target, provider="cursor", set_default=True)
+        cfg.setup(config_path=target, provider="cursor", set_default=True)
         self.assertTrue(target.exists())
         data = json.loads(target.read_text(encoding="utf-8"))
         self.assertIn("cursor", data["providers"])

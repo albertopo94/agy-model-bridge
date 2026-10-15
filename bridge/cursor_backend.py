@@ -6,6 +6,7 @@ with prompts piped via stdin, parsing streaming JSON lines into normalized chunk
 """
 
 from collections.abc import Iterator
+import contextlib
 import json
 import os
 from pathlib import Path
@@ -13,6 +14,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from typing import Any
@@ -192,7 +194,7 @@ class CursorBackend:
         with self._acp_client_lock:
             if self._acp_client is None:
                 from bridge.cursor_acp import CursorAcpClient
-                client = CursorAcpClient(binary_path=self.binary_path, cwd="/tmp")
+                client = CursorAcpClient(binary_path=self.binary_path, cwd=tempfile.gettempdir())
                 client.start()
                 self._acp_client = client
             return self._acp_client
@@ -312,7 +314,8 @@ class CursorBackend:
         start_time = time.time()
 
         try:
-            assert proc.stdout is not None
+            if proc.stdout is None:
+                return
             for raw_line in proc.stdout:
                 if (time.time() - start_time) > timeout:
                     proc.kill()
@@ -356,8 +359,9 @@ class CursorBackend:
 
             proc.wait(timeout=10.0)
             if proc.returncode != 0 and not emitted_any:
-                assert proc.stderr is not None
-                stderr_text = proc.stderr.read().decode("utf-8", errors="replace").strip()
+                stderr_text = ""
+                if proc.stderr is not None:
+                    stderr_text = proc.stderr.read().decode("utf-8", errors="replace").strip()
                 raise BridgeError(f"Cursor CLI failed with exit code {proc.returncode}: {stderr_text}")
 
         except subprocess.TimeoutExpired as exc:
@@ -392,7 +396,7 @@ class CursorBackend:
                 return self._cached_models
 
         discovered: list[str] = []
-        try:
+        with contextlib.suppress(Exception):
             res = subprocess.run(
                 [self.binary_path, "models"],
                 capture_output=True,
@@ -407,8 +411,6 @@ class CursorBackend:
                         model_id = match.group(1).strip()
                         if model_id and model_id != "auto":
                             discovered.append(model_id)
-        except Exception:
-            pass
 
         if not discovered:
             discovered = sorted(m for m in CURSOR_EXCLUSIVE_MODELS if m != "auto")

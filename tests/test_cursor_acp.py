@@ -2,9 +2,6 @@
 
 import json
 import queue
-import subprocess
-import threading
-import time
 import unittest
 from unittest.mock import MagicMock, patch
 

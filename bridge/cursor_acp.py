@@ -7,13 +7,12 @@ of `agent -p` and achieves instant 2-5s prompt streaming.
 """
 
 from collections.abc import Iterator
+import contextlib
 from dataclasses import dataclass, field
 import json
-import os
-from pathlib import Path
 import queue
-import shutil
 import subprocess
+import tempfile
 import threading
 import time
 from typing import Any
@@ -38,7 +37,7 @@ class CursorAcpClient:
         cwd: str | None = None,
     ) -> None:
         self.binary_path = binary_path or find_agent_binary()
-        self.cwd = cwd or "/tmp"
+        self.cwd = cwd or tempfile.gettempdir()
         self._proc: subprocess.Popen[bytes] | None = None
         self._reader_thread: threading.Thread | None = None
         self._next_id: int = 1
@@ -283,10 +282,8 @@ class CursorAcpClient:
                             "id": msg_id,
                             "result": {"outcome": {"outcome": "selected", "optionId": "allow-once"}},
                         }
-                        try:
+                        with contextlib.suppress(Exception):
                             self._write_json(resp)
-                        except Exception:
-                            pass
                 continue
 
             # 2. Response to a pending client request

@@ -13,7 +13,7 @@ from typing import Any
 import urllib.error
 import urllib.request
 
-from bridge.cursor_auth import CursorAuthManager, CursorSession
+from bridge.cursor_auth import CursorAuthManager
 from bridge.errors import AuthenticationError
 from bridge.quota import (
     QuotaBucket,

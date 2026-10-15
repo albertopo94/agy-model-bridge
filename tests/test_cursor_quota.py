@@ -11,7 +11,6 @@ from bridge.cursor_quota import (
     parse_cursor_usage_summary,
 )
 from bridge.errors import AuthenticationError
-from bridge.quota import QuotaSnapshot
 
 
 SAMPLE_CURSOR_USAGE = {
