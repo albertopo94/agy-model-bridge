@@ -12,6 +12,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import sys
 import threading
 import time
 from typing import Any
@@ -168,11 +169,33 @@ def is_cursor_model(model: str) -> bool:
 class CursorBackend:
     """Backend adapter that delegates inference to local Cursor CLI (`agent`)."""
 
-    def __init__(self, binary_path: str | None = None) -> None:
+    def __init__(
+        self,
+        binary_path: str | None = None,
+        acp_client: Any | None = None,
+        use_acp: bool | None = None,
+    ) -> None:
         self.binary_path = binary_path or find_agent_binary()
+        if use_acp is None:
+            self.use_acp = os.environ.get("CURSOR_DISABLE_ACP", "").strip() not in ("1", "true")
+        else:
+            self.use_acp = use_acp
+        self._acp_client = acp_client
+        self._acp_client_lock = threading.Lock()
         self._cached_models: list[dict[str, Any]] | None = None
         self._cached_models_time: float = 0.0
         self._models_lock = threading.Lock()
+
+    def _get_acp_client(self) -> Any:
+        if self._acp_client is not None:
+            return self._acp_client
+        with self._acp_client_lock:
+            if self._acp_client is None:
+                from bridge.cursor_acp import CursorAcpClient
+                client = CursorAcpClient(binary_path=self.binary_path, cwd="/tmp")
+                client.start()
+                self._acp_client = client
+            return self._acp_client
 
     def stream_chat(
         self,
@@ -182,12 +205,41 @@ class CursorBackend:
         api_key: str | None = None,
         cwd: str | None = None,
     ) -> Iterator[str]:
-        """Invokes Cursor CLI in stream-json mode and yields text deltas."""
+        """Streams chat completions, preferring instant ACP server with fallback to CLI."""
         resolved_model = resolve_cursor_model(model)
+
+        # 1. Preferred path: warm background ACP server
+        if self.use_acp and resolved_model == "auto":
+            try:
+                acp = self._get_acp_client()
+                yield from acp.stream_prompt(prompt, timeout=timeout)
+                return
+            except Exception as acp_err:
+                sys.stderr.write(f"Warning: Cursor ACP streaming failed, falling back to agent -p: {acp_err}\n")
+                sys.stderr.flush()
+
+        # 2. Fallback path: CLI subprocess
+        yield from self._stream_chat_cli(
+            prompt=prompt,
+            model=resolved_model,
+            timeout=timeout,
+            api_key=api_key,
+            cwd=cwd,
+        )
+
+    def _stream_chat_cli(
+        self,
+        prompt: str,
+        model: str = "auto",
+        timeout: float = 300.0,
+        api_key: str | None = None,
+        cwd: str | None = None,
+    ) -> Iterator[str]:
+        """Invokes Cursor CLI in stream-json mode via subprocess and yields text deltas."""
         cmd = [
             self.binary_path,
             "--model",
-            resolved_model or "auto",
+            model or "auto",
             "-p",
             "--output-format",
             "stream-json",

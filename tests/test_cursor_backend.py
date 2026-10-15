@@ -96,7 +96,7 @@ class TestCursorBackend(unittest.TestCase):
         mock_proc.poll.return_value = 0
         mock_popen.return_value = mock_proc
 
-        backend = CursorBackend(binary_path="/usr/local/bin/agent")
+        backend = CursorBackend(binary_path="/usr/local/bin/agent", use_acp=False)
         chunks = list(backend.stream_chat("Test prompt", model="gpt-5.3-codex"))
         self.assertEqual(chunks, ["Hello", ", how", " can I help?"])
         mock_proc.stdin.write.assert_called_with(b"Test prompt")
@@ -117,14 +117,14 @@ class TestCursorBackend(unittest.TestCase):
         mock_proc.poll.return_value = 0
         mock_popen.return_value = mock_proc
 
-        backend = CursorBackend(binary_path="/usr/local/bin/agent")
+        backend = CursorBackend(binary_path="/usr/local/bin/agent", use_acp=False)
         result = backend.generate_chat("Hello")
         self.assertEqual(result, "Complete answer.")
 
     @patch("subprocess.Popen")
     def test_stream_chat_command_not_found(self, mock_popen: MagicMock) -> None:
         mock_popen.side_effect = FileNotFoundError("No such file or directory: 'agent'")
-        backend = CursorBackend(binary_path="agent")
+        backend = CursorBackend(binary_path="agent", use_acp=False)
         with self.assertRaises(BridgeError) as ctx:
             list(backend.stream_chat("Hello"))
         self.assertIn("Cursor CLI (agent) not found", str(ctx.exception))
@@ -140,10 +140,43 @@ class TestCursorBackend(unittest.TestCase):
         mock_proc.poll.return_value = 1
         mock_popen.return_value = mock_proc
 
-        backend = CursorBackend(binary_path="agent")
+        backend = CursorBackend(binary_path="agent", use_acp=False)
         with self.assertRaises(BridgeError) as ctx:
             list(backend.stream_chat("Hello"))
         self.assertIn("Error: Not logged in", str(ctx.exception))
+
+    def test_stream_chat_delegates_to_acp_client(self) -> None:
+        mock_acp = MagicMock()
+        mock_acp.stream_prompt.return_value = iter(["Fast ", "ACP ", "response!"])
+        backend = CursorBackend(binary_path="agent", acp_client=mock_acp, use_acp=True)
+
+        chunks = list(backend.stream_chat("Hi", model="auto"))
+        self.assertEqual(chunks, ["Fast ", "ACP ", "response!"])
+        mock_acp.stream_prompt.assert_called_once_with("Hi", timeout=300.0)
+
+    @patch("subprocess.Popen")
+    def test_stream_chat_falls_back_to_cli_when_acp_fails(self, mock_popen: MagicMock) -> None:
+        mock_acp = MagicMock()
+        mock_acp.stream_prompt.side_effect = BridgeError("ACP failed to initialize")
+
+        lines = [
+            json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "Fallback answer"}]}}),
+            json.dumps({"type": "result", "result": "Fallback answer"}),
+        ]
+        mock_proc = MagicMock()
+        mock_proc.stdout = [f"{line}\n".encode("utf-8") for line in lines]
+        mock_proc.stdin = MagicMock()
+        mock_proc.stderr = MagicMock()
+        mock_proc.stderr.read.return_value = b""
+        mock_proc.wait.return_value = 0
+        mock_proc.poll.return_value = 0
+        mock_popen.return_value = mock_proc
+
+        backend = CursorBackend(binary_path="agent", acp_client=mock_acp, use_acp=True)
+        chunks = list(backend.stream_chat("Hi", model="auto"))
+        self.assertEqual(chunks, ["Fallback answer"])
+        mock_acp.stream_prompt.assert_called_once()
+        mock_popen.assert_called_once()
 
     def test_format_cursor_model_display_name(self) -> None:
         self.assertEqual(format_cursor_model_display_name("auto"), "Auto [Cursor - Free]")
