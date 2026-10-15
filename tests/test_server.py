@@ -1036,8 +1036,8 @@ class TestServerEndpoints(unittest.TestCase):
         self.assertEqual(resp.getheader("Connection"), "close")
         conn.close()
 
-    def test_request_handler_timeout_is_60(self):
-        self.assertEqual(OpenAIRequestHandler.timeout, 60.0)
+    def test_request_handler_timeout_is_300(self):
+        self.assertEqual(OpenAIRequestHandler.timeout, 300.0)
 
     def test_streaming_mid_stream_unexpected_error_sends_sse_error_chunk(self):
         def failing_gen():

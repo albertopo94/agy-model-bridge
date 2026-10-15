@@ -101,7 +101,7 @@ _default_cursor_quota_provider: CursorQuotaProvider | None = None
 class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
     """Handles OpenAI REST endpoints and delegates to CloudCodeClient."""
 
-    timeout = 60.0
+    timeout = 300.0
     context: ServerContext | None = None
     client: CloudCodeClient = None  # type: ignore[assignment]
     project: str = ""

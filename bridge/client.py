@@ -42,7 +42,7 @@ class CloudCodeClient:
         self,
         token_provider: Any,
         base_url: str = "https://daily-cloudcode-pa.googleapis.com",
-        timeout: float = 60.0,
+        timeout: float = 300.0,
     ) -> None:
         self.token_provider = token_provider
         self.base_url = base_url.rstrip("/")
