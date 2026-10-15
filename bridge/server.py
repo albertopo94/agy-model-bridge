@@ -52,6 +52,7 @@ from bridge.responses import (
     build_responses_error_response,
 )
 from bridge.quota import AgyCliQuotaProvider, QuotaProvider
+from bridge.cursor_quota import CursorQuotaProvider
 
 SAFE_REQUEST_ID_REGEX = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 
@@ -80,6 +81,7 @@ class ServerContext:
     max_retries: int = 3
     initial_retry_delay: float = 0.5
     quota_provider: QuotaProvider | None = None
+    cursor_quota_provider: CursorQuotaProvider | None = None
 
 
 @dataclass
@@ -93,6 +95,7 @@ class CollectedStreamData:
 
 
 _default_quota_provider: QuotaProvider | None = None
+_default_cursor_quota_provider: CursorQuotaProvider | None = None
 
 
 class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
@@ -104,6 +107,7 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
     project: str = ""
     api_key: str | None = None
     quota_provider: QuotaProvider | None = None
+    cursor_quota_provider: CursorQuotaProvider | None = None
     server: Any = None
     request_id: str = ""
     command: str = ""
@@ -161,6 +165,21 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
         if _default_quota_provider is None:
             _default_quota_provider = AgyCliQuotaProvider()
         return _default_quota_provider
+
+    def _get_cursor_quota_provider(self) -> CursorQuotaProvider:
+        if self.cursor_quota_provider is not None:
+            return self.cursor_quota_provider
+        if self.context is not None and self.context.cursor_quota_provider is not None:
+            return self.context.cursor_quota_provider
+        if self.server is not None:
+            if hasattr(self.server, "context") and getattr(self.server.context, "cursor_quota_provider", None) is not None:
+                return self.server.context.cursor_quota_provider
+            if hasattr(self.server, "cursor_quota_provider") and self.server.cursor_quota_provider is not None:
+                return self.server.cursor_quota_provider
+        global _default_cursor_quota_provider
+        if _default_cursor_quota_provider is None:
+            _default_cursor_quota_provider = CursorQuotaProvider()
+        return _default_cursor_quota_provider
 
     @contextlib.contextmanager
     def _acquire_concurrency(self) -> Iterator[bool]:
@@ -269,7 +288,7 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
             return
 
         parsed_path = urllib.parse.urlparse(self.path).path
-        if parsed_path.startswith("/v1/") or parsed_path in ("/", "/api/status", "/api/quota"):
+        if parsed_path.startswith("/v1/") or parsed_path in ("/", "/api/status", "/api/quota", "/api/cursor/quota"):
             # Inference and admin endpoints forbid browser cross-origin preflight requests
             self.send_response(403)
             self.send_header("X-Request-ID", self.request_id)
@@ -300,7 +319,7 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json")
         self.send_header("X-Request-ID", self.request_id)
         req_path = urllib.parse.urlparse(self.path).path
-        if not req_path.startswith("/v1/") and req_path not in ("/", "/api/status", "/api/quota"):
+        if not req_path.startswith("/v1/") and req_path not in ("/", "/api/status", "/api/quota", "/api/cursor/quota"):
             self.send_header("Access-Control-Allow-Origin", "*")
         sent_connection = False
         if headers:
@@ -425,6 +444,14 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
             query_params = urllib.parse.parse_qs(parsed.query)
             force_refresh = "refresh" in query_params and query_params["refresh"][0].lower() in ("1", "true")
             provider = self._get_quota_provider()
+            snapshot = provider.fetch(force=force_refresh)
+            self._send_json(200, snapshot.to_dict())
+            return
+
+        if path == "/api/cursor/quota":
+            query_params = urllib.parse.parse_qs(parsed.query)
+            force_refresh = "refresh" in query_params and query_params["refresh"][0].lower() in ("1", "true")
+            provider = self._get_cursor_quota_provider()
             snapshot = provider.fetch(force=force_refresh)
             self._send_json(200, snapshot.to_dict())
             return
@@ -1039,6 +1066,7 @@ def create_server(
     max_retries: int = 3,
     initial_retry_delay: float = 0.5,
     quota_provider: QuotaProvider | None = None,
+    cursor_quota_provider: CursorQuotaProvider | None = None,
 ) -> http.server.ThreadingHTTPServer:
     """Instantiates and configures a ThreadingHTTPServer instance."""
     if no_auth and not is_loopback_host(host):
@@ -1080,6 +1108,8 @@ def create_server(
 
     if quota_provider is None:
         quota_provider = AgyCliQuotaProvider()
+    if cursor_quota_provider is None:
+        cursor_quota_provider = CursorQuotaProvider()
 
     concurrency_semaphore = threading.Semaphore(max_concurrency)
 
@@ -1093,6 +1123,7 @@ def create_server(
         max_retries=max_retries,
         initial_retry_delay=initial_retry_delay,
         quota_provider=quota_provider,
+        cursor_quota_provider=cursor_quota_provider,
     )
 
     class ConfiguredHandler(OpenAIRequestHandler):
@@ -1106,6 +1137,7 @@ def create_server(
     ConfiguredHandler.max_retries = max_retries
     ConfiguredHandler.initial_retry_delay = initial_retry_delay
     ConfiguredHandler.quota_provider = quota_provider
+    ConfiguredHandler.cursor_quota_provider = cursor_quota_provider
 
     server = http.server.ThreadingHTTPServer((host, port), ConfiguredHandler)
     server.daemon_threads = True
@@ -1116,6 +1148,7 @@ def create_server(
     server.max_retries = max_retries  # type: ignore[attr-defined]
     server.initial_retry_delay = initial_retry_delay  # type: ignore[attr-defined]
     server.quota_provider = quota_provider  # type: ignore[attr-defined]
+    server.cursor_quota_provider = cursor_quota_provider  # type: ignore[attr-defined]
     return server
 
 
@@ -1130,6 +1163,7 @@ def run_server(
     max_retries: int = 3,
     initial_retry_delay: float = 0.5,
     quota_provider: QuotaProvider | None = None,
+    cursor_quota_provider: CursorQuotaProvider | None = None,
 ) -> None:
     """Starts the ThreadingHTTPServer serving OpenAI-compatible endpoints."""
     server = create_server(
@@ -1143,6 +1177,7 @@ def run_server(
         max_retries=max_retries,
         initial_retry_delay=initial_retry_delay,
         quota_provider=quota_provider,
+        cursor_quota_provider=cursor_quota_provider,
     )
     actual_port = server.server_address[1]
     print(f"Antigravity Model Bridge listening on http://{host}:{actual_port}")

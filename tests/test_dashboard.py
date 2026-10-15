@@ -690,18 +690,28 @@ class TestDashboardBilingual(unittest.TestCase):
         self.assertIn("api_key_configured", i18n_block)
         self.assertIn("api_key_not_required", i18n_block)
 
-    def test_render_dashboard_contains_quota_panel(self):
+    def test_render_dashboard_contains_cursor_quota_card(self):
         auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
         html = render_dashboard("127.0.0.1", 24980, auth_status, models_count=10)
 
-        self.assertIn('<aside class="quota-panel"', html)
-        self.assertIn('id="quota-card"', html)
-        self.assertIn("Antigravity", html)
-        self.assertIn('viewBox="0 0 16 15"', html)
-        self.assertIn('id="google-antigravity"', html)
-        self.assertIn("fetchQuota", html)
-        self.assertIn("/api/quota", html)
-        self.assertIn("1280px", html)
+        self.assertIn('id="cursor-quota-card"', html)
+        self.assertIn('id="cursor-quota-refresh-btn"', html)
+        self.assertIn('id="cursor-quota-buckets"', html)
+        self.assertIn("/api/cursor/quota", html)
+        self.assertIn("fetchCursorQuota", html)
+
+    def test_cursor_quota_card_uses_safe_dom(self):
+        auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
+        html = render_dashboard("127.0.0.1", 24980, auth_status, models_count=10)
+
+        start = html.find("function renderCursorQuotaCard")
+        self.assertNotEqual(start, -1, "renderCursorQuotaCard function not found in dashboard script")
+        end = html.find("function fetchCursorQuota", start)
+        self.assertNotEqual(end, -1)
+        func_body = html[start:end]
+
+        self.assertNotIn(".innerHTML =", func_body)
+        self.assertIn(".textContent =", func_body)
 
     def test_render_dashboard_quota_i18n_keys(self):
         auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}

@@ -1180,6 +1180,31 @@ def render_dashboard(
           <div id="quota-notice" style="display: none;"></div>
           <div id="quota-footnote" class="quota-footnote" style="display: none;"></div>
         </div>
+
+        <div id="cursor-quota-card" class="quota-card" style="margin-top: 1.5rem;">
+          <div class="quota-header">
+            <div class="quota-title-row">
+              {CURSOR_ICON_SVG}
+              <div class="quota-title-text">
+                <span class="quota-title">Cursor</span>
+                <span id="cursor-quota-subtitle" class="quota-subtitle" data-i18n="quota_loading">{quota_loading_text}</span>
+              </div>
+            </div>
+            <button type="button" id="cursor-quota-refresh-btn" class="quota-refresh-btn" aria-label="{quota_refresh_text}" onclick="refreshCursorQuota()" title="{quota_refresh_text}">
+              {REFRESH_ICON_SVG}
+            </button>
+          </div>
+          <div class="quota-divider"></div>
+          <div id="cursor-quota-buckets" class="quota-buckets">
+            <div class="quota-skeleton">
+              <div class="skeleton-line" style="width: 70%;"></div>
+              <div class="skeleton-line" style="width: 100%; height: 6px;"></div>
+              <div class="skeleton-line" style="width: 45%;"></div>
+            </div>
+          </div>
+          <div id="cursor-quota-notice" style="display: none;"></div>
+          <div id="cursor-quota-footnote" class="quota-footnote" style="display: none;"></div>
+        </div>
       </aside>
 
       <main class="cards-grid">
@@ -1240,7 +1265,10 @@ def render_dashboard(
         quota_group_claude_gpt: "Claude and GPT models",
         quota_bucket_weekly: "Weekly Limit Remaining",
         quota_bucket_5h: "Five Hour Limit Remaining",
-        quota_desc_default: "Within each group, models share a weekly limit and a 5-hour limit."
+        quota_desc_default: "Within each group, models share a weekly limit and a 5-hour limit.",
+        cursor_group_models: "Cursor Models",
+        cursor_group_other: "Other Models",
+        cursor_group_ondemand: "On-demand"
       }},
       es: {{
         subtitle: "Gateway multiprotocolo sin dependencias para Google Cloud Code Assist",
@@ -1286,7 +1314,10 @@ def render_dashboard(
         quota_group_claude_gpt: "Modelos Claude y GPT",
         quota_bucket_weekly: "L\u00edmite semanal restante",
         quota_bucket_5h: "L\u00edmite de 5 horas restante",
-        quota_desc_default: "Dentro de cada grupo, los modelos comparten un l\u00edmite semanal y un l\u00edmite de 5 horas. La cuota se consume proporcionalmente al costo de los tokens, por lo que los l\u00edmites durar\u00e1n m\u00e1s con tareas cortas o usando modelos m\u00e1s econ\u00f3micos. El l\u00edmite de 5 horas suaviza la demanda agregada para distribuir equitativamente la capacidad global entre todos los usuarios, mientras que el l\u00edmite semanal est\u00e1 vinculado directamente a tu nivel individual."
+        quota_desc_default: "Dentro de cada grupo, los modelos comparten un l\u00edmite semanal y un l\u00edmite de 5 horas. La cuota se consume proporcionalmente al costo de los tokens, por lo que los l\u00edmites durar\u00e1n m\u00e1s con tareas cortas o usando modelos m\u00e1s econ\u00f3micos. El l\u00edmite de 5 horas suaviza la demanda agregada para distribuir equitativamente la capacidad global entre todos los usuarios, mientras que el l\u00edmite semanal est\u00e1 vinculado directamente a tu nivel individual.",
+        cursor_group_models: "Modelos Cursor",
+        cursor_group_other: "Otros Modelos",
+        cursor_group_ondemand: "Bajo demanda"
       }}
     }};
 
@@ -1353,8 +1384,18 @@ def render_dashboard(
         refreshBtn.setAttribute("title", refreshText);
       }}
 
+      var cursorRefreshBtn = document.getElementById("cursor-quota-refresh-btn");
+      if (cursorRefreshBtn) {{
+        var cursorRefreshText = dict.quota_refresh || "Refresh quota";
+        cursorRefreshBtn.setAttribute("aria-label", cursorRefreshText);
+        cursorRefreshBtn.setAttribute("title", cursorRefreshText);
+      }}
+
       if (currentQuotaSnapshot) {{
         renderQuotaCard(currentQuotaSnapshot);
+      }}
+      if (currentCursorQuotaSnapshot) {{
+        renderCursorQuotaCard(currentCursorQuotaSnapshot);
       }}
     }}
 
@@ -1593,6 +1634,183 @@ def render_dashboard(
       fetchQuota(true);
     }}
 
+    var currentCursorQuotaSnapshot = null;
+    var isFetchingCursorQuota = false;
+
+    function formatCursorBucketLabel(b, dict) {{
+      var raw = (b && (b.label || b.name)) ? (b.label || b.name) : "";
+      if (currentLang !== "es") return raw;
+      if (raw === "Cursor Models") return dict.cursor_group_models || "Modelos Cursor";
+      if (raw === "Other Models") return dict.cursor_group_other || "Otros Modelos";
+      if (raw === "On-demand") return dict.cursor_group_ondemand || "Bajo demanda";
+      return raw;
+    }}
+
+    function renderCursorQuotaCard(snapshot) {{
+      if (!snapshot) return;
+      currentCursorQuotaSnapshot = snapshot;
+      var dict = I18N[currentLang] || I18N.en;
+
+      var subtitleEl = document.getElementById("cursor-quota-subtitle");
+      var bucketsEl = document.getElementById("cursor-quota-buckets");
+      var noticeEl = document.getElementById("cursor-quota-notice");
+      var footnoteEl = document.getElementById("cursor-quota-footnote");
+
+      if (subtitleEl) {{
+        if (snapshot.status === "ok" && snapshot.updated_at) {{
+          subtitleEl.textContent = formatRelativeTime(snapshot.updated_at);
+        }} else if (snapshot.status === "unavailable") {{
+          subtitleEl.textContent = dict.quota_unavailable || "Quota unavailable";
+        }} else if (snapshot.status === "error" && (!snapshot.buckets || snapshot.buckets.length === 0)) {{
+          subtitleEl.textContent = snapshot.error || "Error";
+        }}
+      }}
+
+      if (noticeEl) {{
+        if (snapshot.error && snapshot.buckets && snapshot.buckets.length > 0) {{
+          noticeEl.textContent = dict.quota_error_stale || "Showing cached quota (refresh failed)";
+          noticeEl.className = "quota-notice";
+          noticeEl.style.display = "block";
+        }} else {{
+          noticeEl.style.display = "none";
+          noticeEl.textContent = "";
+        }}
+      }}
+
+      if (footnoteEl) {{
+        if (snapshot.description) {{
+          footnoteEl.textContent = snapshot.description;
+          footnoteEl.title = snapshot.description;
+          footnoteEl.style.display = "block";
+        }} else {{
+          footnoteEl.style.display = "none";
+          footnoteEl.textContent = "";
+        }}
+      }}
+
+      if (!bucketsEl) return;
+      while (bucketsEl.firstChild) {{
+        bucketsEl.removeChild(bucketsEl.firstChild);
+      }}
+
+      if (snapshot.status === "unavailable") {{
+        var unavailBox = document.createElement("div");
+        unavailBox.className = "quota-notice";
+        unavailBox.style.color = "var(--text-secondary)";
+        unavailBox.style.background = "#1a1a1a";
+        unavailBox.style.borderColor = "#333";
+        unavailBox.textContent = snapshot.error || (dict.quota_unavailable || "Quota unavailable");
+        bucketsEl.appendChild(unavailBox);
+        return;
+      }}
+
+      if (snapshot.status === "error" && (!snapshot.buckets || snapshot.buckets.length === 0)) {{
+        var errBox = document.createElement("div");
+        errBox.className = "quota-notice";
+        errBox.style.color = "var(--red)";
+        errBox.style.background = "var(--red-bg)";
+        errBox.style.borderColor = "rgba(239, 68, 68, 0.3)";
+        errBox.textContent = snapshot.error || "Error loading quota";
+        bucketsEl.appendChild(errBox);
+        return;
+      }}
+
+      if (!snapshot.buckets || snapshot.buckets.length === 0) {{
+        var emptyBox = document.createElement("div");
+        emptyBox.className = "quota-notice";
+        emptyBox.textContent = dict.quota_unavailable || "Quota unavailable";
+        bucketsEl.appendChild(emptyBox);
+        return;
+      }}
+
+      for (var i = 0; i < snapshot.buckets.length; i++) {{
+        var b = snapshot.buckets[i];
+        var bucketRow = document.createElement("div");
+        bucketRow.className = "quota-bucket";
+
+        var labelEl = document.createElement("div");
+        labelEl.className = "bucket-label";
+        labelEl.textContent = formatCursorBucketLabel(b, dict);
+        bucketRow.appendChild(labelEl);
+
+        var barEl = document.createElement("div");
+        barEl.className = "bucket-bar";
+        var fillEl = document.createElement("div");
+        fillEl.className = "bucket-fill";
+        var pct = typeof b.used_percent === "number" ? b.used_percent : 0;
+        fillEl.style.width = Math.min(100, Math.max(0, pct)) + "%";
+        if (pct < 60) {{
+          fillEl.classList.add("fill-low");
+        }} else if (pct < 85) {{
+          fillEl.classList.add("fill-medium");
+        }} else {{
+          fillEl.classList.add("fill-high");
+        }}
+        barEl.appendChild(fillEl);
+        bucketRow.appendChild(barEl);
+
+        var metaEl = document.createElement("div");
+        metaEl.className = "bucket-meta";
+
+        var pctEl = document.createElement("span");
+        pctEl.className = "bucket-pct";
+        var usedTpl = dict.quota_used || "{{pct}}% used";
+        pctEl.textContent = usedTpl.replace("{{pct}}", pct);
+        metaEl.appendChild(pctEl);
+
+        var resetEl = document.createElement("span");
+        resetEl.className = "bucket-reset";
+        resetEl.textContent = formatCountdown(b);
+        metaEl.appendChild(resetEl);
+
+        bucketRow.appendChild(metaEl);
+        bucketsEl.appendChild(bucketRow);
+      }}
+    }}
+
+    function fetchCursorQuota(force) {{
+      if (isFetchingCursorQuota) return;
+      isFetchingCursorQuota = true;
+      var refreshBtn = document.getElementById("cursor-quota-refresh-btn");
+      if (refreshBtn) {{
+        refreshBtn.disabled = true;
+        refreshBtn.classList.add("spinning");
+      }}
+
+      var url = "/api/cursor/quota" + (force ? "?refresh=1" : "");
+      fetch(url)
+        .then(function(res) {{
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          return res.json();
+        }})
+        .then(function(data) {{
+          renderCursorQuotaCard(data);
+        }})
+        .catch(function(err) {{
+          if (currentCursorQuotaSnapshot) {{
+            currentCursorQuotaSnapshot.error = String(err);
+            renderCursorQuotaCard(currentCursorQuotaSnapshot);
+          }} else {{
+            renderCursorQuotaCard({{
+              status: "error",
+              error: String(err),
+              buckets: []
+            }});
+          }}
+        }})
+        .finally(function() {{
+          isFetchingCursorQuota = false;
+          if (refreshBtn) {{
+            refreshBtn.disabled = false;
+            refreshBtn.classList.remove("spinning");
+          }}
+        }});
+    }}
+
+    function refreshCursorQuota() {{
+      fetchCursorQuota(true);
+    }}
+
     (function initLang() {{
       var saved = null;
       try {{
@@ -1602,6 +1820,7 @@ def render_dashboard(
         setLanguage(saved);
       }}
       fetchQuota(false);
+      fetchCursorQuota(false);
     }})();
 
     setInterval(function() {{
@@ -1609,10 +1828,15 @@ def render_dashboard(
         var sub = document.getElementById("quota-subtitle");
         if (sub) sub.textContent = formatRelativeTime(currentQuotaSnapshot.updated_at);
       }}
+      if (currentCursorQuotaSnapshot && currentCursorQuotaSnapshot.status === "ok") {{
+        var subC = document.getElementById("cursor-quota-subtitle");
+        if (subC) subC.textContent = formatRelativeTime(currentCursorQuotaSnapshot.updated_at);
+      }}
     }}, 30000);
 
     setInterval(function() {{
       fetchQuota(false);
+      fetchCursorQuota(false);
     }}, 300000);
 
     function switchProvider(cardId, providerId) {{

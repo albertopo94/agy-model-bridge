@@ -54,6 +54,47 @@ class MockQuotaProvider:
         return self.snapshot
 
 
+class MockCursorQuotaProvider:
+    def __init__(self, snapshot: QuotaSnapshot | None = None):
+        self.call_count = 0
+        self.last_force: bool | None = None
+        self.snapshot = snapshot or QuotaSnapshot(
+            status="ok",
+            buckets=[
+                QuotaBucket(
+                    id="cursor-models",
+                    group="Cursor",
+                    name="Cursor Models",
+                    label="Cursor Models",
+                    window="monthly",
+                    used_percent=0,
+                    remaining_fraction=1.0,
+                    resets_at=time.time() + 864000,
+                    resets_in="10d",
+                ),
+                QuotaBucket(
+                    id="other-models",
+                    group="Cursor",
+                    name="Other Models",
+                    label="Other Models",
+                    window="monthly",
+                    used_percent=13,
+                    remaining_fraction=0.87,
+                    resets_at=time.time() + 864000,
+                    resets_in="10d",
+                ),
+            ],
+            description="Free Tier",
+            updated_at=1700000000.0,
+            summary={"membership_type": "free", "is_unlimited": False},
+        )
+
+    def fetch(self, force: bool = False) -> QuotaSnapshot:
+        self.call_count += 1
+        self.last_force = force
+        return self.snapshot
+
+
 class MockCloudCodeClient:
     def __init__(self):
         self.models = [{"name": "models/gemini-2.5-pro"}, {"id": "gemini-2.5-flash"}]
@@ -98,6 +139,7 @@ class TestServerEndpoints(unittest.TestCase):
     def setUpClass(cls):
         cls.mock_client = MockCloudCodeClient()
         cls.mock_quota_provider = MockQuotaProvider()
+        cls.mock_cursor_quota_provider = MockCursorQuotaProvider()
         cls.server = create_server(
             host="127.0.0.1",
             port=0,
@@ -105,6 +147,7 @@ class TestServerEndpoints(unittest.TestCase):
             project="test-project",
             no_auth=True,
             quota_provider=cls.mock_quota_provider,
+            cursor_quota_provider=cls.mock_cursor_quota_provider,
         )
         cls.port = cls.server.server_address[1]
         cls.base_url = f"http://127.0.0.1:{cls.port}"
@@ -1089,6 +1132,24 @@ class TestServerEndpoints(unittest.TestCase):
         self.assertEqual(headers.get_content_type(), "application/json")
         self.assertEqual(body["status"], "ok")
         self.assertTrue(self.mock_quota_provider.last_force)
+
+    def test_api_cursor_quota_endpoint(self):
+        status, headers, body = self._http_get("/api/cursor/quota")
+        self.assertEqual(status, 200)
+        self.assertEqual(headers.get_content_type(), "application/json")
+        self.assertEqual(body["status"], "ok")
+        self.assertEqual(len(body["buckets"]), 2)
+        self.assertEqual(body["buckets"][0]["id"], "cursor-models")
+        self.assertEqual(body["description"], "Free Tier")
+        self.assertIn("summary", body)
+        self.assertEqual(body["summary"]["membership_type"], "free")
+
+    def test_api_cursor_quota_refresh_flag(self):
+        status, headers, body = self._http_get("/api/cursor/quota?refresh=1")
+        self.assertEqual(status, 200)
+        self.assertEqual(headers.get_content_type(), "application/json")
+        self.assertEqual(body["status"], "ok")
+        self.assertTrue(self.mock_cursor_quota_provider.last_force)
 
     def test_api_status_does_not_call_quota_provider(self):
         initial_count = self.mock_quota_provider.call_count
