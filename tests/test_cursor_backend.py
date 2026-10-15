@@ -178,6 +178,17 @@ class TestCursorBackend(unittest.TestCase):
         mock_acp.stream_prompt.assert_called_once()
         mock_popen.assert_called_once()
 
+    def test_warmup_and_close(self) -> None:
+        mock_acp = MagicMock()
+        mock_acp.is_alive.return_value = False
+        backend = CursorBackend(binary_path="agent", acp_client=mock_acp, use_acp=True)
+
+        backend.warmup(async_mode=False)
+        mock_acp.start.assert_called_once()
+
+        backend.close()
+        mock_acp.close.assert_called_once()
+
     def test_format_cursor_model_display_name(self) -> None:
         self.assertEqual(format_cursor_model_display_name("auto"), "Auto [Cursor - Free]")
         self.assertEqual(format_cursor_model_display_name("gpt-5.3-codex"), "Codex 5.3 [Cursor - Pro]")

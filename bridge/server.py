@@ -1417,9 +1417,14 @@ def run_server(
     )
     actual_port = server.server_address[1]
     print(f"Antigravity Model Bridge listening on http://{host}:{actual_port}")
+    if hasattr(server, "cursor_backend") and server.cursor_backend is not None:
+        if hasattr(server.cursor_backend, "warmup"):
+            server.cursor_backend.warmup()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         print("\nShutting down server...")
     finally:
         server.server_close()
+        if hasattr(server, "cursor_backend") and hasattr(server.cursor_backend, "close"):
+            server.cursor_backend.close()

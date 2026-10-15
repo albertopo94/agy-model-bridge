@@ -197,6 +197,33 @@ class CursorBackend:
                 self._acp_client = client
             return self._acp_client
 
+    def warmup(self, async_mode: bool = True) -> None:
+        """Pre-warms the background Cursor ACP process in a background thread."""
+        if not self.use_acp:
+            return
+
+        def _do_warmup() -> None:
+            try:
+                acp = self._get_acp_client()
+                if not acp.is_alive():
+                    acp.start()
+            except Exception as exc:
+                sys.stderr.write(f"Warning: Cursor ACP warmup failed: {exc}\n")
+                sys.stderr.flush()
+
+        if async_mode:
+            t = threading.Thread(target=_do_warmup, daemon=True, name="cursor-acp-warmup")
+            t.start()
+        else:
+            _do_warmup()
+
+    def close(self) -> None:
+        """Closes any active ACP background client."""
+        with self._acp_client_lock:
+            if self._acp_client is not None and hasattr(self._acp_client, "close"):
+                self._acp_client.close()
+                self._acp_client = None
+
     def stream_chat(
         self,
         prompt: str,
