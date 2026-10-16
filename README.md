@@ -22,7 +22,7 @@ Zero-dependency, pure Python 3 local AI gateway that bridges the Google Cloud Co
 - **Automatic Local API Key Security**: Automatically generates a persistent random API key stored at `~/.agy-bridge/api_key` (`0600` permissions) to protect `/v1/*` gateway endpoints against cross-origin access.
 - **macOS Keychain OAuth Integration**: Seamlessly extracts Google OAuth credentials (`service="gemini"`, `account="antigravity"`) and Cursor session JWTs (`service="cursor-access-token"`, `account="cursor-user"`) directly from macOS Keychain with thread-safe TTL caching.
 - **Antigravity & Cursor Model Quota Tracking**: Real-time quota monitoring on the dashboard and JSON endpoints (`GET /api/quota` and `GET /api/cursor/quota`). Displays visual usage bars and reset countdowns for Antigravity pools (Gemini and 3P) and Cursor buckets (`Cursor Models`, `Other Models`, `Plan`).
-- **Extended 300s HTTP Timeout & Deep Reasoning**: 300-second upstream timeout allows models with deep reasoning chains (`gemini-3.8-flash-high`, `claude-opus-5-5-high`) to complete complex thinking steps without connection resets.
+- **Extended 300s HTTP Timeout & Deep Reasoning**: 300-second upstream timeout allows models with deep reasoning chains (`gemini-4-argon-high`, `gemini-3.8-flash-high`, `claude-opus-5-5-high`) to complete complex thinking steps without connection resets.
 
 ---
 
@@ -144,19 +144,22 @@ claude
 
 #### Changing Models in Claude Code (`/model`)
 Typing `/model` inside Claude Code displays curated models ready to use:
-1. **Gemini 3.8 Flash · High (AGY)** (`gemini-3.8-flash-high`) — *Default*
-2. **Gemini 3.7 Flash · High (AGY)** (`gemini-3.7-flash-tiered`)
-3. **Claude Sonnet 5.5 · High (AGY)** (`claude-sonnet-5-5-high`)
-4. **Claude Sonnet 5.5 · Medium (AGY)** (`claude-sonnet-5-5-medium`)
-5. **Claude Sonnet 5.5 · Low (AGY)** (`claude-sonnet-5-5-low`)
-6. **Claude Opus 5.5 · High (AGY)** (`claude-opus-5-5-high`)
-7. **Claude Opus 5.5 · Medium (AGY)** (`claude-opus-5-5-medium`)
-8. **Claude Opus 5.5 · Low (AGY)** (`claude-opus-5-5-low`)
-9. **Claude Haiku 5.5 · High (AGY)** (`claude-haiku-5-5-high`)
-10. **Claude Haiku 5.5 · Medium (AGY)** (`claude-haiku-5-5-medium`)
-11. **Claude Haiku 5.5 · Low (AGY)** (`claude-haiku-5-5-low`)
-12. **Gemini 2.5 Pro (AGY)** (`gemini-2.5-pro`)
-13. **Gemini 2.5 Flash (AGY)** (`gemini-2.5-flash`)
+1. **Gemini 4 Argon · High (AGY)** (`gemini-4-argon-high`)
+2. **Gemini 4 Argon · Medium (AGY)** (`gemini-4-argon-medium`)
+3. **Gemini 4 Argon · Low (AGY)** (`gemini-4-argon-low`)
+4. **Gemini 3.8 Flash · High (AGY)** (`gemini-3.8-flash-high`) — *Default*
+5. **Gemini 3.7 Flash · High (AGY)** (`gemini-3.7-flash-tiered`)
+6. **Claude Sonnet 5.5 · High (AGY)** (`claude-sonnet-5-5-high`)
+7. **Claude Sonnet 5.5 · Medium (AGY)** (`claude-sonnet-5-5-medium`)
+8. **Claude Sonnet 5.5 · Low (AGY)** (`claude-sonnet-5-5-low`)
+9. **Claude Opus 5.5 · High (AGY)** (`claude-opus-5-5-high`)
+10. **Claude Opus 5.5 · Medium (AGY)** (`claude-opus-5-5-medium`)
+11. **Claude Opus 5.5 · Low (AGY)** (`claude-opus-5-5-low`)
+12. **Claude Haiku 5.5 · High (AGY)** (`claude-haiku-5-5-high`)
+13. **Claude Haiku 5.5 · Medium (AGY)** (`claude-haiku-5-5-medium`)
+14. **Claude Haiku 5.5 · Low (AGY)** (`claude-haiku-5-5-low`)
+15. **Gemini 2.5 Pro (AGY)** (`gemini-2.5-pro`)
+16. **Gemini 2.5 Flash (AGY)** (`gemini-2.5-flash`)
 
 *(Alternative: set environment variables manually for a single session:)*
 ```bash
