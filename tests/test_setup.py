@@ -465,6 +465,9 @@ class TestSetupClaude(unittest.TestCase):
         self.assertEqual(
             option_models,
             [
+                "gemini-4-argon-high",
+                "gemini-4-argon-medium",
+                "gemini-4-argon-low",
                 "gemini-3.8-flash-high",
                 "gemini-3.7-flash-tiered",
                 "claude-sonnet-5-5-high",
@@ -493,6 +496,9 @@ class TestSetupClaude(unittest.TestCase):
 
         models = [opt["model"] for opt in DEFAULT_CLAUDE_MODEL_PICKER_OPTIONS]
         expected_models = [
+            "gemini-4-argon-high",
+            "gemini-4-argon-medium",
+            "gemini-4-argon-low",
             "gemini-3.8-flash-high",
             "gemini-3.7-flash-tiered",
             "claude-sonnet-5-5-high",
@@ -514,6 +520,9 @@ class TestSetupClaude(unittest.TestCase):
             self.assertEqual(opt["behavesAs"], "claude-3-7-sonnet")
 
         label_map = {opt["model"]: opt["label"] for opt in DEFAULT_CLAUDE_MODEL_PICKER_OPTIONS}
+        self.assertEqual(label_map["gemini-4-argon-high"], "Gemini 4 Argon · High (AGY)")
+        self.assertEqual(label_map["gemini-4-argon-medium"], "Gemini 4 Argon · Medium (AGY)")
+        self.assertEqual(label_map["gemini-4-argon-low"], "Gemini 4 Argon · Low (AGY)")
         self.assertEqual(label_map["gemini-3.8-flash-high"], "Gemini 3.8 Flash · High (AGY)")
         self.assertEqual(label_map["gemini-3.7-flash-tiered"], "Gemini 3.7 Flash · High (AGY)")
         self.assertEqual(label_map["claude-sonnet-5-5-high"], "Claude Sonnet 5.5 · High (AGY)")
@@ -533,7 +542,7 @@ class TestSetupClaude(unittest.TestCase):
         options = data.get("modelPicker", {}).get("options", [])
         self.assertEqual(options[0]["model"], "my-special-model")
         self.assertIn("my-special-model", options[0]["label"])
-        self.assertEqual(options[1]["model"], "gemini-3.8-flash-high")
+        self.assertEqual(options[1]["model"], "gemini-4-argon-high")
 
     def test_surgical_merge_preserves_existing_keys_and_creates_backup(self):
         target = self.dir_path / "settings.json"
@@ -3721,8 +3730,11 @@ class TestPiConfigurator(unittest.TestCase):
         self.assertEqual(agy["headers"], {"User-Agent": "pi-coding-agent"})
 
         models = agy["models"]
-        self.assertEqual(len(models), 13)
+        self.assertEqual(len(models), 16)
         expected_ids = [
+            "gemini-4-argon-high",
+            "gemini-4-argon-medium",
+            "gemini-4-argon-low",
             "gemini-3.8-flash-high",
             "gemini-3.8",
             "claude-sonnet-5-5-high",
@@ -3738,19 +3750,22 @@ class TestPiConfigurator(unittest.TestCase):
             "gemini-2.5-flash",
         ]
         self.assertEqual([m["id"] for m in models], expected_ids)
-        self.assertEqual(models[0]["name"], "Gemini 3.8 Flash (High - AGY)")
-        self.assertEqual(models[1]["name"], "Gemini 3.8 (AGY)")
-        self.assertEqual(models[2]["name"], "Claude Sonnet 5.5 (High - AGY)")
-        self.assertEqual(models[3]["name"], "Claude Sonnet 5.5 (Medium - AGY)")
-        self.assertEqual(models[4]["name"], "Claude Sonnet 5.5 (Low - AGY)")
-        self.assertEqual(models[5]["name"], "Claude Opus 5.5 (High - AGY)")
-        self.assertEqual(models[6]["name"], "Claude Opus 5.5 (Medium - AGY)")
-        self.assertEqual(models[7]["name"], "Claude Opus 5.5 (Low - AGY)")
-        self.assertEqual(models[8]["name"], "Claude Haiku 5.5 · High (AGY)")
-        self.assertEqual(models[9]["name"], "Claude Haiku 5.5 · Medium (AGY)")
-        self.assertEqual(models[10]["name"], "Claude Haiku 5.5 · Low (AGY)")
-        self.assertEqual(models[11]["name"], "Gemini 2.5 Pro (AGY)")
-        self.assertEqual(models[12]["name"], "Gemini 2.5 Flash (AGY)")
+        self.assertEqual(models[0]["name"], "Gemini 4 Argon (High - AGY)")
+        self.assertEqual(models[1]["name"], "Gemini 4 Argon (Medium - AGY)")
+        self.assertEqual(models[2]["name"], "Gemini 4 Argon (Low - AGY)")
+        self.assertEqual(models[3]["name"], "Gemini 3.8 Flash (High - AGY)")
+        self.assertEqual(models[4]["name"], "Gemini 3.8 (AGY)")
+        self.assertEqual(models[5]["name"], "Claude Sonnet 5.5 (High - AGY)")
+        self.assertEqual(models[6]["name"], "Claude Sonnet 5.5 (Medium - AGY)")
+        self.assertEqual(models[7]["name"], "Claude Sonnet 5.5 (Low - AGY)")
+        self.assertEqual(models[8]["name"], "Claude Opus 5.5 (High - AGY)")
+        self.assertEqual(models[9]["name"], "Claude Opus 5.5 (Medium - AGY)")
+        self.assertEqual(models[10]["name"], "Claude Opus 5.5 (Low - AGY)")
+        self.assertEqual(models[11]["name"], "Claude Haiku 5.5 · High (AGY)")
+        self.assertEqual(models[12]["name"], "Claude Haiku 5.5 · Medium (AGY)")
+        self.assertEqual(models[13]["name"], "Claude Haiku 5.5 · Low (AGY)")
+        self.assertEqual(models[14]["name"], "Gemini 2.5 Pro (AGY)")
+        self.assertEqual(models[15]["name"], "Gemini 2.5 Flash (AGY)")
         for m in models:
             if m["id"] in ("gemini-2.5-pro", "gemini-2.5-flash"):
                 self.assertFalse(m["reasoning"])
@@ -4362,8 +4377,11 @@ class TestGentleShellConfigurator(unittest.TestCase):
         self.assertEqual(agy["headers"], {"User-Agent": "gentle-shell"})
 
         models = agy["models"]
-        self.assertEqual(len(models), 13)
+        self.assertEqual(len(models), 16)
         expected_ids = [
+            "gemini-4-argon-high",
+            "gemini-4-argon-medium",
+            "gemini-4-argon-low",
             "gemini-3.8-flash-high",
             "gemini-3.8",
             "claude-sonnet-5-5-high",
@@ -4379,19 +4397,22 @@ class TestGentleShellConfigurator(unittest.TestCase):
             "gemini-2.5-flash",
         ]
         self.assertEqual([m["id"] for m in models], expected_ids)
-        self.assertEqual(models[0]["name"], "Gemini 3.8 Flash (High - AGY)")
-        self.assertEqual(models[1]["name"], "Gemini 3.8 (AGY)")
-        self.assertEqual(models[2]["name"], "Claude Sonnet 5.5 (High - AGY)")
-        self.assertEqual(models[3]["name"], "Claude Sonnet 5.5 (Medium - AGY)")
-        self.assertEqual(models[4]["name"], "Claude Sonnet 5.5 (Low - AGY)")
-        self.assertEqual(models[5]["name"], "Claude Opus 5.5 (High - AGY)")
-        self.assertEqual(models[6]["name"], "Claude Opus 5.5 (Medium - AGY)")
-        self.assertEqual(models[7]["name"], "Claude Opus 5.5 (Low - AGY)")
-        self.assertEqual(models[8]["name"], "Claude Haiku 5.5 · High (AGY)")
-        self.assertEqual(models[9]["name"], "Claude Haiku 5.5 · Medium (AGY)")
-        self.assertEqual(models[10]["name"], "Claude Haiku 5.5 · Low (AGY)")
-        self.assertEqual(models[11]["name"], "Gemini 2.5 Pro (AGY)")
-        self.assertEqual(models[12]["name"], "Gemini 2.5 Flash (AGY)")
+        self.assertEqual(models[0]["name"], "Gemini 4 Argon (High - AGY)")
+        self.assertEqual(models[1]["name"], "Gemini 4 Argon (Medium - AGY)")
+        self.assertEqual(models[2]["name"], "Gemini 4 Argon (Low - AGY)")
+        self.assertEqual(models[3]["name"], "Gemini 3.8 Flash (High - AGY)")
+        self.assertEqual(models[4]["name"], "Gemini 3.8 (AGY)")
+        self.assertEqual(models[5]["name"], "Claude Sonnet 5.5 (High - AGY)")
+        self.assertEqual(models[6]["name"], "Claude Sonnet 5.5 (Medium - AGY)")
+        self.assertEqual(models[7]["name"], "Claude Sonnet 5.5 (Low - AGY)")
+        self.assertEqual(models[8]["name"], "Claude Opus 5.5 (High - AGY)")
+        self.assertEqual(models[9]["name"], "Claude Opus 5.5 (Medium - AGY)")
+        self.assertEqual(models[10]["name"], "Claude Opus 5.5 (Low - AGY)")
+        self.assertEqual(models[11]["name"], "Claude Haiku 5.5 · High (AGY)")
+        self.assertEqual(models[12]["name"], "Claude Haiku 5.5 · Medium (AGY)")
+        self.assertEqual(models[13]["name"], "Claude Haiku 5.5 · Low (AGY)")
+        self.assertEqual(models[14]["name"], "Gemini 2.5 Pro (AGY)")
+        self.assertEqual(models[15]["name"], "Gemini 2.5 Flash (AGY)")
         for m in models:
             if m["id"] in ("gemini-2.5-pro", "gemini-2.5-flash"):
                 self.assertFalse(m["reasoning"])

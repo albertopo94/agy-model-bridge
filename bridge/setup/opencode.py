@@ -175,6 +175,27 @@ class OpenCodeConfigurator(ClientConfigurator):
                     "apiKey": auth_token,
                 },
                 "models": {
+                "gemini-4-argon-high": {
+                    "name": "Gemini 4 Argon (High)",
+                    "limit": {
+                        "context": 1048576,
+                        "output": 65536,
+                    },
+                },
+                "gemini-4-argon-medium": {
+                    "name": "Gemini 4 Argon (Medium)",
+                    "limit": {
+                        "context": 1048576,
+                        "output": 65536,
+                    },
+                },
+                "gemini-4-argon-low": {
+                    "name": "Gemini 4 Argon (Low)",
+                    "limit": {
+                        "context": 1048576,
+                        "output": 65536,
+                    },
+                },
                 "gemini-3.8-flash-high": {
                     "name": "Gemini 3.8 Flash (High)",
                     "limit": {

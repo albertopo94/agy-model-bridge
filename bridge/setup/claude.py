@@ -14,6 +14,21 @@ from bridge.setup.common import (
 
 DEFAULT_CLAUDE_MODEL_PICKER_OPTIONS: list[dict[str, str]] = [
     {
+        "model": "gemini-4-argon-high",
+        "label": "Gemini 4 Argon · High (AGY)",
+        "behavesAs": "claude-3-7-sonnet",
+    },
+    {
+        "model": "gemini-4-argon-medium",
+        "label": "Gemini 4 Argon · Medium (AGY)",
+        "behavesAs": "claude-3-7-sonnet",
+    },
+    {
+        "model": "gemini-4-argon-low",
+        "label": "Gemini 4 Argon · Low (AGY)",
+        "behavesAs": "claude-3-7-sonnet",
+    },
+    {
         "model": "gemini-3.8-flash-high",
         "label": "Gemini 3.8 Flash · High (AGY)",
         "behavesAs": "claude-3-7-sonnet",
@@ -286,6 +301,9 @@ class ClaudeConfigurator(ClientConfigurator):
                         model_picker = settings.get("modelPicker")
                         if isinstance(model_picker, dict):
                             agy_models = {
+                                "gemini-4-argon-high",
+                                "gemini-4-argon-medium",
+                                "gemini-4-argon-low",
                                 "gemini-3.8-flash-high",
                                 "gemini-3.7-flash-tiered",
                                 "gemini-3.6-flash-tiered",

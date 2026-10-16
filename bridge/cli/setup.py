@@ -514,6 +514,7 @@ def handle_setup_cursor(argv: list[str], prog_base: str, setup_fn: Any = None) -
     model_names = [res["model"]] + [
         m
         for m in (
+            "gemini-4-argon-high",
             "gemini-3.8-flash-high",
             "claude-sonnet-5-5-high",
             "claude-opus-5-5-high",

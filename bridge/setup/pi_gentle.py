@@ -20,6 +20,30 @@ from bridge.setup.common import (
 
 DEFAULT_PI_AND_GENTLE_MODELS: list[dict[str, Any]] = [
     {
+        "id": "gemini-4-argon-high",
+        "name": "Gemini 4 Argon (High - AGY)",
+        "reasoning": True,
+        "input": ["text"],
+        "contextWindow": 1048576,
+        "maxTokens": 65536,
+    },
+    {
+        "id": "gemini-4-argon-medium",
+        "name": "Gemini 4 Argon (Medium - AGY)",
+        "reasoning": True,
+        "input": ["text"],
+        "contextWindow": 1048576,
+        "maxTokens": 65536,
+    },
+    {
+        "id": "gemini-4-argon-low",
+        "name": "Gemini 4 Argon (Low - AGY)",
+        "reasoning": True,
+        "input": ["text"],
+        "contextWindow": 1048576,
+        "maxTokens": 65536,
+    },
+    {
         "id": "gemini-3.8-flash-high",
         "name": "Gemini 3.8 Flash (High - AGY)",
         "reasoning": True,
