@@ -953,6 +953,26 @@ def render_dashboard(
       flex-shrink: 0;
       position: sticky;
       top: 1.5rem;
+      max-height: calc(100vh - 3rem);
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      scrollbar-width: thin;
+      scrollbar-color: #2a2a2a transparent;
+      padding-right: 4px;
+      padding-bottom: 0.5rem;
+    }}
+    .quota-panel::-webkit-scrollbar {{
+      width: 6px;
+    }}
+    .quota-panel::-webkit-scrollbar-track {{
+      background: transparent;
+    }}
+    .quota-panel::-webkit-scrollbar-thumb {{
+      background: #262626;
+      border-radius: 3px;
+    }}
+    .quota-panel::-webkit-scrollbar-thumb:hover {{
+      background: #3f3f3f;
     }}
     .dashboard-layout .cards-grid {{
       flex: 1;
@@ -971,6 +991,9 @@ def render_dashboard(
       .quota-panel {{
         width: 100%;
         position: static;
+        max-height: none;
+        overflow-y: visible;
+        padding-right: 0;
       }}
     }}
     @media (max-width: 768px) {{

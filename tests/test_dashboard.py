@@ -782,6 +782,9 @@ class TestDashboardBilingual(unittest.TestCase):
         self.assertIn("::-webkit-scrollbar", html)
         self.assertIn("pre::-webkit-scrollbar", html)
         self.assertIn("scrollbar-color: #2a2a2a #080808;", html)
+        self.assertIn("max-height: calc(100vh - 3rem);", html)
+        self.assertIn("overflow-y: auto;", html)
+        self.assertIn("overscroll-behavior: contain;", html)
 
     def test_gentle_shell_multi_provider_card(self):
         auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
