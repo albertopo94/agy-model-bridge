@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import urllib.error
 
 from bridge.client import (
+    DEFAULT_USER_AGENT,
     CloudCodeClient,
     BridgeError,
     AuthenticationError,
@@ -57,7 +58,7 @@ class TestCloudCodeClient(unittest.TestCase):
         self.assertEqual(req.full_url, "https://daily-cloudcode-pa.googleapis.com/v1internal:testEndpoint")
         self.assertEqual(req.headers["Authorization"], "Bearer ya29.initial_token")
         self.assertEqual(req.headers["Content-type"], "application/json")
-        self.assertEqual(req.headers["User-agent"], "antigravity/1.0")
+        self.assertEqual(req.headers["User-agent"], DEFAULT_USER_AGENT)
         self.assertEqual(json.loads(req.data.decode("utf-8")), {"key": "val"})
 
     @patch("urllib.request.urlopen")

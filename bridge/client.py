@@ -35,6 +35,11 @@ __all__ = [
 ]
 
 
+DEFAULT_USER_AGENT: str = (
+    "antigravity/cli/1.4.0 (aidev_client; os_type=darwin; arch=amd64; cl=1000494485; auth_method=consumer)"
+)
+
+
 class CloudCodeClient:
     """Client for Google Cloud Code Assist upstream endpoints."""
 
@@ -52,7 +57,7 @@ class CloudCodeClient:
         return {
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
-            "User-Agent": "antigravity/1.0",
+            "User-Agent": DEFAULT_USER_AGENT,
         }
 
     def _map_http_error(self, err: urllib.error.HTTPError) -> Exception:
