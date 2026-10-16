@@ -481,6 +481,15 @@ MODEL_TIER_TABLE: dict[str, tuple[str, str | None]] = {
     "claude-haiku-5-5-high": ("claude-haiku-5-5", "HIGH"),
     "claude-haiku-5-5-medium": ("claude-haiku-5-5", "MEDIUM"),
     "claude-haiku-5-5-low": ("claude-haiku-5-5", "LOW"),
+    # Gemini 4 Argon aliases
+    "gemini-4-argon": ("gemini-4-argon-high", "HIGH"),
+    "gemini-4-argon-high": ("gemini-4-argon-high", "HIGH"),
+    "gemini-4-argon-medium": ("gemini-4-argon-medium", "MEDIUM"),
+    "gemini-4-argon-low": ("gemini-4-argon-low", "LOW"),
+    "argon": ("gemini-4-argon-high", "HIGH"),
+    "argon-high": ("gemini-4-argon-high", "HIGH"),
+    "argon-medium": ("gemini-4-argon-medium", "MEDIUM"),
+    "argon-low": ("gemini-4-argon-low", "LOW"),
 }
 
 

@@ -1542,6 +1542,35 @@ class TestResolveModelAndThinking(unittest.TestCase):
         self.assertEqual(model_upper, "gemini-3.8-flash-tiered")
         self.assertEqual(thinking_upper, {"thinkingLevel": "HIGH"})
 
+    def test_gemini_4_argon_tiers_and_aliases(self):
+        cases = [
+            ("gemini-4-argon", "gemini-4-argon-high", {"thinkingLevel": "HIGH"}),
+            ("gemini-4-argon-high", "gemini-4-argon-high", {"thinkingLevel": "HIGH"}),
+            ("gemini-4-argon-medium", "gemini-4-argon-medium", {"thinkingLevel": "MEDIUM"}),
+            ("gemini-4-argon-low", "gemini-4-argon-low", {"thinkingLevel": "LOW"}),
+            ("argon", "gemini-4-argon-high", {"thinkingLevel": "HIGH"}),
+            ("argon-high", "gemini-4-argon-high", {"thinkingLevel": "HIGH"}),
+            ("argon-medium", "gemini-4-argon-medium", {"thinkingLevel": "MEDIUM"}),
+            ("argon-low", "gemini-4-argon-low", {"thinkingLevel": "LOW"}),
+        ]
+        for raw_model, expected_model, expected_thinking in cases:
+            model, thinking = resolve_model_and_thinking(raw_model, {})
+            self.assertEqual(model, expected_model, f"Failed model resolution for {raw_model}")
+            self.assertEqual(thinking, expected_thinking, f"Failed thinking resolution for {raw_model}")
+
+        # Overrides
+        model_ov, thinking_ov = resolve_model_and_thinking(
+            "gemini-4-argon-high", {"reasoning_effort": "low"}
+        )
+        self.assertEqual(model_ov, "gemini-4-argon-high")
+        self.assertEqual(thinking_ov, {"thinkingLevel": "LOW"})
+
+        model_dis, thinking_dis = resolve_model_and_thinking(
+            "gemini-4-argon", {"thinking": {"type": "disabled"}}
+        )
+        self.assertEqual(model_dis, "gemini-4-argon-high")
+        self.assertIsNone(thinking_dis)
+
     def test_flash_high_model_resolves_to_tiered_high(self):
         model, thinking = resolve_model_and_thinking("gemini-3.8-flash-high", {})
         self.assertEqual(model, "gemini-3.8-flash-tiered")
