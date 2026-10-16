@@ -1417,8 +1417,10 @@ def render_dashboard(
         quota_error_stale: "Showing cached quota (refresh failed)",
         quota_group_gemini: "Gemini Models",
         quota_group_claude_gpt: "Claude and GPT models",
+        quota_group_argon: "Gemini 4 Argon",
         quota_bucket_weekly: "Weekly Limit Remaining",
         quota_bucket_5h: "Five Hour Limit Remaining",
+        quota_bucket_argon_weekly: "Gemini 4 Argon Weekly Limit",
         quota_desc_default: "Within each group, models share a weekly limit and a 5-hour limit.",
         cursor_group_models: "Cursor Models",
         cursor_group_other: "Other Models",
@@ -1473,8 +1475,10 @@ def render_dashboard(
         quota_error_stale: "Mostrando cuota en caché (falló la actualización)",
         quota_group_gemini: "Modelos Gemini",
         quota_group_claude_gpt: "Modelos Claude y GPT",
+        quota_group_argon: "Gemini 4 Argon",
         quota_bucket_weekly: "L\u00edmite semanal restante",
         quota_bucket_5h: "L\u00edmite de 5 horas restante",
+        quota_bucket_argon_weekly: "L\u00edmite semanal de Gemini 4 Argon",
         quota_desc_default: "Dentro de cada grupo, los modelos comparten un l\u00edmite semanal y un l\u00edmite de 5 horas. La cuota se consume proporcionalmente al costo de los tokens, por lo que los l\u00edmites durar\u00e1n m\u00e1s con tareas cortas o usando modelos m\u00e1s econ\u00f3micos. El l\u00edmite de 5 horas suaviza la demanda agregada para distribuir equitativamente la capacidad global entre todos los usuarios, mientras que el l\u00edmite semanal est\u00e1 vinculado directamente a tu nivel individual.",
         cursor_group_models: "Modelos Cursor",
         cursor_group_other: "Otros Modelos",
@@ -1615,11 +1619,13 @@ def render_dashboard(
       if (currentLang !== "es") return raw;
       var groupTranslations = {{
         "Gemini Models": dict.quota_group_gemini || "Modelos Gemini",
-        "Claude and GPT models": dict.quota_group_claude_gpt || "Modelos Claude y GPT"
+        "Claude and GPT models": dict.quota_group_claude_gpt || "Modelos Claude y GPT",
+        "Gemini 4 Argon": dict.quota_group_argon || "Gemini 4 Argon"
       }};
       var bucketTranslations = {{
         "Weekly Limit Remaining": dict.quota_bucket_weekly || "L\u00edmite semanal restante",
-        "Five Hour Limit Remaining": dict.quota_bucket_5h || "L\u00edmite de 5 horas restante"
+        "Five Hour Limit Remaining": dict.quota_bucket_5h || "L\u00edmite de 5 horas restante",
+        "Gemini 4 Argon Weekly Limit": dict.quota_bucket_argon_weekly || "L\u00edmite semanal de Gemini 4 Argon"
       }};
       if (raw.indexOf(" \u00b7 ") !== -1) {{
         var parts = raw.split(" \u00b7 ");
