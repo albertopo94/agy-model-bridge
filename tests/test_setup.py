@@ -1833,6 +1833,56 @@ class TestUpdateInstallation(unittest.TestCase):
         self.assertFalse(result["restarted_daemon"])
 
     @unittest.mock.patch("bridge.setup.subprocess.run")
+    def test_update_recovers_when_no_tracking_information(self, mock_run):
+        # First call fails with no tracking info; second call (pull origin main) succeeds
+        fail_res = unittest.mock.MagicMock(
+            returncode=1,
+            stdout="",
+            stderr="Error: There is no tracking information for the current branch.\n",
+        )
+        success_res = unittest.mock.MagicMock(
+            returncode=0,
+            stdout="Already up to date.\n",
+            stderr="",
+        )
+        mock_run.side_effect = [fail_res, success_res]
+
+        result = update_installation(
+            core_dir=self.repo_dir,
+            restart_daemon_if_running=False,
+        )
+
+        self.assertEqual(result["status"], "already_up_to_date")
+        self.assertFalse(result["restarted_daemon"])
+
+    @unittest.mock.patch("bridge.setup.subprocess.run")
+    def test_update_recovers_when_detached_head(self, mock_run):
+        fail_res = unittest.mock.MagicMock(
+            returncode=1,
+            stdout="",
+            stderr="fatal: You are not currently on a branch.\n",
+        )
+        fetch_res = unittest.mock.MagicMock(returncode=0)
+        tags_res = unittest.mock.MagicMock(
+            returncode=0,
+            stdout="v0.28.0\nv0.27.1\n",
+        )
+        checkout_res = unittest.mock.MagicMock(
+            returncode=0,
+            stdout="HEAD is now at c946e2a\n",
+            stderr="",
+        )
+        mock_run.side_effect = [fail_res, fetch_res, tags_res, checkout_res]
+
+        result = update_installation(
+            core_dir=self.repo_dir,
+            restart_daemon_if_running=False,
+        )
+
+        self.assertIn(result["status"], ("updated", "already_up_to_date"))
+        self.assertFalse(result["restarted_daemon"])
+
+    @unittest.mock.patch("bridge.setup.subprocess.run")
     def test_update_git_command_missing(self, mock_run):
         mock_run.side_effect = FileNotFoundError("git not found")
 

@@ -277,12 +277,12 @@ def update_installation(
             default_dir = base_state / "core"
             if (default_dir / ".git").exists():
                 target_dir = default_dir
-            elif (Path.cwd() / ".git").exists():
-                target_dir = Path.cwd()
             else:
                 repo_root = Path(__file__).resolve().parents[2]
                 if (repo_root / ".git").exists():
                     target_dir = repo_root
+                elif (Path.cwd() / ".git").exists() and (Path.cwd() / "bridge").is_dir():
+                    target_dir = Path.cwd()
                 else:
                     target_dir = default_dir
 
@@ -314,12 +314,46 @@ def update_installation(
 
     if res.returncode != 0:
         err_msg = res.stderr.strip() or res.stdout.strip() or f"git pull falló con código {res.returncode}"
-        return {
-            "status": "error",
-            "message": err_msg,
-            "restarted_daemon": False,
-            "version": _get_installed_version(target_dir),
-        }
+        recovered = False
+        lower_err = err_msg.lower()
+        if "no tracking information" in lower_err:
+            fallback_res = subprocess.run(
+                ["git", "-C", str(target_dir), "pull", "--ff-only", "origin", "main"],
+                capture_output=True,
+                text=True,
+            )
+            if fallback_res.returncode == 0:
+                res = fallback_res
+                recovered = True
+        elif "not currently on a branch" in lower_err:
+            subprocess.run(
+                ["git", "-C", str(target_dir), "fetch", "--tags", "--quiet", "origin"],
+                capture_output=True,
+                text=True,
+            )
+            tags_res = subprocess.run(
+                ["git", "-C", str(target_dir), "tag", "-l", "v*", "--sort=-v:refname"],
+                capture_output=True,
+                text=True,
+            )
+            tags = [t.strip() for t in tags_res.stdout.splitlines() if t.strip()]
+            target_ref = tags[0] if tags else "origin/main"
+            checkout_res = subprocess.run(
+                ["git", "-C", str(target_dir), "checkout", target_ref, "--quiet"],
+                capture_output=True,
+                text=True,
+            )
+            if checkout_res.returncode == 0:
+                res = checkout_res
+                recovered = True
+
+        if not recovered:
+            return {
+                "status": "error",
+                "message": err_msg,
+                "restarted_daemon": False,
+                "version": _get_installed_version(target_dir),
+            }
 
     new_ver = _get_installed_version(target_dir)
     installed_marker = target_dir / ".agy-bridge-installed"
