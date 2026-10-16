@@ -771,6 +771,7 @@ def render_dashboard(
   <title>AGY Model Bridge — Local AI Gateway</title>
   <style>
     :root {{
+      color-scheme: dark;
       --bg: #000000;
       --card-bg: #111111;
       --card-border: #222222;
@@ -790,6 +791,22 @@ def render_dashboard(
       box-sizing: border-box;
       margin: 0;
       padding: 0;
+    }}
+    /* Custom scrollbars */
+    ::-webkit-scrollbar {{
+      width: 8px;
+      height: 8px;
+    }}
+    ::-webkit-scrollbar-track {{
+      background: #0a0a0a;
+    }}
+    ::-webkit-scrollbar-thumb {{
+      background: #262626;
+      border-radius: 4px;
+      border: 2px solid #0a0a0a;
+    }}
+    ::-webkit-scrollbar-thumb:hover {{
+      background: #3f3f3f;
     }}
     body {{
       background-color: var(--bg);
@@ -1263,6 +1280,23 @@ def render_dashboard(
       font-size: 0.82rem;
       color: #d1d5db;
       line-height: 1.5;
+      scrollbar-width: thin;
+      scrollbar-color: #2a2a2a #080808;
+    }}
+    pre::-webkit-scrollbar {{
+      height: 6px;
+      width: 6px;
+    }}
+    pre::-webkit-scrollbar-track {{
+      background: #080808;
+      border-radius: 3px;
+    }}
+    pre::-webkit-scrollbar-thumb {{
+      background: #2a2a2a;
+      border-radius: 3px;
+    }}
+    pre::-webkit-scrollbar-thumb:hover {{
+      background: #444444;
     }}
     footer {{
       margin-top: 3rem;
@@ -1668,18 +1702,8 @@ def render_dashboard(
       }}
 
       if (footnoteEl) {{
-        if (snapshot.description) {{
-          var descText = snapshot.description;
-          if (currentLang === "es" && descText.indexOf("Within each group, models share a weekly limit and a 5-hour limit") !== -1) {{
-            descText = dict.quota_desc_default || "Dentro de cada grupo, los modelos comparten un l\u00edmite semanal y un l\u00edmite de 5 horas.";
-          }}
-          footnoteEl.textContent = descText;
-          footnoteEl.title = descText;
-          footnoteEl.style.display = "block";
-        }} else {{
-          footnoteEl.style.display = "none";
-          footnoteEl.textContent = "";
-        }}
+        footnoteEl.style.display = "none";
+        footnoteEl.textContent = "";
       }}
 
       if (!bucketsEl) return;

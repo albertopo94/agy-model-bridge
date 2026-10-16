@@ -775,6 +775,14 @@ class TestDashboardBilingual(unittest.TestCase):
             html,
         )
 
+    def test_dashboard_dark_scrollbar_and_color_scheme(self):
+        auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
+        html = render_dashboard("127.0.0.1", 24980, auth_status, models_count=10)
+        self.assertIn("color-scheme: dark;", html)
+        self.assertIn("::-webkit-scrollbar", html)
+        self.assertIn("pre::-webkit-scrollbar", html)
+        self.assertIn("scrollbar-color: #2a2a2a #080808;", html)
+
     def test_gentle_shell_multi_provider_card(self):
         auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
         html_en = render_dashboard("127.0.0.1", 24980, auth_status, models_count=10, lang="en")
