@@ -697,6 +697,9 @@ class TestDashboardBilingual(unittest.TestCase):
         self.assertIn('id="cursor-quota-card"', html)
         self.assertIn('id="cursor-quota-refresh-btn"', html)
         self.assertIn('id="cursor-quota-buckets"', html)
+        self.assertIn('id="tab-quota-agy"', html)
+        self.assertIn('id="tab-quota-cursor"', html)
+        self.assertIn("switchQuotaTab", html)
         self.assertIn("/api/cursor/quota", html)
         self.assertIn("fetchCursorQuota", html)
 

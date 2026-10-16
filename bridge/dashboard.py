@@ -1219,6 +1219,36 @@ def render_dashboard(
       margin-top: 0.25rem;
       margin-bottom: 0.5rem;
     }}
+    .quota-tabs {{
+      display: flex;
+      gap: 0.35rem;
+      background: #181818;
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 3px;
+      margin-bottom: 0.75rem;
+    }}
+    .quota-tab-btn {{
+      flex: 1;
+      border: none;
+      background: transparent;
+      color: var(--text-secondary);
+      font-size: 0.78rem;
+      font-weight: 500;
+      padding: 0.35rem 0.65rem;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      text-align: center;
+    }}
+    .quota-tab-btn:hover {{
+      color: var(--text-primary);
+    }}
+    .quota-tab-btn.active {{
+      background: #282828;
+      color: var(--text-primary);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+    }}
     .provider-tab-btn {{
       flex: 1;
       border: none;
@@ -1359,7 +1389,12 @@ def render_dashboard(
     </header>
 
     <div class="dashboard-layout">
-      <aside class="quota-panel" aria-label="Antigravity Quota">
+      <aside class="quota-panel" aria-label="Quota Tracking">
+        <div class="quota-tabs" role="tablist" aria-label="Quota Provider">
+          <button type="button" id="tab-quota-agy" class="quota-tab-btn active" role="tab" aria-selected="true" onclick="switchQuotaTab('agy')">Antigravity</button>
+          <button type="button" id="tab-quota-cursor" class="quota-tab-btn" role="tab" aria-selected="false" onclick="switchQuotaTab('cursor')">Cursor</button>
+        </div>
+
         <div id="quota-card" class="quota-card">
           <div class="quota-header">
             <div class="quota-title-row">
@@ -1385,7 +1420,7 @@ def render_dashboard(
           <div id="quota-footnote" class="quota-footnote" style="display: none;"></div>
         </div>
 
-        <div id="cursor-quota-card" class="quota-card" style="margin-top: 1.5rem;">
+        <div id="cursor-quota-card" class="quota-card" style="display: none;">
           <div class="quota-header">
             <div class="quota-title-row">
               {CURSOR_ICON_SVG}
@@ -2037,6 +2072,12 @@ def render_dashboard(
       if (saved === "es" || saved === "en") {{
         setLanguage(saved);
       }}
+      try {{
+        var savedQuotaTab = localStorage.getItem("agy_quota_tab");
+        if (savedQuotaTab === "cursor") {{
+          switchQuotaTab("cursor");
+        }}
+      }} catch (e) {{}}
       fetchQuota(false);
       fetchCursorQuota(false);
     }})();
@@ -2056,6 +2097,39 @@ def render_dashboard(
       fetchQuota(false);
       fetchCursorQuota(false);
     }}, 300000);
+
+    function switchQuotaTab(tabId) {{
+      var isCursor = (tabId === "cursor");
+      var agyCard = document.getElementById("quota-card");
+      var cursorCard = document.getElementById("cursor-quota-card");
+      var agyBtn = document.getElementById("tab-quota-agy");
+      var cursorBtn = document.getElementById("tab-quota-cursor");
+
+      if (agyCard) agyCard.style.display = isCursor ? "none" : "flex";
+      if (cursorCard) cursorCard.style.display = isCursor ? "flex" : "none";
+
+      if (agyBtn) {{
+        if (!isCursor) {{
+          agyBtn.classList.add("active");
+          agyBtn.setAttribute("aria-selected", "true");
+        }} else {{
+          agyBtn.classList.remove("active");
+          agyBtn.setAttribute("aria-selected", "false");
+        }}
+      }}
+      if (cursorBtn) {{
+        if (isCursor) {{
+          cursorBtn.classList.add("active");
+          cursorBtn.setAttribute("aria-selected", "true");
+        }} else {{
+          cursorBtn.classList.remove("active");
+          cursorBtn.setAttribute("aria-selected", "false");
+        }}
+      }}
+      try {{
+        localStorage.setItem("agy_quota_tab", isCursor ? "cursor" : "agy");
+      }} catch (e) {{}}
+    }}
 
     function switchProvider(cardId, providerId) {{
       var card = document.getElementById("card-" + cardId);

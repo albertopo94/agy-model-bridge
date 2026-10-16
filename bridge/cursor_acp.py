@@ -98,7 +98,7 @@ class CursorAcpClient:
                         "fs": {"readTextFile": False, "writeTextFile": False},
                         "terminal": False,
                     },
-                    "clientInfo": {"name": "agy-model-bridge", "version": "0.28.3"},
+                    "clientInfo": {"name": "agy-model-bridge", "version": "0.28.4"},
                 },
                 timeout=15.0,
             )
