@@ -259,27 +259,6 @@ class OpenCodeConfigurator(ClientConfigurator):
                         "output": 128000,
                     },
                 },
-                "claude-haiku-5-5-high": {
-                    "name": "Claude Haiku 5.5 · High (AGY)",
-                    "limit": {
-                        "context": 1000000,
-                        "output": 128000,
-                    },
-                },
-                "claude-haiku-5-5-medium": {
-                    "name": "Claude Haiku 5.5 · Medium (AGY)",
-                    "limit": {
-                        "context": 1000000,
-                        "output": 128000,
-                    },
-                },
-                "claude-haiku-5-5-low": {
-                    "name": "Claude Haiku 5.5 · Low (AGY)",
-                    "limit": {
-                        "context": 1000000,
-                        "output": 128000,
-                    },
-                },
             },
         }
 

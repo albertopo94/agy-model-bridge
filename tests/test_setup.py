@@ -2815,9 +2815,6 @@ class TestOpenCodeConfigurator(unittest.TestCase):
             ("claude-opus-5-5-high", "Claude Opus 5.5 (High - AGY)"),
             ("claude-opus-5-5-medium", "Claude Opus 5.5 (Medium - AGY)"),
             ("claude-opus-5-5-low", "Claude Opus 5.5 (Low - AGY)"),
-            ("claude-haiku-5-5-high", "Claude Haiku 5.5 · High (AGY)"),
-            ("claude-haiku-5-5-medium", "Claude Haiku 5.5 · Medium (AGY)"),
-            ("claude-haiku-5-5-low", "Claude Haiku 5.5 · Low (AGY)"),
         ]
         for m_id, m_name in claude_5_5_models:
             self.assertIn(m_id, agy_conf["models"])
@@ -2831,6 +2828,10 @@ class TestOpenCodeConfigurator(unittest.TestCase):
                     },
                 },
             )
+
+        # Claude Haiku 5.5 is not served by the Antigravity backend catalog.
+        for tier in ("high", "medium", "low"):
+            self.assertNotIn(f"claude-haiku-5-5-{tier}", agy_conf["models"])
 
     def test_setup_preserves_existing_keys_and_other_providers(self):
         target = self.dir_path / "opencode.json"
@@ -3139,7 +3140,7 @@ class TestOpenClawConfigurator(unittest.TestCase):
         self.assertEqual(agy_provider["apiKey"], get_active_api_key())
         self.assertEqual(agy_provider["api"], "openai-completions")
         self.assertEqual(agy_provider["headers"], {"User-Agent": "openclaw"})
-        self.assertEqual(len(agy_provider["models"]), 12)
+        self.assertEqual(len(agy_provider["models"]), 9)
 
         expected_models = [
             {
@@ -3199,33 +3200,6 @@ class TestOpenClawConfigurator(unittest.TestCase):
             {
                 "id": "claude-opus-5-5-low",
                 "name": "Claude Opus 5.5 (Low - AGY)",
-                "reasoning": True,
-                "input": ["text"],
-                "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
-                "contextWindow": 1000000,
-                "maxTokens": 128000,
-            },
-            {
-                "id": "claude-haiku-5-5-high",
-                "name": "Claude Haiku 5.5 · High (AGY)",
-                "reasoning": True,
-                "input": ["text"],
-                "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
-                "contextWindow": 1000000,
-                "maxTokens": 128000,
-            },
-            {
-                "id": "claude-haiku-5-5-medium",
-                "name": "Claude Haiku 5.5 · Medium (AGY)",
-                "reasoning": True,
-                "input": ["text"],
-                "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
-                "contextWindow": 1000000,
-                "maxTokens": 128000,
-            },
-            {
-                "id": "claude-haiku-5-5-low",
-                "name": "Claude Haiku 5.5 · Low (AGY)",
                 "reasoning": True,
                 "input": ["text"],
                 "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
@@ -3780,7 +3754,7 @@ class TestPiConfigurator(unittest.TestCase):
         self.assertEqual(agy["headers"], {"User-Agent": "pi-coding-agent"})
 
         models = agy["models"]
-        self.assertEqual(len(models), 16)
+        self.assertEqual(len(models), 13)
         expected_ids = [
             "gemini-4-argon-high",
             "gemini-4-argon-medium",
@@ -3793,9 +3767,6 @@ class TestPiConfigurator(unittest.TestCase):
             "claude-opus-5-5-high",
             "claude-opus-5-5-medium",
             "claude-opus-5-5-low",
-            "claude-haiku-5-5-high",
-            "claude-haiku-5-5-medium",
-            "claude-haiku-5-5-low",
             "gemini-2.5-pro",
             "gemini-2.5-flash",
         ]
@@ -3811,11 +3782,8 @@ class TestPiConfigurator(unittest.TestCase):
         self.assertEqual(models[8]["name"], "Claude Opus 5.5 (High - AGY)")
         self.assertEqual(models[9]["name"], "Claude Opus 5.5 (Medium - AGY)")
         self.assertEqual(models[10]["name"], "Claude Opus 5.5 (Low - AGY)")
-        self.assertEqual(models[11]["name"], "Claude Haiku 5.5 · High (AGY)")
-        self.assertEqual(models[12]["name"], "Claude Haiku 5.5 · Medium (AGY)")
-        self.assertEqual(models[13]["name"], "Claude Haiku 5.5 · Low (AGY)")
-        self.assertEqual(models[14]["name"], "Gemini 2.5 Pro (AGY)")
-        self.assertEqual(models[15]["name"], "Gemini 2.5 Flash (AGY)")
+        self.assertEqual(models[11]["name"], "Gemini 2.5 Pro (AGY)")
+        self.assertEqual(models[12]["name"], "Gemini 2.5 Flash (AGY)")
         for m in models:
             if m["id"] in ("gemini-2.5-pro", "gemini-2.5-flash"):
                 self.assertFalse(m["reasoning"])
@@ -3829,23 +3797,16 @@ class TestPiConfigurator(unittest.TestCase):
                 self.assertEqual(m["contextWindow"], 1048576)
                 self.assertEqual(m["maxTokens"], 65536)
 
-    def test_default_pi_and_gentle_models_contains_claude_haiku_5_5(self):
+    def test_default_pi_and_gentle_models_excludes_claude_haiku_5_5(self):
         from bridge.setup import DEFAULT_PI_AND_GENTLE_MODELS
 
-        model_map = {m["id"]: m for m in DEFAULT_PI_AND_GENTLE_MODELS}
-        expected = [
-            ("claude-haiku-5-5-high", "Claude Haiku 5.5 · High (AGY)"),
-            ("claude-haiku-5-5-medium", "Claude Haiku 5.5 · Medium (AGY)"),
-            ("claude-haiku-5-5-low", "Claude Haiku 5.5 · Low (AGY)"),
-        ]
-        for m_id, m_name in expected:
-            self.assertIn(m_id, model_map)
-            item = model_map[m_id]
-            self.assertEqual(item["name"], m_name)
-            self.assertTrue(item["reasoning"])
-            self.assertEqual(item["contextWindow"], 1000000)
-            self.assertEqual(item["maxTokens"], 128000)
-            self.assertEqual(item["input"], ["text"])
+        model_ids = {m["id"] for m in DEFAULT_PI_AND_GENTLE_MODELS}
+        for tier in ("high", "medium", "low"):
+            self.assertNotIn(f"claude-haiku-5-5-{tier}", model_ids)
+        # Sonnet and Opus tiers stay.
+        for family in ("sonnet", "opus"):
+            for tier in ("high", "medium", "low"):
+                self.assertIn(f"claude-{family}-5-5-{tier}", model_ids)
 
     def test_setup_with_port(self):
         target = self.dir_path / "models.json"
@@ -4427,7 +4388,7 @@ class TestGentleShellConfigurator(unittest.TestCase):
         self.assertEqual(agy["headers"], {"User-Agent": "gentle-shell"})
 
         models = agy["models"]
-        self.assertEqual(len(models), 16)
+        self.assertEqual(len(models), 13)
         expected_ids = [
             "gemini-4-argon-high",
             "gemini-4-argon-medium",
@@ -4440,9 +4401,6 @@ class TestGentleShellConfigurator(unittest.TestCase):
             "claude-opus-5-5-high",
             "claude-opus-5-5-medium",
             "claude-opus-5-5-low",
-            "claude-haiku-5-5-high",
-            "claude-haiku-5-5-medium",
-            "claude-haiku-5-5-low",
             "gemini-2.5-pro",
             "gemini-2.5-flash",
         ]
@@ -4458,11 +4416,8 @@ class TestGentleShellConfigurator(unittest.TestCase):
         self.assertEqual(models[8]["name"], "Claude Opus 5.5 (High - AGY)")
         self.assertEqual(models[9]["name"], "Claude Opus 5.5 (Medium - AGY)")
         self.assertEqual(models[10]["name"], "Claude Opus 5.5 (Low - AGY)")
-        self.assertEqual(models[11]["name"], "Claude Haiku 5.5 · High (AGY)")
-        self.assertEqual(models[12]["name"], "Claude Haiku 5.5 · Medium (AGY)")
-        self.assertEqual(models[13]["name"], "Claude Haiku 5.5 · Low (AGY)")
-        self.assertEqual(models[14]["name"], "Gemini 2.5 Pro (AGY)")
-        self.assertEqual(models[15]["name"], "Gemini 2.5 Flash (AGY)")
+        self.assertEqual(models[11]["name"], "Gemini 2.5 Pro (AGY)")
+        self.assertEqual(models[12]["name"], "Gemini 2.5 Flash (AGY)")
         for m in models:
             if m["id"] in ("gemini-2.5-pro", "gemini-2.5-flash"):
                 self.assertFalse(m["reasoning"])
