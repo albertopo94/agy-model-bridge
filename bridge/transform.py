@@ -466,21 +466,23 @@ MODEL_TIER_TABLE: dict[str, tuple[str, str | None]] = {
     "claude-3-7-sonnet-high": ("claude-3-7-sonnet", "HIGH"),
     "claude-3-7-sonnet-medium": ("claude-3-7-sonnet", "MEDIUM"),
     "claude-3-7-sonnet-low": ("claude-3-7-sonnet", "LOW"),
-    # Claude 5.5 Sonnet aliases
-    "claude-sonnet-5-5": ("claude-sonnet-5-5", None),
-    "claude-sonnet-5-5-high": ("claude-sonnet-5-5", "HIGH"),
-    "claude-sonnet-5-5-medium": ("claude-sonnet-5-5", "MEDIUM"),
-    "claude-sonnet-5-5-low": ("claude-sonnet-5-5", "LOW"),
+    # Claude 5.5 Sonnet aliases.
+    # The upstream catalog exposes per-tier ids only (claude-sonnet-5-5-high /
+    # -medium / -low); collapsing them into a bare base id makes upstream 404.
+    "claude-sonnet-5-5": ("claude-sonnet-5-5-high", "HIGH"),
+    "claude-sonnet-5-5-high": ("claude-sonnet-5-5-high", "HIGH"),
+    "claude-sonnet-5-5-medium": ("claude-sonnet-5-5-medium", "MEDIUM"),
+    "claude-sonnet-5-5-low": ("claude-sonnet-5-5-low", "LOW"),
     # Claude 5.5 Opus aliases
-    "claude-opus-5-5": ("claude-opus-5-5", None),
-    "claude-opus-5-5-high": ("claude-opus-5-5", "HIGH"),
-    "claude-opus-5-5-medium": ("claude-opus-5-5", "MEDIUM"),
-    "claude-opus-5-5-low": ("claude-opus-5-5", "LOW"),
+    "claude-opus-5-5": ("claude-opus-5-5-high", "HIGH"),
+    "claude-opus-5-5-high": ("claude-opus-5-5-high", "HIGH"),
+    "claude-opus-5-5-medium": ("claude-opus-5-5-medium", "MEDIUM"),
+    "claude-opus-5-5-low": ("claude-opus-5-5-low", "LOW"),
     # Claude 5.5 Haiku aliases
-    "claude-haiku-5-5": ("claude-haiku-5-5", None),
-    "claude-haiku-5-5-high": ("claude-haiku-5-5", "HIGH"),
-    "claude-haiku-5-5-medium": ("claude-haiku-5-5", "MEDIUM"),
-    "claude-haiku-5-5-low": ("claude-haiku-5-5", "LOW"),
+    "claude-haiku-5-5": ("claude-haiku-5-5-high", "HIGH"),
+    "claude-haiku-5-5-high": ("claude-haiku-5-5-high", "HIGH"),
+    "claude-haiku-5-5-medium": ("claude-haiku-5-5-medium", "MEDIUM"),
+    "claude-haiku-5-5-low": ("claude-haiku-5-5-low", "LOW"),
     # Gemini 4 Argon aliases
     "gemini-4-argon": ("gemini-4-argon-high", "HIGH"),
     "gemini-4-argon-high": ("gemini-4-argon-high", "HIGH"),

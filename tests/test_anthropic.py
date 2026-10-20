@@ -293,11 +293,11 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
             self.assertIn("between_tools", str(cm.exception))
 
     def test_anthropic_haiku_5_5_models(self):
-        for model_name, expected_thinking in (
-            ("claude-haiku-5-5-high", {"thinkingLevel": "HIGH"}),
-            ("claude-haiku-5-5-medium", {"thinkingLevel": "MEDIUM"}),
-            ("claude-haiku-5-5-low", {"thinkingLevel": "LOW"}),
-            ("claude-haiku-5-5", None),
+        for model_name, expected_model, expected_thinking in (
+            ("claude-haiku-5-5-high", "claude-haiku-5-5-high", {"thinkingLevel": "HIGH"}),
+            ("claude-haiku-5-5-medium", "claude-haiku-5-5-medium", {"thinkingLevel": "MEDIUM"}),
+            ("claude-haiku-5-5-low", "claude-haiku-5-5-low", {"thinkingLevel": "LOW"}),
+            ("claude-haiku-5-5", "claude-haiku-5-5-high", {"thinkingLevel": "HIGH"}),
         ):
             with self.subTest(model=model_name):
                 payload = {
@@ -305,12 +305,9 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
                     "messages": [{"role": "user", "content": "hola"}],
                 }
                 res_model, _, _, gen_config, _, _ = anthropic_to_cloudcode_request(payload, "test-project")
-                self.assertEqual(res_model, "claude-haiku-5-5")
-                if expected_thinking is not None:
-                    self.assertIsNotNone(gen_config)
-                    self.assertEqual(gen_config.get("thinkingConfig"), expected_thinking)
-                else:
-                    self.assertTrue(gen_config is None or "thinkingConfig" not in gen_config)
+                self.assertEqual(res_model, expected_model)
+                self.assertIsNotNone(gen_config)
+                self.assertEqual(gen_config.get("thinkingConfig"), expected_thinking)
 
     def test_anthropic_thinking_disabled_claude_raises_value_error(self):
         payload = {
@@ -551,11 +548,10 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
             ],
         }
         model, contents, _, gen_config, _, _ = anthropic_to_cloudcode_request(payload, "test-project")
-        self.assertEqual(model, "claude-sonnet-5-5")
+        self.assertEqual(model, "claude-sonnet-5-5-high")
         self.assertIsNotNone(gen_config)
         self.assertEqual(gen_config["thinkingConfig"], {"thinkingLevel": "HIGH"})
         self.assertEqual(len(contents), 3)
-
         model_turn = contents[1]
         self.assertEqual(model_turn["role"], "model")
         self.assertEqual(len(model_turn["parts"]), 2)
@@ -610,7 +606,7 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
             ],
         }
         model, contents, _, _, _, _ = anthropic_to_cloudcode_request(payload, "test-project")
-        self.assertEqual(model, "claude-sonnet-5-5")
+        self.assertEqual(model, "claude-sonnet-5-5-high")
         self.assertEqual(len(contents), 3)
         model_turn = contents[1]
         self.assertEqual(model_turn["role"], "model")
@@ -1292,7 +1288,7 @@ class TestAnthropicProtocolAdapter(unittest.TestCase):
         model, contents, system_inst, gen_config, tools, tool_config = (
             AnthropicProtocolAdapter.transform_request(payload, "my-proj")
         )
-        self.assertEqual(model, "claude-sonnet-5-5")
+        self.assertEqual(model, "claude-sonnet-5-5-high")
         self.assertEqual(contents, [{"role": "user", "parts": [{"text": "Hello"}]}])
         self.assertIsNone(system_inst)
         self.assertEqual(gen_config["maxOutputTokens"], 512)

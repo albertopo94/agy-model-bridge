@@ -1499,23 +1499,23 @@ class TestBuildThinkingConfig(unittest.TestCase):
         self.assertEqual(gen_config_ovr.get("thinkingConfig"), {"thinkingBudget": 1024})
 
     def test_openai_to_cloudcode_request_resolves_claude_5_5_models(self):
-        # Sonnet 5.5 High
+        # Sonnet 5.5 High maps to the exact upstream tiered id.
         p1 = {"model": "claude-sonnet-5-5-high", "messages": [{"role": "user", "content": "hi"}]}
         m1, _, _, g1, _ = openai_to_cloudcode_request(p1, "p")
-        self.assertEqual(m1, "claude-sonnet-5-5")
+        self.assertEqual(m1, "claude-sonnet-5-5-high")
         self.assertEqual(g1["thinkingConfig"], {"thinkingLevel": "HIGH"})
 
         # Opus 5.5 Low
         p2 = {"model": "claude-opus-5-5-low", "messages": [{"role": "user", "content": "hi"}]}
         m2, _, _, g2, _ = openai_to_cloudcode_request(p2, "p")
-        self.assertEqual(m2, "claude-opus-5-5")
+        self.assertEqual(m2, "claude-opus-5-5-low")
         self.assertEqual(g2["thinkingConfig"], {"thinkingLevel": "LOW"})
 
-        # Sonnet 5.5 base without thinking
+        # Sonnet 5.5 base alias resolves to the high tier (bare id is not served upstream)
         p3 = {"model": "claude-sonnet-5-5", "messages": [{"role": "user", "content": "hi"}]}
         m3, _, _, g3, _ = openai_to_cloudcode_request(p3, "p")
-        self.assertEqual(m3, "claude-sonnet-5-5")
-        self.assertNotIn("thinkingConfig", g3 or {})
+        self.assertEqual(m3, "claude-sonnet-5-5-high")
+        self.assertEqual(g3["thinkingConfig"], {"thinkingLevel": "HIGH"})
 
 
 class TestResolveModelAndThinking(unittest.TestCase):
@@ -1620,16 +1620,21 @@ class TestResolveModelAndThinking(unittest.TestCase):
 
     def test_claude_5_5_sonnet_and_opus_tiers_aliasing(self):
         cases = [
-            ("claude-sonnet-5-5-high", "claude-sonnet-5-5", {"thinkingLevel": "HIGH"}),
-            ("claude-sonnet-5-5-medium", "claude-sonnet-5-5", {"thinkingLevel": "MEDIUM"}),
-            ("claude-sonnet-5-5-low", "claude-sonnet-5-5", {"thinkingLevel": "LOW"}),
-            ("claude-opus-5-5-high", "claude-opus-5-5", {"thinkingLevel": "HIGH"}),
-            ("claude-opus-5-5-medium", "claude-opus-5-5", {"thinkingLevel": "MEDIUM"}),
-            ("claude-opus-5-5-low", "claude-opus-5-5", {"thinkingLevel": "LOW"}),
-            ("claude-sonnet-5-5", "claude-sonnet-5-5", None),
-            ("claude-opus-5-5", "claude-opus-5-5", None),
-            ("CLAUDE-SONNET-5-5-HIGH", "claude-sonnet-5-5", {"thinkingLevel": "HIGH"}),
-            ("CLAUDE-OPUS-5-5", "claude-opus-5-5", None),
+            # Upstream catalog ids (tiered) must pass through unchanged.
+            ("claude-sonnet-5-5-high", "claude-sonnet-5-5-high", {"thinkingLevel": "HIGH"}),
+            ("claude-sonnet-5-5-medium", "claude-sonnet-5-5-medium", {"thinkingLevel": "MEDIUM"}),
+            ("claude-sonnet-5-5-low", "claude-sonnet-5-5-low", {"thinkingLevel": "LOW"}),
+            ("claude-opus-5-5-high", "claude-opus-5-5-high", {"thinkingLevel": "HIGH"}),
+            ("claude-opus-5-5-medium", "claude-opus-5-5-medium", {"thinkingLevel": "MEDIUM"}),
+            ("claude-opus-5-5-low", "claude-opus-5-5-low", {"thinkingLevel": "LOW"}),
+            ("claude-haiku-5-5-high", "claude-haiku-5-5-high", {"thinkingLevel": "HIGH"}),
+            ("claude-haiku-5-5-medium", "claude-haiku-5-5-medium", {"thinkingLevel": "MEDIUM"}),
+            ("claude-haiku-5-5-low", "claude-haiku-5-5-low", {"thinkingLevel": "LOW"}),
+            # Generic (no-tier) aliases still resolve to the base id.
+            ("claude-sonnet-5-5", "claude-sonnet-5-5-high", {"thinkingLevel": "HIGH"}),
+            ("claude-opus-5-5", "claude-opus-5-5-high", {"thinkingLevel": "HIGH"}),
+            ("CLAUDE-SONNET-5-5-HIGH", "claude-sonnet-5-5-high", {"thinkingLevel": "HIGH"}),
+            ("CLAUDE-OPUS-5-5", "claude-opus-5-5-high", {"thinkingLevel": "HIGH"}),
         ]
         for raw_model, exp_model, exp_thinking in cases:
             model, thinking = resolve_model_and_thinking(raw_model, {})
@@ -1640,29 +1645,29 @@ class TestResolveModelAndThinking(unittest.TestCase):
         model, thinking = resolve_model_and_thinking(
             "claude-sonnet-5-5-high", {"thinkingConfig": {"thinkingLevel": "LOW"}}
         )
-        self.assertEqual(model, "claude-sonnet-5-5")
+        self.assertEqual(model, "claude-sonnet-5-5-high")
         self.assertEqual(thinking, {"thinkingLevel": "LOW"})
 
         model2, thinking2 = resolve_model_and_thinking(
             "claude-opus-5-5-high", {"reasoning_effort": "low"}
         )
-        self.assertEqual(model2, "claude-opus-5-5")
+        self.assertEqual(model2, "claude-opus-5-5-high")
         self.assertEqual(thinking2, {"thinkingLevel": "LOW"})
 
         model3, thinking3 = resolve_model_and_thinking(
             "claude-sonnet-5-5", {"thinking": {"type": "enabled", "budget_tokens": 1024}}
         )
-        self.assertEqual(model3, "claude-sonnet-5-5")
+        self.assertEqual(model3, "claude-sonnet-5-5-high")
         self.assertEqual(thinking3, {"thinkingBudget": 1024})
 
     def test_claude_5_5_haiku_tiers_aliasing(self):
         cases = [
-            ("claude-haiku-5-5-high", "claude-haiku-5-5", {"thinkingLevel": "HIGH"}),
-            ("claude-haiku-5-5-medium", "claude-haiku-5-5", {"thinkingLevel": "MEDIUM"}),
-            ("claude-haiku-5-5-low", "claude-haiku-5-5", {"thinkingLevel": "LOW"}),
-            ("claude-haiku-5-5", "claude-haiku-5-5", None),
-            ("CLAUDE-HAIKU-5-5-HIGH", "claude-haiku-5-5", {"thinkingLevel": "HIGH"}),
-            ("CLAUDE-HAIKU-5-5", "claude-haiku-5-5", None),
+            ("claude-haiku-5-5-high", "claude-haiku-5-5-high", {"thinkingLevel": "HIGH"}),
+            ("claude-haiku-5-5-medium", "claude-haiku-5-5-medium", {"thinkingLevel": "MEDIUM"}),
+            ("claude-haiku-5-5-low", "claude-haiku-5-5-low", {"thinkingLevel": "LOW"}),
+            ("claude-haiku-5-5", "claude-haiku-5-5-high", {"thinkingLevel": "HIGH"}),
+            ("CLAUDE-HAIKU-5-5-HIGH", "claude-haiku-5-5-high", {"thinkingLevel": "HIGH"}),
+            ("CLAUDE-HAIKU-5-5", "claude-haiku-5-5-high", {"thinkingLevel": "HIGH"}),
         ]
         for raw_model, exp_model, exp_thinking in cases:
             model, thinking = resolve_model_and_thinking(raw_model, {})
@@ -1673,26 +1678,26 @@ class TestResolveModelAndThinking(unittest.TestCase):
         model, thinking = resolve_model_and_thinking(
             "claude-haiku-5-5", {"output_config": {"effort": "high"}}
         )
-        self.assertEqual(model, "claude-haiku-5-5")
+        self.assertEqual(model, "claude-haiku-5-5-high")
         self.assertEqual(thinking, {"thinkingLevel": "HIGH"})
 
         model2, thinking2 = resolve_model_and_thinking(
             "claude-haiku-5-5-high", {"output_config": {"effort": "low"}}
         )
-        self.assertEqual(model2, "claude-haiku-5-5")
+        self.assertEqual(model2, "claude-haiku-5-5-high")
         self.assertEqual(thinking2, {"thinkingLevel": "LOW"})
 
         model3, thinking3 = resolve_model_and_thinking(
             "claude-haiku-5-5", {"thinking": {"type": "between_tools"}}
         )
-        self.assertEqual(model3, "claude-haiku-5-5")
+        self.assertEqual(model3, "claude-haiku-5-5-high")
         self.assertEqual(thinking3, {"thinkingLevel": "LOW"})
 
         model4, thinking4 = resolve_model_and_thinking(
             "claude-haiku-5-5",
             {"thinking": {"type": "between_tools"}, "output_config": {"effort": "medium"}},
         )
-        self.assertEqual(model4, "claude-haiku-5-5")
+        self.assertEqual(model4, "claude-haiku-5-5-high")
         self.assertEqual(thinking4, {"thinkingLevel": "MEDIUM"})
 
     def test_unaliased_model_preserved(self):
