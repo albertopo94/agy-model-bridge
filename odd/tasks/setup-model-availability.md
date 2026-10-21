@@ -83,3 +83,10 @@ in Gentle Shell:
   Gentle Shell path when --path is omitted regardless of $HOME; the single run
   was restored from its own backup (restore_pi → byte-identical 283956 bytes).
 - L8: Feature closed. T1-T6 done; final unit 5ec6648. Live post-restart check: claude-sonnet-5-5-high, claude-opus-5-5-medium, argon all OK through /v1/chat/completions.
+- L9 (T7): Live E2E of the new filter exposed a false skip: preset id
+  "gemini-3.8" is a bridge alias, not an upstream id; MODEL_TIER_TABLE resolves
+  it to gemini-3.8-flash-tiered, which the catalog does serve. Fix:
+  fetch_agy_available_models now expands the catalog with with_bridge_aliases
+  (alias kept when its resolved target is in the catalog). Re-run live: 13 AGY
+  models written, gemini-3.8 present, haiku absent, notice silent. Suite 1048 OK,
+  ruff/mypy clean against CI (.github/workflows/ci.yml runs the same commands).
