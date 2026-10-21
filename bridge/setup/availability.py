@@ -39,9 +39,34 @@ def fetch_agy_available_models(timeout: float = 15.0) -> set[str] | None:
             for model in client.fetch_available_models(project)
             if isinstance(model, dict) and model.get("id")
         }
-        return ids or None
+        return with_bridge_aliases(ids) if ids else None
     except Exception:
         return None
+
+
+def with_bridge_aliases(catalog_ids: set[str]) -> set[str]:
+    """Adds bridge alias names whose upstream target the account serves.
+
+    Presets may list request-time aliases ("gemini-3.8") that the bridge
+    resolves to an upstream id via MODEL_TIER_TABLE. Those aliases never appear
+    literally in fetchAvailableModels, so the catalog must be expanded with
+    them before filtering; otherwise valid preset entries would be skipped.
+
+    Args:
+        catalog_ids: Upstream ids servable for the account.
+
+    Returns:
+        A new set with catalog ids plus every alias whose resolved target is
+        in the catalog.
+    """
+    from bridge.transform import MODEL_TIER_TABLE
+
+    aliases = {
+        alias
+        for alias, (target, _tier) in MODEL_TIER_TABLE.items()
+        if target in catalog_ids
+    }
+    return set(catalog_ids) | aliases
 
 
 def split_by_availability(
