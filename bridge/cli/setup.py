@@ -22,6 +22,28 @@ from bridge.setup import (
     setup_opencode,
     setup_pi,
 )
+from bridge.setup.availability import fetch_agy_available_models
+
+
+def _should_check_availability(provider: str, check_availability: bool) -> bool:
+    """True when this run writes AGY models and the catalog check is enabled."""
+    if not check_availability:
+        return False
+    return str(provider or "").lower() in ("agy", "all", "todos")
+
+
+def _report_availability(target: Any, queried: bool) -> None:
+    """Prints catalog availability notices after a client config was written.
+
+    Args:
+        target: The ConfigPath returned by the setup call.
+        queried: Whether the catalog was actually consulted for this run.
+    """
+    if queried and getattr(target, "availability_verified", False) is False:
+        print(t("setup_availability_unverified"))
+    skipped = list(getattr(target, "skipped_models", None) or [])
+    if skipped:
+        print(t("setup_models_skipped", count=len(skipped), models=", ".join(skipped)))
 
 
 def handle_restore_cli(
@@ -387,8 +409,15 @@ def handle_setup_opencode(argv: list[str], prog_base: str, setup_fn: Any = None)
         default="agy",
         help="Provider to configure (default: agy)",
     )
+    parser.add_argument(
+        "--no-check-availability",
+        action="store_true",
+        help=t("cli_help_no_check_availability"),
+    )
     parser.add_argument("--lang", type=str, default=None, help=t("cli_help_lang"))
     args = parser.parse_args(argv)
+    queried = _should_check_availability(args.provider, not args.no_check_availability)
+    available_models = fetch_agy_available_models() if queried else None
     target = fn(
         config_path=args.path,
         base_url=args.base_url,
@@ -396,12 +425,14 @@ def handle_setup_opencode(argv: list[str], prog_base: str, setup_fn: Any = None)
         model=args.model,
         auth_token=args.auth_token,
         provider=args.provider,
+        available_models=available_models,
     )
     if getattr(target, "backup_path", None):
         print(t("setup_backup_label", path=target.backup_path))
     print(t("setup_opencode_success", target=target))
     print(t("setup_opencode_auto_read"))
     print(t("setup_opencode_run_hint"))
+    _report_availability(target, queried)
     return 0
 
 
@@ -447,8 +478,15 @@ def handle_setup_openclaw(argv: list[str], prog_base: str, setup_fn: Any = None)
         default="agy",
         help="Provider to configure (default: agy)",
     )
+    parser.add_argument(
+        "--no-check-availability",
+        action="store_true",
+        help=t("cli_help_no_check_availability"),
+    )
     parser.add_argument("--lang", type=str, default=None, help=t("cli_help_lang"))
     args = parser.parse_args(argv)
+    queried = _should_check_availability(args.provider, not args.no_check_availability)
+    available_models = fetch_agy_available_models() if queried else None
     target = fn(
         config_path=args.path,
         base_url=args.base_url,
@@ -456,12 +494,14 @@ def handle_setup_openclaw(argv: list[str], prog_base: str, setup_fn: Any = None)
         model=args.model,
         auth_token=args.auth_token,
         provider=args.provider,
+        available_models=available_models,
     )
     if getattr(target, "backup_path", None):
         print(t("setup_backup_label", path=target.backup_path))
     print(t("setup_openclaw_success", target=target))
     print(t("setup_openclaw_auto_read"))
     print(t("setup_openclaw_run_hint"))
+    _report_availability(target, queried)
     return 0
 
 
@@ -575,8 +615,15 @@ def handle_setup_pi(argv: list[str], prog_base: str, setup_fn: Any = None) -> in
         default="agy",
         help="Provider to configure (default: agy)",
     )
+    parser.add_argument(
+        "--no-check-availability",
+        action="store_true",
+        help=t("cli_help_no_check_availability"),
+    )
     parser.add_argument("--lang", type=str, default=None, help=t("cli_help_lang"))
     args = parser.parse_args(argv)
+    queried = _should_check_availability(args.provider, not args.no_check_availability)
+    available_models = fetch_agy_available_models() if queried else None
     target = fn(
         config_path=args.path,
         base_url=args.base_url,
@@ -585,6 +632,7 @@ def handle_setup_pi(argv: list[str], prog_base: str, setup_fn: Any = None) -> in
         auth_token=args.auth_token,
         set_default=args.set_default,
         provider=args.provider,
+        available_models=available_models,
     )
     if getattr(target, "backup_path", None):
         print(t("setup_backup_label", path=target.backup_path))
@@ -595,6 +643,7 @@ def handle_setup_pi(argv: list[str], prog_base: str, setup_fn: Any = None) -> in
         print(t("setup_pi_set_default_tip"))
     else:
         print(t("setup_pi_set_default_done"))
+    _report_availability(target, queried)
     return 0
 
 
@@ -656,8 +705,15 @@ def handle_setup_gentle_shell(
         default=None,
         help="API key for provider",
     )
+    parser.add_argument(
+        "--no-check-availability",
+        action="store_true",
+        help=t("cli_help_no_check_availability"),
+    )
     parser.add_argument("--lang", type=str, default=None, help=t("cli_help_lang"))
     args = parser.parse_args(argv)
+    queried = _should_check_availability(args.provider, not args.no_check_availability)
+    available_models = fetch_agy_available_models() if queried else None
 
     if args.provider == "freellmapi" and not args.api_key:
         print("Error: --api-key is required when configuring FreeLLMAPI.")
@@ -671,6 +727,7 @@ def handle_setup_gentle_shell(
         auth_token=args.auth_token,
         set_default=args.set_default,
         provider=args.provider,
+        available_models=available_models,
         api_key=args.api_key,
     )
     if getattr(target, "backup_path", None):
@@ -682,4 +739,5 @@ def handle_setup_gentle_shell(
         print(t("setup_gentle_shell_set_default_tip"))
     else:
         print(t("setup_gentle_shell_set_default_done"))
+    _report_availability(target, queried)
     return 0

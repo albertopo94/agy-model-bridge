@@ -196,6 +196,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "cli_help_project": "Google Cloud project ID override",
         "cli_help_base_url": "Upstream API base URL override",
         "cli_help_lang": "Language code override ('en' or 'es')",
+        # Setup availability notices
+        "setup_availability_unverified": "Notice: Model availability could not be verified (Antigravity catalog unreachable). The full model list was written.",
+        "setup_models_skipped": "Skipped {count} model(s) not available for your Antigravity plan: {models}",
+        "cli_help_no_check_availability": "Write the full model preset without checking which models your plan serves",
     },
     "es": {
         # Daemon lifecycle
@@ -296,6 +300,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "cli_help_project": "Sobrescribir el ID de proyecto de Google Cloud",
         "cli_help_base_url": "Sobrescribir la URL base de la API upstream",
         "cli_help_lang": "Sobrescribir código de idioma ('en' o 'es')",
+        # Avisos de disponibilidad de modelos
+        "setup_availability_unverified": "Aviso: No se pudo verificar la disponibilidad de modelos (no se accedi\u00f3 al cat\u00e1logo de Antigravity). Se escribi\u00f3 la lista completa.",
+        "setup_models_skipped": "Se omitieron {count} modelo(s) no disponibles para tu plan de Antigravity: {models}",
+        "cli_help_no_check_availability": "Escribir el preset completo sin verificar qu\u00e9 modelos ofrece tu plan",
     },
 }
 

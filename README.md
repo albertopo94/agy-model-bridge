@@ -253,6 +253,12 @@ This surgically configures `~/.pi/agent/models.json` with:
 - Models: `gemini-3.8-flash-high`, `claude-sonnet-5-5-high`, `cursor/auto`, `cursor/gpt-5.3-codex`, etc.
 - Base URL: `http://127.0.0.1:24980/v1`
 
+Before writing the `agy` provider, the setup queries the Antigravity catalog for your
+account and writes only the models your plan actually serves, reporting the ones it
+skipped. If the catalog is unreachable, the full preset is written and the setup says
+availability could not be verified. Pass `--no-check-availability` to always write the
+full preset without the query. `cursor` models are never filtered.
+
 Options:
 - `--provider <agy|cursor|all>`: Choose provider to configure (default: `agy`).
 - `--set-default`: Also sets the provider and default model in `~/.pi/agent/settings.json`.

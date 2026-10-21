@@ -19,6 +19,8 @@ from bridge.cli.lifecycle import (
     handle_update,
 )
 from bridge.cli.server import handle_server
+from bridge.i18n import t
+from bridge.setup.base import ConfigPath
 from bridge.cli.setup import (
     handle_restore_cli,
     handle_setup_claude,
@@ -205,6 +207,87 @@ class TestCliSetupHandlers(unittest.TestCase):
             self.assertEqual(ret, 0)
             mock_setup.assert_called_once()
             self.assertEqual(mock_setup.call_args.kwargs.get("provider"), "cursor")
+
+    # --- Antigravity availability check in setup handlers ---
+
+    def _availability_cases(self):
+        return {
+            "opencode": (handle_setup_opencode, [], "/tmp/opencode.json"),
+            "openclaw": (handle_setup_openclaw, [], "/tmp/openclaw.json"),
+            "pi": (handle_setup_pi, [], "/tmp/models.json"),
+            "gentle": (handle_setup_gentle_shell, [], "/tmp/models.json"),
+        }
+
+    def _call(self, name, handler, extra, ret):
+        mock_setup = MagicMock(return_value=ret)
+        kwargs = {"prog_base": "agy-bridge", "setup_fn": mock_setup}
+        if name == "gentle":
+            kwargs["subcmd"] = "setup-gentle"
+        with patch("sys.stdout", new=io.StringIO()) as out:
+            rc = handler(extra, **kwargs)
+        return rc, mock_setup, out.getvalue()
+
+    def test_availability_catalog_reaches_setup_for_agy_provider(self):
+        catalog = {"gemini-4-argon-high"}
+        for name, (handler, extra, path) in self._availability_cases().items():
+            with self.subTest(client=name), patch(
+                "bridge.cli.setup.fetch_agy_available_models", return_value=catalog
+            ):
+                rc, mock_setup, _ = self._call(name, handler, extra, Path(path))
+                self.assertEqual(rc, 0)
+                self.assertEqual(mock_setup.call_args.kwargs.get("available_models"), catalog)
+
+    def test_no_check_availability_skips_catalog_query(self):
+        for name, (handler, extra, path) in self._availability_cases().items():
+            with self.subTest(client=name), patch(
+                "bridge.cli.setup.fetch_agy_available_models"
+            ) as fetch:
+                rc, mock_setup, _ = self._call(
+                    name, handler, extra + ["--no-check-availability"], Path(path)
+                )
+                self.assertEqual(rc, 0)
+                fetch.assert_not_called()
+                self.assertIsNone(mock_setup.call_args.kwargs.get("available_models"))
+
+    def test_cursor_provider_never_queries_catalog(self):
+        for name, (handler, extra, path) in self._availability_cases().items():
+            with self.subTest(client=name), patch(
+                "bridge.cli.setup.fetch_agy_available_models"
+            ) as fetch:
+                rc, mock_setup, _ = self._call(
+                    name, handler, extra + ["--provider", "cursor"], Path(path)
+                )
+                self.assertEqual(rc, 0)
+                fetch.assert_not_called()
+
+    def test_skipped_models_notice_is_printed(self):
+        ret = ConfigPath("/tmp/models.json")
+        ret.skipped_models = ["gemini-4-argon-low", "claude-sonnet-5-5-high"]
+        for name, (handler, extra, _) in self._availability_cases().items():
+            with self.subTest(client=name), patch(
+                "bridge.cli.setup.fetch_agy_available_models", return_value=set()
+            ):
+                _, _, out = self._call(name, handler, extra, ret)
+                self.assertIn("gemini-4-argon-low", out)
+                self.assertIn("claude-sonnet-5-5-high", out)
+
+    def test_unverified_notice_when_catalog_unavailable(self):
+        for name, (handler, extra, path) in self._availability_cases().items():
+            with self.subTest(client=name), patch(
+                "bridge.cli.setup.fetch_agy_available_models", return_value=None
+            ):
+                _, _, out = self._call(name, handler, extra, Path(path))
+                self.assertIn(t("setup_availability_unverified"), out)
+
+    def test_no_notices_when_check_skipped_and_nothing_skipped(self):
+        for name, (handler, extra, path) in self._availability_cases().items():
+            with self.subTest(client=name), patch(
+                "bridge.cli.setup.fetch_agy_available_models"
+            ):
+                _, _, out = self._call(
+                    name, handler, extra + ["--no-check-availability"], Path(path)
+                )
+                self.assertNotIn(t("setup_availability_unverified"), out)
 
     def test_handle_restore_cli_no_backups(self):
         with patch("bridge.cli.setup.list_backups", return_value=[]), patch("sys.stdout", new=io.StringIO()):
