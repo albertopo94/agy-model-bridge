@@ -34,11 +34,6 @@ DEFAULT_CLAUDE_MODEL_PICKER_OPTIONS: list[dict[str, str]] = [
         "behavesAs": "claude-3-7-sonnet",
     },
     {
-        "model": "gemini-3.7-flash-tiered",
-        "label": "Gemini 3.7 Flash · High (AGY)",
-        "behavesAs": "claude-3-7-sonnet",
-    },
-    {
         "model": "claude-sonnet-5-5-high",
         "label": "Claude Sonnet 5.5 · High (AGY)",
         "behavesAs": "claude-3-7-sonnet",

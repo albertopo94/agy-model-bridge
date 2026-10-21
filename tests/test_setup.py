@@ -469,7 +469,6 @@ class TestSetupClaude(unittest.TestCase):
                 "gemini-4-argon-medium",
                 "gemini-4-argon-low",
                 "gemini-3.8-flash-high",
-                "gemini-3.7-flash-tiered",
                 "claude-sonnet-5-5-high",
                 "claude-sonnet-5-5-medium",
                 "claude-sonnet-5-5-low",
@@ -500,7 +499,6 @@ class TestSetupClaude(unittest.TestCase):
             "gemini-4-argon-medium",
             "gemini-4-argon-low",
             "gemini-3.8-flash-high",
-            "gemini-3.7-flash-tiered",
             "claude-sonnet-5-5-high",
             "claude-sonnet-5-5-medium",
             "claude-sonnet-5-5-low",
@@ -524,7 +522,6 @@ class TestSetupClaude(unittest.TestCase):
         self.assertEqual(label_map["gemini-4-argon-medium"], "Gemini 4 Argon · Medium (AGY)")
         self.assertEqual(label_map["gemini-4-argon-low"], "Gemini 4 Argon · Low (AGY)")
         self.assertEqual(label_map["gemini-3.8-flash-high"], "Gemini 3.8 Flash · High (AGY)")
-        self.assertEqual(label_map["gemini-3.7-flash-tiered"], "Gemini 3.7 Flash · High (AGY)")
         self.assertEqual(label_map["claude-sonnet-5-5-high"], "Claude Sonnet 5.5 · High (AGY)")
         self.assertEqual(label_map["claude-sonnet-5-5-medium"], "Claude Sonnet 5.5 · Medium (AGY)")
         self.assertEqual(label_map["claude-sonnet-5-5-low"], "Claude Sonnet 5.5 · Low (AGY)")

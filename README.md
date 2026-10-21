@@ -148,18 +148,14 @@ Typing `/model` inside Claude Code displays curated models ready to use:
 2. **Gemini 4 Argon · Medium (AGY)** (`gemini-4-argon-medium`)
 3. **Gemini 4 Argon · Low (AGY)** (`gemini-4-argon-low`)
 4. **Gemini 3.8 Flash · High (AGY)** (`gemini-3.8-flash-high`) — *Default*
-5. **Gemini 3.7 Flash · High (AGY)** (`gemini-3.7-flash-tiered`)
-6. **Claude Sonnet 5.5 · High (AGY)** (`claude-sonnet-5-5-high`)
-7. **Claude Sonnet 5.5 · Medium (AGY)** (`claude-sonnet-5-5-medium`)
-8. **Claude Sonnet 5.5 · Low (AGY)** (`claude-sonnet-5-5-low`)
-9. **Claude Opus 5.5 · High (AGY)** (`claude-opus-5-5-high`)
-10. **Claude Opus 5.5 · Medium (AGY)** (`claude-opus-5-5-medium`)
-11. **Claude Opus 5.5 · Low (AGY)** (`claude-opus-5-5-low`)
-12. **Claude Haiku 5.5 · High (AGY)** (`claude-haiku-5-5-high`)
-13. **Claude Haiku 5.5 · Medium (AGY)** (`claude-haiku-5-5-medium`)
-14. **Claude Haiku 5.5 · Low (AGY)** (`claude-haiku-5-5-low`)
-15. **Gemini 2.5 Pro (AGY)** (`gemini-2.5-pro`)
-16. **Gemini 2.5 Flash (AGY)** (`gemini-2.5-flash`)
+5. **Claude Sonnet 5.5 · High (AGY)** (`claude-sonnet-5-5-high`)
+6. **Claude Sonnet 5.5 · Medium (AGY)** (`claude-sonnet-5-5-medium`)
+7. **Claude Sonnet 5.5 · Low (AGY)** (`claude-sonnet-5-5-low`)
+8. **Claude Opus 5.5 · High (AGY)** (`claude-opus-5-5-high`)
+9. **Claude Opus 5.5 · Medium (AGY)** (`claude-opus-5-5-medium`)
+10. **Claude Opus 5.5 · Low (AGY)** (`claude-opus-5-5-low`)
+11. **Gemini 2.5 Pro (AGY)** (`gemini-2.5-pro`)
+12. **Gemini 2.5 Flash (AGY)** (`gemini-2.5-flash`)
 
 *(Alternative: set environment variables manually for a single session:)*
 ```bash
