@@ -14,8 +14,15 @@ else:
 
 
 class ConfigPath(_PathBase):
-    """Path subclass that carries an optional backup_path attribute."""
+    """Path subclass carrying the backup path and preset availability report.
+
+    availability_verified is True only when the Antigravity catalog was queried
+    successfully for this run; skipped_models lists preset models the account
+    cannot serve, which were therefore not written to the client config.
+    """
     backup_path: Path | None = None
+    availability_verified: bool = False
+    skipped_models: list[str] = []
 
 
 class ClientConfigurator(ABC):

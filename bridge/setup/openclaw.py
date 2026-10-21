@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 from typing import Any, cast
 
+from bridge.setup.availability import split_by_availability
 from bridge.setup.base import ClientConfigurator, ConfigPath, get_configurator
 from bridge.setup.common import (
     _strip_json_comments,
@@ -71,6 +72,91 @@ DEFAULT_CURSOR_OPENCLAW_MODELS: list[dict[str, Any]] = [
         "maxTokens": 32000,
     },
 ]
+
+
+DEFAULT_AGY_OPENCLAW_MODELS: list[dict[str, Any]] = [
+                {
+                    "id": "gemini-3.8-flash-high",
+                    "name": "Gemini 3.8 Flash (High)",
+                    "reasoning": True,
+                    "input": ["text"],
+                    "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+                    "contextWindow": 1048576,
+                    "maxTokens": 65536,
+                },
+                {
+                    "id": "claude-sonnet-5-5-high",
+                    "name": "Claude Sonnet 5.5 (High - AGY)",
+                    "reasoning": True,
+                    "input": ["text"],
+                    "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+                    "contextWindow": 1000000,
+                    "maxTokens": 128000,
+                },
+                {
+                    "id": "claude-sonnet-5-5-medium",
+                    "name": "Claude Sonnet 5.5 (Medium - AGY)",
+                    "reasoning": True,
+                    "input": ["text"],
+                    "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+                    "contextWindow": 1000000,
+                    "maxTokens": 128000,
+                },
+                {
+                    "id": "claude-sonnet-5-5-low",
+                    "name": "Claude Sonnet 5.5 (Low - AGY)",
+                    "reasoning": True,
+                    "input": ["text"],
+                    "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+                    "contextWindow": 1000000,
+                    "maxTokens": 128000,
+                },
+                {
+                    "id": "claude-opus-5-5-high",
+                    "name": "Claude Opus 5.5 (High - AGY)",
+                    "reasoning": True,
+                    "input": ["text"],
+                    "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+                    "contextWindow": 1000000,
+                    "maxTokens": 128000,
+                },
+                {
+                    "id": "claude-opus-5-5-medium",
+                    "name": "Claude Opus 5.5 (Medium - AGY)",
+                    "reasoning": True,
+                    "input": ["text"],
+                    "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+                    "contextWindow": 1000000,
+                    "maxTokens": 128000,
+                },
+                {
+                    "id": "claude-opus-5-5-low",
+                    "name": "Claude Opus 5.5 (Low - AGY)",
+                    "reasoning": True,
+                    "input": ["text"],
+                    "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+                    "contextWindow": 1000000,
+                    "maxTokens": 128000,
+                },
+                {
+                    "id": "gemini-2.5-pro",
+                    "name": "Gemini 2.5 Pro",
+                    "reasoning": False,
+                    "input": ["text"],
+                    "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+                    "contextWindow": 1048576,
+                    "maxTokens": 65536,
+                },
+                {
+                    "id": "gemini-2.5-flash",
+                    "name": "Gemini 2.5 Flash",
+                    "reasoning": False,
+                    "input": ["text"],
+                    "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+                    "contextWindow": 1048576,
+                    "maxTokens": 65536,
+                },
+            ]
 
 
 class OpenClawConfigurator(ClientConfigurator):
@@ -189,101 +275,28 @@ class OpenClawConfigurator(ClientConfigurator):
                 "models": [dict(m) for m in DEFAULT_CURSOR_OPENCLAW_MODELS],
             }
 
+        agy_models: list[dict[str, Any]] = []
+        agy_skipped: list[str] = []
         if provider in ("agy", "all", "todos"):
+            agy_kept, agy_skipped = split_by_availability(
+                [(m["id"], dict(m)) for m in DEFAULT_AGY_OPENCLAW_MODELS],
+                kwargs.get("available_models"),
+            )
+            agy_models = [model for _, model in agy_kept]
             providers["agy"] = {
                 "baseUrl": resolved_url,
                 "apiKey": auth_token,
                 "api": "openai-completions",
                 "headers": {"User-Agent": "openclaw"},
-                "models": [
-                {
-                    "id": "gemini-3.8-flash-high",
-                    "name": "Gemini 3.8 Flash (High)",
-                    "reasoning": True,
-                    "input": ["text"],
-                    "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
-                    "contextWindow": 1048576,
-                    "maxTokens": 65536,
-                },
-                {
-                    "id": "claude-sonnet-5-5-high",
-                    "name": "Claude Sonnet 5.5 (High - AGY)",
-                    "reasoning": True,
-                    "input": ["text"],
-                    "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
-                    "contextWindow": 1000000,
-                    "maxTokens": 128000,
-                },
-                {
-                    "id": "claude-sonnet-5-5-medium",
-                    "name": "Claude Sonnet 5.5 (Medium - AGY)",
-                    "reasoning": True,
-                    "input": ["text"],
-                    "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
-                    "contextWindow": 1000000,
-                    "maxTokens": 128000,
-                },
-                {
-                    "id": "claude-sonnet-5-5-low",
-                    "name": "Claude Sonnet 5.5 (Low - AGY)",
-                    "reasoning": True,
-                    "input": ["text"],
-                    "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
-                    "contextWindow": 1000000,
-                    "maxTokens": 128000,
-                },
-                {
-                    "id": "claude-opus-5-5-high",
-                    "name": "Claude Opus 5.5 (High - AGY)",
-                    "reasoning": True,
-                    "input": ["text"],
-                    "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
-                    "contextWindow": 1000000,
-                    "maxTokens": 128000,
-                },
-                {
-                    "id": "claude-opus-5-5-medium",
-                    "name": "Claude Opus 5.5 (Medium - AGY)",
-                    "reasoning": True,
-                    "input": ["text"],
-                    "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
-                    "contextWindow": 1000000,
-                    "maxTokens": 128000,
-                },
-                {
-                    "id": "claude-opus-5-5-low",
-                    "name": "Claude Opus 5.5 (Low - AGY)",
-                    "reasoning": True,
-                    "input": ["text"],
-                    "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
-                    "contextWindow": 1000000,
-                    "maxTokens": 128000,
-                },
-                {
-                    "id": "gemini-2.5-pro",
-                    "name": "Gemini 2.5 Pro",
-                    "reasoning": False,
-                    "input": ["text"],
-                    "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
-                    "contextWindow": 1048576,
-                    "maxTokens": 65536,
-                },
-                {
-                    "id": "gemini-2.5-flash",
-                    "name": "Gemini 2.5 Flash",
-                    "reasoning": False,
-                    "input": ["text"],
-                    "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
-                    "contextWindow": 1048576,
-                    "maxTokens": 65536,
-                },
-            ],
+                "models": agy_models
         }
 
         formatted_json = json.dumps(config, indent=2) + "\n"
         atomic_write_file(target, formatted_json, mode=0o600)
         res = ConfigPath(target)
         res.backup_path = backup_path
+        res.availability_verified = kwargs.get("available_models") is not None
+        res.skipped_models = agy_skipped
         return res
 
     def restore(
@@ -355,6 +368,7 @@ def setup_openclaw(
     model: str = "gemini-3.8-flash-high",
     auth_token: str | None = None,
     provider: str = "agy",
+    available_models: set[str] | None = None,
 ) -> ConfigPath:
     """Configures OpenClaw openclaw.json with agy provider and models."""
     return cast(
@@ -366,6 +380,7 @@ def setup_openclaw(
             port=port,
             auth_token=auth_token,
             provider=provider,
+            available_models=available_models,
         ),
     )
 

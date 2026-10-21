@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 from typing import Any, cast
 
+from bridge.setup.availability import split_by_availability
 from bridge.setup.base import ClientConfigurator, ConfigPath, get_configurator
 from bridge.setup.common import (
     _strip_json_comments,
@@ -340,14 +341,21 @@ class PiConfigurator(ClientConfigurator):
                 "headers": {"User-Agent": "pi-coding-agent"},
                 "models": [dict(m) for m in DEFAULT_CURSOR_MODELS],
             }
+        agy_models: list[dict[str, Any]] = []
+        agy_skipped: list[str] = []
         if provider in ("agy", "all", "todos"):
+            agy_kept, agy_skipped = split_by_availability(
+                [(m["id"], dict(m)) for m in DEFAULT_PI_AND_GENTLE_MODELS],
+                kwargs.get("available_models"),
+            )
+            agy_models = [emodel for _, emodel in agy_kept]
             providers["agy"] = {
                 "name": "AGY Bridge",
                 "baseUrl": resolved_url,
                 "api": "openai-completions",
                 "apiKey": auth_token,
                 "headers": {"User-Agent": "pi-coding-agent"},
-                "models": [dict(m) for m in DEFAULT_PI_AND_GENTLE_MODELS],
+                "models": agy_models,
             }
 
         if kwargs.get("set_default"):
@@ -385,6 +393,8 @@ class PiConfigurator(ClientConfigurator):
         atomic_write_file(target, formatted_json, mode=0o600)
         res = ConfigPath(target)
         res.backup_path = backup_path
+        res.availability_verified = kwargs.get("available_models") is not None
+        res.skipped_models = agy_skipped
         return res
 
     def restore(
@@ -597,14 +607,21 @@ class GentleShellConfigurator(ClientConfigurator):
                 "headers": {"User-Agent": "gentle-shell"},
                 "models": [dict(m) for m in DEFAULT_CURSOR_MODELS],
             }
+        agy_models: list[dict[str, Any]] = []
+        agy_skipped: list[str] = []
         if provider in ("agy", "all", "todos"):
+            agy_kept, agy_skipped = split_by_availability(
+                [(m["id"], dict(m)) for m in DEFAULT_PI_AND_GENTLE_MODELS],
+                kwargs.get("available_models"),
+            )
+            agy_models = [emodel for _, emodel in agy_kept]
             providers["agy"] = {
                 "name": "AGY Bridge",
                 "baseUrl": resolved_url,
                 "api": "openai-completions",
                 "apiKey": auth_token,
                 "headers": {"User-Agent": "gentle-shell"},
-                "models": [dict(m) for m in DEFAULT_PI_AND_GENTLE_MODELS],
+                "models": agy_models,
             }
 
         if kwargs.get("set_default"):
@@ -642,6 +659,8 @@ class GentleShellConfigurator(ClientConfigurator):
         atomic_write_file(target, formatted_json, mode=0o600)
         res = ConfigPath(target)
         res.backup_path = backup_path
+        res.availability_verified = kwargs.get("available_models") is not None
+        res.skipped_models = agy_skipped
         return res
 
     def restore(
@@ -816,6 +835,7 @@ def setup_pi(
     auth_token: str | None = None,
     set_default: bool = False,
     provider: str = "agy",
+    available_models: set[str] | None = None,
 ) -> ConfigPath:
     """Configures Pi models.json for agy-model-bridge gateway."""
     return cast(
@@ -828,6 +848,7 @@ def setup_pi(
             auth_token=auth_token,
             set_default=set_default,
             provider=provider,
+            available_models=available_models,
         ),
     )
 
@@ -854,6 +875,7 @@ def setup_gentle_shell(
     set_default: bool = False,
     provider: str = "agy",
     api_key: str | None = None,
+    available_models: set[str] | None = None,
 ) -> ConfigPath:
     """Configures Gentle Shell models.json for agy-model-bridge gateway or FreeLLMAPI."""
     return cast(
@@ -867,6 +889,7 @@ def setup_gentle_shell(
             set_default=set_default,
             provider=provider,
             api_key=api_key,
+            available_models=available_models,
         ),
     )
 

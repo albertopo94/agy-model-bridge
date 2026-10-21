@@ -11,6 +11,10 @@ from pathlib import Path
 
 import tests  # noqa: F401
 
+from bridge.setup.pi_gentle import (
+    DEFAULT_CURSOR_MODELS,
+    DEFAULT_PI_AND_GENTLE_MODELS,
+)
 from bridge.setup import (
     BACKUP_TIMESTAMP_REGEX,
     CLIENT_CONFIGURATORS,
@@ -3804,6 +3808,48 @@ class TestPiConfigurator(unittest.TestCase):
         for family in ("sonnet", "opus"):
             for tier in ("high", "medium", "low"):
                 self.assertIn(f"claude-{family}-5-5-{tier}", model_ids)
+
+    def test_setup_filters_agy_models_by_availability(self):
+        catalog = {"gemini-4-argon-high", "gemini-3.8-flash-high", "gemini-2.5-pro"}
+        target = self.dir_path / "models.json"
+        res = self.configurator.setup(config_path=target, available_models=catalog)
+
+        written = [m["id"] for m in json.loads(target.read_text())["providers"]["agy"]["models"]]
+        self.assertEqual(written, ["gemini-4-argon-high", "gemini-3.8-flash-high", "gemini-2.5-pro"])
+        self.assertTrue(res.availability_verified)
+        self.assertNotIn("gemini-4-argon-high", res.skipped_models)
+        self.assertIn("gemini-4-argon-low", res.skipped_models)
+
+    def test_setup_reports_all_skipped_models_in_preset_order(self):
+        catalog = {"gemini-4-argon-high", "gemini-2.5-pro"}
+        target = self.dir_path / "models.json"
+        res = self.configurator.setup(config_path=target, available_models=catalog)
+        written = [m["id"] for m in json.loads(target.read_text())["providers"]["agy"]["models"]]
+        self.assertEqual(written, ["gemini-4-argon-high", "gemini-2.5-pro"])
+        expected_skipped = [
+            m["id"] for m in DEFAULT_PI_AND_GENTLE_MODELS
+            if m["id"] not in catalog
+        ]
+        self.assertEqual(res.skipped_models, expected_skipped)
+
+    def test_setup_without_availability_keeps_full_preset(self):
+        target = self.dir_path / "models.json"
+        res = self.configurator.setup(config_path=target)
+        written = [m["id"] for m in json.loads(target.read_text())["providers"]["agy"]["models"]]
+        self.assertEqual(len(written), 13)
+        self.assertFalse(res.availability_verified)
+        self.assertEqual(res.skipped_models, [])
+
+    def test_setup_availability_never_filters_cursor_models(self):
+        target = self.dir_path / "models.json"
+        res = self.configurator.setup(config_path=target, provider="all", available_models=set())
+        data = json.loads(target.read_text())
+        self.assertEqual(
+            [m["id"] for m in data["providers"]["cursor"]["models"]],
+            [m["id"] for m in DEFAULT_CURSOR_MODELS],
+        )
+        self.assertEqual(data["providers"]["agy"]["models"], [])
+        self.assertEqual(len(res.skipped_models), len(DEFAULT_PI_AND_GENTLE_MODELS))
 
     def test_setup_with_port(self):
         target = self.dir_path / "models.json"
