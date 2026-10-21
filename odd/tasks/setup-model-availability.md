@@ -82,3 +82,4 @@ in Gentle Shell:
   Incident during an availability test run: handle_setup_pi writes to the real
   Gentle Shell path when --path is omitted regardless of $HOME; the single run
   was restored from its own backup (restore_pi → byte-identical 283956 bytes).
+- L8: Feature closed. T1-T6 done; final unit 5ec6648. Live post-restart check: claude-sonnet-5-5-high, claude-opus-5-5-medium, argon all OK through /v1/chat/completions.
