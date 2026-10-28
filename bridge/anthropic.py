@@ -176,7 +176,10 @@ def anthropic_to_cloudcode_request(
                         extracted_texts.append(nb)
                 tr_content = "\n".join(extracted_texts) if extracted_texts else json.dumps(tr_content)
             resp_payload = tr_content if isinstance(tr_content, dict) else {"output": tr_content}
-            _add_part("user", {"functionResponse": {"name": fn_name, "response": resp_payload}})
+            fr_payload: dict[str, Any] = {"name": fn_name, "response": resp_payload}
+            if call_id:
+                fr_payload["id"] = call_id
+            _add_part("user", {"functionResponse": fr_payload})
             continue
 
         if isinstance(raw_content, list):
@@ -229,9 +232,12 @@ def anthropic_to_cloudcode_request(
                         )
                         if sig:
                             cache_thought_signature(call_id=call_id, signature=sig, name=name, args=args)
+                        fc_payload: dict[str, Any] = {"name": name, "args": args}
+                        if call_id:
+                            fc_payload["id"] = call_id
                         part = {
                             "thoughtSignature": sig,
-                            "functionCall": {"name": name, "args": args},
+                            "functionCall": fc_payload,
                         }
                         _add_part("model", part)
                         parts_added += 1
@@ -250,7 +256,10 @@ def anthropic_to_cloudcode_request(
                                     extracted_texts.append(nb)
                             tr_content = "\n".join(extracted_texts) if extracted_texts else json.dumps(tr_content)
                         response_payload = tr_content if isinstance(tr_content, dict) else {"output": tr_content}
-                        part = {"functionResponse": {"name": name, "response": response_payload}}
+                        fr_payload = {"name": name, "response": response_payload}
+                        if call_id:
+                            fr_payload["id"] = call_id
+                        part = {"functionResponse": fr_payload}
                         _add_part("user", part)
                         parts_added += 1
                     elif b_type == "text" or "text" in block:

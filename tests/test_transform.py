@@ -368,7 +368,7 @@ class TestOpenAIToCloudCodeRequest(unittest.TestCase):
             [
                 {
                     "thoughtSignature": "context_engineering_is_the_way_to_go",
-                    "functionCall": {"name": "get_weather", "args": {"location": "Tokyo"}},
+                    "functionCall": {"id": "call_123", "name": "get_weather", "args": {"location": "Tokyo"}},
                 }
             ],
         )
@@ -2040,6 +2040,7 @@ class TestOpenAIToolCallingAndAliasing(unittest.TestCase):
                 {
                     "thoughtSignature": "context_engineering_is_the_way_to_go",
                     "functionCall": {
+                        "id": "call_weather_1",
                         "name": "get_weather",
                         "args": {"location": "Tokyo"},
                     },
@@ -2053,12 +2054,53 @@ class TestOpenAIToolCallingAndAliasing(unittest.TestCase):
             [
                 {
                     "functionResponse": {
+                        "id": "call_weather_1",
                         "name": "get_weather",
                         "response": {"output": "Sunny, 25C"},
                     }
                 }
             ],
         )
+
+    def test_openai_to_cloudcode_request_preserves_tool_ids_for_claude(self):
+        payload = {
+            "model": "claude-opus-5-5-high",
+            "messages": [
+                {"role": "user", "content": "What is 2+2?"},
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "call_calc_42",
+                            "type": "function",
+                            "function": {
+                                "name": "calculator",
+                                "arguments": '{"expr": "2+2"}',
+                            },
+                        }
+                    ],
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_calc_42",
+                    "content": "4",
+                },
+            ],
+        }
+        model, contents, _, _, _ = openai_to_cloudcode_request(payload, "test-project")
+        self.assertEqual(model, "claude-opus-5-5-high")
+        # Verify functionCall has the call ID so upstream Vertex Claude does not reject with tool_use.id required
+        fc_part = contents[1]["parts"][0]
+        self.assertEqual(fc_part["functionCall"]["id"], "call_calc_42")
+        self.assertEqual(fc_part["functionCall"]["name"], "calculator")
+        self.assertEqual(fc_part["functionCall"]["args"], {"expr": "2+2"})
+
+        # Verify functionResponse has matching id
+        fr_part = contents[2]["parts"][0]
+        self.assertEqual(fr_part["functionResponse"]["id"], "call_calc_42")
+        self.assertEqual(fr_part["functionResponse"]["name"], "calculator")
+        self.assertEqual(fr_part["functionResponse"]["response"], {"output": "4"})
 
     def test_openai_to_cloudcode_request_function_role_response(self):
         payload = {
@@ -2090,7 +2132,7 @@ class TestOpenAIToolCallingAndAliasing(unittest.TestCase):
             [
                 {
                     "thoughtSignature": "context_engineering_is_the_way_to_go",
-                    "functionCall": {"name": "my_calc", "args": {"x": 5}},
+                    "functionCall": {"id": "call_fn_99", "name": "my_calc", "args": {"x": 5}},
                 }
             ],
         )
@@ -2183,7 +2225,7 @@ class TestThoughtSignatureManagement(unittest.TestCase):
             contents[1]["parts"][0],
             {
                 "thoughtSignature": sig,
-                "functionCall": {"name": "run", "args": {}},
+                "functionCall": {"id": "call_custom_sig", "name": "run", "args": {}},
             },
         )
 

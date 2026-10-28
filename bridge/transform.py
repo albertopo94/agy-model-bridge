@@ -644,7 +644,7 @@ def openai_to_cloudcode_request(
                 for tc in tool_calls:
                     if not isinstance(tc, dict):
                         continue
-                    call_id = tc.get("id") or ""
+                    call_id = tc.get("id") or f"call_{uuid.uuid4().hex[:16]}"
                     fn_raw = tc.get("function")
                     fn: dict[str, Any] = fn_raw if isinstance(fn_raw, dict) else tc
                     fn_name = fn.get("name") or "unknown"
@@ -669,15 +669,18 @@ def openai_to_cloudcode_request(
                         or (fn.get("thought_signature") if isinstance(fn, dict) else None)
                         or get_thought_signature(call_id, fn_name, args_dict)
                     )
+                    fc_payload: dict[str, Any] = {"name": fn_name, "args": args_dict}
+                    if call_id:
+                        fc_payload["id"] = call_id
                     turn_parts.append({
                         "thoughtSignature": sig,
-                        "functionCall": {"name": fn_name, "args": args_dict},
+                        "functionCall": fc_payload,
                     })
             else:
                 fc = msg.get("function_call")
                 if isinstance(fc, dict):
                     fn_name = fc.get("name") or "unknown"
-                    call_id = msg.get("name") or ""
+                    call_id = msg.get("name") or f"call_{uuid.uuid4().hex[:16]}"
                     if call_id:
                         tool_names_by_call_id[call_id] = fn_name
                     args_raw = fc.get("arguments")
@@ -697,18 +700,24 @@ def openai_to_cloudcode_request(
                         or fc.get("thought_signature")
                         or get_thought_signature(call_id, fn_name, args_dict)
                     )
+                    fc_payload = {"name": fn_name, "args": args_dict}
+                    if call_id:
+                        fc_payload["id"] = call_id
                     turn_parts.append({
                         "thoughtSignature": sig,
-                        "functionCall": {"name": fn_name, "args": args_dict},
+                        "functionCall": fc_payload,
                     })
             if not turn_parts:
                 part_text = content if content and content.strip() else " "
                 turn_parts = [{"text": part_text}]
         elif role in ("tool", "function"):
             turn_role = "user"
-            call_id = msg.get("tool_call_id") or msg.get("name") or ""
-            fn_name = msg.get("name") or tool_names_by_call_id.get(call_id, "tool")
-            turn_parts = [{"functionResponse": {"name": fn_name, "response": {"output": content}}}]
+            tool_call_id = msg.get("tool_call_id") or ""
+            fn_name = msg.get("name") or (tool_names_by_call_id.get(tool_call_id) if tool_call_id else None) or "tool"
+            fr_payload: dict[str, Any] = {"name": fn_name, "response": {"output": content}}
+            if tool_call_id:
+                fr_payload["id"] = tool_call_id
+            turn_parts = [{"functionResponse": fr_payload}]
         else:
             raise ValueError(f"Invalid role: {role}")
 

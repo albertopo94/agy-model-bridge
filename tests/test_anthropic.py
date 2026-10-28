@@ -379,18 +379,18 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
         self.assertEqual(contents[1]["role"], "model")
         self.assertEqual(len(contents[1]["parts"]), 1)
         part = contents[1]["parts"][0]
-        self.assertEqual(part.get("functionCall"), {"name": "get_weather", "args": {"location": "Paris"}})
+        self.assertEqual(part.get("functionCall"), {"id": "t1", "name": "get_weather", "args": {"location": "Paris"}})
         self.assertTrue(part.get("thoughtSignature"))
         # Tool results merged into user turn
         self.assertEqual(contents[2]["role"], "user")
         self.assertEqual(len(contents[2]["parts"]), 2)
         self.assertEqual(
             contents[2]["parts"][0],
-            {"functionResponse": {"name": "get_weather", "response": {"output": "Sunny, 22C"}}},
+            {"functionResponse": {"id": "t1", "name": "get_weather", "response": {"output": "Sunny, 22C"}}},
         )
         self.assertEqual(
             contents[2]["parts"][1],
-            {"functionResponse": {"name": "tool", "response": {"temperature": 22}}},
+            {"functionResponse": {"id": "t2", "name": "tool", "response": {"temperature": 22}}},
         )
 
     def test_mixed_text_and_tool_use_in_assistant_turn(self):
@@ -415,7 +415,7 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
         self.assertEqual(contents[1]["role"], "model")
         self.assertEqual(len(contents[1]["parts"]), 2)
         self.assertEqual(contents[1]["parts"][0], {"text": "I will check the weather for Tokyo."})
-        self.assertEqual(contents[1]["parts"][1]["functionCall"], {"name": "get_weather", "args": {"city": "Tokyo"}})
+        self.assertEqual(contents[1]["parts"][1]["functionCall"], {"id": "t_tokyo", "name": "get_weather", "args": {"city": "Tokyo"}})
         self.assertTrue(contents[1]["parts"][1].get("thoughtSignature"))
         # Since last turn was model, alternation appends "Continue" user turn
         self.assertEqual(contents[2]["role"], "user")
@@ -460,7 +460,7 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
             contents[1]["parts"][0],
             {
                 "thoughtSignature": "explicit_sig_456",
-                "functionCall": {"name": "Bash", "args": {"command": "ls -la"}},
+                "functionCall": {"id": "t_bash", "name": "Bash", "args": {"command": "ls -la"}},
             },
         )
         # Turn 2: user tool_result extracted from block list
@@ -469,6 +469,7 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
             contents[2]["parts"][0],
             {
                 "functionResponse": {
+                    "id": "t_bash",
                     "name": "Bash",
                     "response": {"output": "file1.txt\nfile2.txt"},
                 }
@@ -623,7 +624,7 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
             model_turn["parts"][1],
             {
                 "thoughtSignature": "sig_tool_weather_99",
-                "functionCall": {"name": "get_weather", "args": {"city": "Paris"}},
+                "functionCall": {"id": "t_weather", "name": "get_weather", "args": {"city": "Paris"}},
             },
         )
 

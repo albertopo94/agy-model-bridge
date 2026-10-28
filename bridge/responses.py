@@ -121,7 +121,10 @@ def responses_to_cloudcode_request(
                     tool_names_by_call_id[call_id] = name
                     cache_tool_name(call_id, name)
                 args_dict = _parse_arguments_to_dict(item.get("arguments"))
-                part: dict[str, Any] = {"functionCall": {"name": name, "args": args_dict}}
+                fc_dict: dict[str, Any] = {"name": name, "args": args_dict}
+                if call_id:
+                    fc_dict["id"] = call_id
+                part: dict[str, Any] = {"functionCall": fc_dict}
                 sig = (
                     item.get("thoughtSignature")
                     or item.get("thought_signature")
@@ -144,7 +147,10 @@ def responses_to_cloudcode_request(
                         response_payload = {"output": output}
                 else:
                     response_payload = {"output": output}
-                part = {"functionResponse": {"name": name, "response": response_payload}}
+                fr_dict: dict[str, Any] = {"name": name, "response": response_payload}
+                if call_id:
+                    fr_dict["id"] = call_id
+                part = {"functionResponse": fr_dict}
                 turn_parts = [part]
                 turn_role = "user"
             elif role in ("system", "developer"):
@@ -175,7 +181,10 @@ def responses_to_cloudcode_request(
                         response_payload = {"output": raw_content}
                 else:
                     response_payload = {"output": raw_content}
-                part = {"functionResponse": {"name": name, "response": response_payload}}
+                fr_dict = {"name": name, "response": response_payload}
+                if call_id:
+                    fr_dict["id"] = call_id
+                part = {"functionResponse": fr_dict}
                 turn_parts = [part]
                 turn_role = "user"
             elif role == "assistant":
@@ -196,7 +205,10 @@ def responses_to_cloudcode_request(
                                     tool_names_by_call_id[b_call_id] = b_name
                                     cache_tool_name(b_call_id, b_name)
                                 b_args = _parse_arguments_to_dict(block.get("arguments"))
-                                b_part: dict[str, Any] = {"functionCall": {"name": b_name, "args": b_args}}
+                                b_fc_dict: dict[str, Any] = {"name": b_name, "args": b_args}
+                                if b_call_id:
+                                    b_fc_dict["id"] = b_call_id
+                                b_part: dict[str, Any] = {"functionCall": b_fc_dict}
                                 b_sig = (
                                     block.get("thoughtSignature")
                                     or block.get("thought_signature")
@@ -225,7 +237,10 @@ def responses_to_cloudcode_request(
                         tool_names_by_call_id[fc_call_id] = fc_name
                         cache_tool_name(fc_call_id, fc_name)
                     fc_args = _parse_arguments_to_dict(fc.get("arguments"))
-                    fc_part: dict[str, Any] = {"functionCall": {"name": fc_name, "args": fc_args}}
+                    fc_dict: dict[str, Any] = {"name": fc_name, "args": fc_args}
+                    if fc_call_id:
+                        fc_dict["id"] = fc_call_id
+                    fc_part: dict[str, Any] = {"functionCall": fc_dict}
                     fc_sig = (
                         item.get("thoughtSignature")
                         or fc.get("thoughtSignature")
@@ -249,7 +264,10 @@ def responses_to_cloudcode_request(
                                 tool_names_by_call_id[tc_call_id] = tc_name
                                 cache_tool_name(tc_call_id, tc_name)
                             tc_args = _parse_arguments_to_dict(fn.get("arguments"))
-                            tc_part: dict[str, Any] = {"functionCall": {"name": tc_name, "args": tc_args}}
+                            tc_dict: dict[str, Any] = {"name": tc_name, "args": tc_args}
+                            if tc_call_id:
+                                tc_dict["id"] = tc_call_id
+                            tc_part: dict[str, Any] = {"functionCall": tc_dict}
                             tc_sig = (
                                 tc.get("thoughtSignature")
                                 or tc.get("thought_signature")

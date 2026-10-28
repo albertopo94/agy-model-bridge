@@ -138,7 +138,7 @@ class TestResponsesRequestTranslation(unittest.TestCase):
         self.assertEqual(contents[0]["role"], "user")
         self.assertEqual(
             contents[0]["parts"],
-            [{"functionResponse": {"name": "tool", "response": {"output": "42"}}}],
+            [{"functionResponse": {"id": "call_123", "name": "tool", "response": {"output": "42"}}}],
         )
         self.assertIsNone(tools)
 
@@ -190,7 +190,7 @@ class TestResponsesRequestTranslation(unittest.TestCase):
             [
                 {
                     "thoughtSignature": "context_engineering_is_the_way_to_go",
-                    "functionCall": {"name": "search", "args": {"query": "weather", "days": 3}},
+                    "functionCall": {"id": "call_search_1", "name": "search", "args": {"query": "weather", "days": 3}},
                 }
             ],
         )
@@ -238,11 +238,11 @@ class TestResponsesRequestTranslation(unittest.TestCase):
             [
                 {
                     "thoughtSignature": "context_engineering_is_the_way_to_go",
-                    "functionCall": {"name": "exec_command", "args": {"cmd": "ls"}},
+                    "functionCall": {"id": "call_1", "name": "exec_command", "args": {"cmd": "ls"}},
                 },
                 {
                     "thoughtSignature": "context_engineering_is_the_way_to_go",
-                    "functionCall": {"name": "read_file", "args": {"path": "a.txt"}},
+                    "functionCall": {"id": "call_2", "name": "read_file", "args": {"path": "a.txt"}},
                 },
             ],
         )
@@ -253,12 +253,14 @@ class TestResponsesRequestTranslation(unittest.TestCase):
             [
                 {
                     "functionResponse": {
+                        "id": "call_1",
                         "name": "exec_command",
                         "response": {"output": "file1.txt\nfile2.txt"},
                     }
                 },
                 {
                     "functionResponse": {
+                        "id": "call_2",
                         "name": "read_file",
                         "response": {"content": "hello world"},
                     }
@@ -322,7 +324,7 @@ class TestResponsesRequestTranslation(unittest.TestCase):
         self.assertEqual(
             contents[1]["parts"][0],
             {
-                "functionCall": {"name": "find", "args": {"pattern": "*.py"}},
+                "functionCall": {"id": "call_sig_1", "name": "find", "args": {"pattern": "*.py"}},
                 "thoughtSignature": sig,
             },
         )
