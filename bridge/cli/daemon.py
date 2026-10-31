@@ -135,12 +135,17 @@ def handle_status(argv: list[str], prog_base: str, status_fn: Any = None) -> int
     args = parser.parse_args(argv)
     st = fn(port=args.port, host=args.host)
     if st.get("running"):
-        auth_st = st.get("auth", {}).get("status", "Valid")
         pid_str = f" (PID {st['pid']})" if st.get("pid") else ""
         print(t("status_active", pid_str=pid_str))
         print(t("status_address", url=st["url"]))
         print(t("status_models", count=st.get("models_count", 0)))
-        print(t("status_auth", status=auth_st))
+        if st.get("status_available"):
+            # Never default to "Valid": that would claim a proof upstream never gave.
+            print(t("status_auth", status=st.get("auth", {}).get("status") or "Unknown"))
+        else:
+            # The gateway is up but the status probe did not complete; that is not
+            # a verdict about the credential, so it must not look like one.
+            print(t("status_auth", status=t("status_auth_pending")))
     else:
         print(t("status_stopped"))
         print(t("status_start_hint", prog_base=prog_base))

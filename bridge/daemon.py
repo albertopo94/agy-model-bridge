@@ -631,15 +631,19 @@ def get_daemon_status(
     dashboard_url = f"http://{effective_host}:{effective_port}/"
 
     if alive:
-        status_data = fetch_status_json(effective_host, effective_port, timeout=1.0) or {}
+        # A cold /api/status verifies the credential against Google and needs a
+        # couple of seconds; a sub-second probe would report a healthy gateway
+        # as unverifiable.
+        status_data = fetch_status_json(effective_host, effective_port, timeout=4.0)
         return {
             "running": True,
             "pid": pid,
             "port": effective_port,
             "host": effective_host,
             "url": dashboard_url,
-            "models_count": status_data.get("models_count", 0),
-            "auth": status_data.get("auth", {}),
+            "status_available": isinstance(status_data, dict),
+            "models_count": (status_data or {}).get("models_count", 0),
+            "auth": (status_data or {}).get("auth", {}),
         }
     else:
         unbound_status = fetch_status_json(effective_host, effective_port, timeout=0.5)
@@ -650,6 +654,7 @@ def get_daemon_status(
                 "port": effective_port,
                 "host": effective_host,
                 "url": dashboard_url,
+                "status_available": True,
                 "models_count": unbound_status.get("models_count", 0),
                 "auth": unbound_status.get("auth", {}),
             }

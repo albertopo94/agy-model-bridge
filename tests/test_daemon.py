@@ -432,6 +432,35 @@ class TestDaemonLifecycle(unittest.TestCase):
         self.assertEqual(status["url"], "http://127.0.0.1:24980/")
 
     @patch("bridge.daemon.fetch_status_json", return_value=None)
+    def test_get_daemon_status_running_allows_for_a_cold_probe(self, mock_fetch):
+        """A cold /api/status verifies the credential upstream and takes seconds;
+        a sub-second probe would report a healthy gateway as unverifiable."""
+        write_pid(55559, pid_file=self.pid_file)
+        with patch("bridge.daemon.is_pid_alive", return_value=True), patch("bridge.daemon.is_bridge_process", return_value=True):
+            get_daemon_status(port=24980, host="127.0.0.1", pid_file=self.pid_file)
+
+        self.assertTrue(mock_fetch.called)
+        self.assertGreaterEqual(mock_fetch.call_args[1].get("timeout", 0), 3.0)
+
+    @patch("bridge.daemon.fetch_status_json", return_value=None)
+    def test_get_daemon_status_flags_missing_status_data(self, mock_fetch):
+        write_pid(55560, pid_file=self.pid_file)
+        with patch("bridge.daemon.is_pid_alive", return_value=True), patch("bridge.daemon.is_bridge_process", return_value=True):
+            status = get_daemon_status(port=24980, host="127.0.0.1", pid_file=self.pid_file)
+
+        self.assertTrue(status["running"])
+        self.assertFalse(status["status_available"])
+
+    @patch("bridge.daemon.fetch_status_json")
+    def test_get_daemon_status_marks_status_data_available(self, mock_fetch):
+        write_pid(55561, pid_file=self.pid_file)
+        mock_fetch.return_value = {"auth": {"status": "Valid"}, "models_count": 4}
+        with patch("bridge.daemon.is_pid_alive", return_value=True), patch("bridge.daemon.is_bridge_process", return_value=True):
+            status = get_daemon_status(port=24980, host="127.0.0.1", pid_file=self.pid_file)
+
+        self.assertTrue(status["status_available"])
+
+    @patch("bridge.daemon.fetch_status_json", return_value=None)
     def test_get_daemon_status_stopped(self, mock_fetch):
         status = get_daemon_status(port=24980, host="127.0.0.1", pid_file=self.pid_file)
         self.assertFalse(status["running"])
@@ -653,7 +682,7 @@ class TestHealthCheck(unittest.TestCase):
     def test_check_server_healthy_matches_valid_service_identity(self, mock_urlopen):
         resp = MagicMock()
         resp.status = 200
-        resp.read.return_value = b'{"status": "ok", "service": "agy-model-bridge", "version": "0.29.2"}'
+        resp.read.return_value = b'{"status": "ok", "service": "agy-model-bridge", "version": "0.30.0"}'
         resp.__enter__.return_value = resp
         mock_urlopen.return_value = resp
 
@@ -707,7 +736,7 @@ class TestDaemonDescriptorAndPortBinding(unittest.TestCase):
             "host": "127.0.0.1",
             "port": 24980,
             "service": "agy-model-bridge",
-            "version": "0.29.2",
+            "version": "0.30.0",
         }
         write_daemon_info(info_data, info_file=self.info_file)
         self.assertTrue(self.info_file.exists())
@@ -760,7 +789,7 @@ class TestDaemonDescriptorAndPortBinding(unittest.TestCase):
                 "host": "127.0.0.1",
                 "port": 24980,
                 "service": "agy-model-bridge",
-                "version": "0.29.2",
+                "version": "0.30.0",
             },
             info_file=self.info_file,
         )
@@ -799,7 +828,7 @@ class TestDaemonDescriptorAndPortBinding(unittest.TestCase):
                 "host": "127.0.0.1",
                 "port": 24980,
                 "service": "agy-model-bridge",
-                "version": "0.29.2",
+                "version": "0.30.0",
             },
             info_file=self.info_file,
         )
@@ -821,13 +850,13 @@ class TestDaemonDescriptorAndPortBinding(unittest.TestCase):
                 "host": "127.0.0.1",
                 "port": 24999,
                 "service": "agy-model-bridge",
-                "version": "0.29.2",
+                "version": "0.30.0",
             },
             info_file=self.info_file,
         )
         mock_fetch.return_value = {
             "service": "agy-model-bridge",
-            "version": "0.29.2",
+            "version": "0.30.0",
             "models_count": 5,
             "auth": {"status": "Valid"},
         }
@@ -930,7 +959,7 @@ class TestDaemonDescriptorAndPortBinding(unittest.TestCase):
                 "host": "127.0.0.1",
                 "port": 24980,
                 "service": "agy-model-bridge",
-                "version": "0.29.2",
+                "version": "0.30.0",
             },
             info_file=self.info_file,
         )
@@ -954,7 +983,7 @@ class TestDaemonDescriptorAndPortBinding(unittest.TestCase):
                 "host": "127.0.0.1",
                 "port": 24980,
                 "service": "agy-model-bridge",
-                "version": "0.29.2",
+                "version": "0.30.0",
             },
             info_file=self.info_file,
         )
@@ -978,7 +1007,7 @@ class TestDaemonDescriptorAndPortBinding(unittest.TestCase):
                 "host": "127.0.0.1",
                 "port": 24980,
                 "service": "agy-model-bridge",
-                "version": "0.29.2",
+                "version": "0.30.0",
             },
             info_file=self.info_file,
         )
