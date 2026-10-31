@@ -237,10 +237,10 @@ def responses_to_cloudcode_request(
                         tool_names_by_call_id[fc_call_id] = fc_name
                         cache_tool_name(fc_call_id, fc_name)
                     fc_args = _parse_arguments_to_dict(fc.get("arguments"))
-                    fc_dict: dict[str, Any] = {"name": fc_name, "args": fc_args}
+                    fc_payload: dict[str, Any] = {"name": fc_name, "args": fc_args}
                     if fc_call_id:
-                        fc_dict["id"] = fc_call_id
-                    fc_part: dict[str, Any] = {"functionCall": fc_dict}
+                        fc_payload["id"] = fc_call_id
+                    fc_part: dict[str, Any] = {"functionCall": fc_payload}
                     fc_sig = (
                         item.get("thoughtSignature")
                         or fc.get("thoughtSignature")
