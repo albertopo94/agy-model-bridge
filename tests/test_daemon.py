@@ -84,6 +84,7 @@ class TestDaemonLifecycle(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.dir_path = Path(self.temp_dir.name)
         self.pid_file = self.dir_path / "bridge.pid"
+        self.info_file = self.dir_path / "bridge.json"
         self.log_file = self.dir_path / "bridge.log"
 
     def tearDown(self):
@@ -225,19 +226,159 @@ class TestDaemonLifecycle(unittest.TestCase):
     def test_start_daemon_health_timeout(self, mock_popen, mock_health):
         mock_proc = MagicMock()
         mock_proc.pid = 44446
+        mock_proc.poll.return_value = None
         mock_popen.return_value = mock_proc
 
-        res = start_daemon(
-            port=24980,
-            host="127.0.0.1",
-            pid_file=self.pid_file,
-            log_file=self.log_file,
-            health_timeout=0.1,
-        )
+        # The child stays alive the whole window, so the only explanation left
+        # is that it never answered the health check in time.
+        with patch("bridge.daemon.is_pid_alive", return_value=True):
+            res = start_daemon(
+                port=24980,
+                host="127.0.0.1",
+                pid_file=self.pid_file,
+                info_file=self.info_file,
+                log_file=self.log_file,
+                health_timeout=0.1,
+            )
 
         self.assertEqual(res["status"], "error")
+        self.assertEqual(res["reason"], "health_timeout")
         self.assertIn("Timeout", res["error"])
         mock_proc.terminate.assert_called_once()
+        self.assertIsNone(read_pid(self.pid_file))
+
+    @patch("bridge.daemon.check_server_healthy", return_value=False)
+    @patch("bridge.daemon.subprocess.Popen")
+    def test_start_daemon_reports_exit_for_reaped_child_alive_pid(self, mock_popen, mock_health):
+        """A dead child of this process is a zombie: PID still answers os.kill()."""
+        mock_proc = MagicMock()
+        mock_proc.pid = 44450
+        mock_proc.poll.return_value = 1
+        mock_popen.return_value = mock_proc
+        self.log_file.write_text("OSError: [Errno 49] Can't assign requested address\n", encoding="utf-8")
+
+        with patch("bridge.daemon.is_pid_alive", return_value=True):
+            res = start_daemon(
+                port=24980,
+                host="127.0.0.1",
+                pid_file=self.pid_file,
+                info_file=self.info_file,
+                log_file=self.log_file,
+                health_timeout=0.1,
+            )
+
+        self.assertEqual(res["status"], "error")
+        self.assertEqual(res["reason"], "process_exited")
+        self.assertIn("Can't assign requested address", res["error"])
+        self.assertIsNone(read_pid(self.pid_file))
+
+    @patch("bridge.daemon.check_server_healthy", return_value=False)
+    @patch("bridge.daemon.subprocess.Popen")
+    def test_start_daemon_death_at_deadline_is_not_reported_as_timeout(self, mock_popen, mock_health):
+        """The whole budget can be spent inside one health check, so the loop exits
+        with the child still assumed alive; the final poll must settle it."""
+        mock_proc = MagicMock()
+        mock_proc.pid = 44451
+        mock_proc.poll.return_value = 1
+        mock_popen.return_value = mock_proc
+        self.log_file.write_text("RuntimeError: Could not discover Google Cloud project ID\n", encoding="utf-8")
+
+        with patch("bridge.daemon.is_pid_alive", return_value=True):
+            res = start_daemon(
+                port=24980,
+                host="127.0.0.1",
+                pid_file=self.pid_file,
+                info_file=self.info_file,
+                log_file=self.log_file,
+                health_timeout=0.0,
+            )
+
+        self.assertEqual(res["status"], "error")
+        self.assertEqual(res["reason"], "process_exited")
+        self.assertIn("Could not discover Google Cloud project ID", res["error"])
+
+    @patch("bridge.daemon.check_server_healthy", return_value=False)
+    @patch("bridge.daemon.subprocess.Popen")
+    def test_start_daemon_distinguishes_crashed_child_from_timeout(self, mock_popen, mock_health):
+        mock_proc = MagicMock()
+        mock_proc.pid = 44447
+        mock_popen.return_value = mock_proc
+        self.log_file.write_text(
+            "\n".join(f"noise line {i:03d}" for i in range(40))
+            + "\nRuntimeError: Could not discover Google Cloud project ID: Upstream authentication failure (401)\n",
+            encoding="utf-8",
+        )
+
+        with patch("bridge.daemon.is_pid_alive", return_value=False):
+            res = start_daemon(
+                port=24980,
+                host="127.0.0.1",
+                pid_file=self.pid_file,
+                info_file=self.info_file,
+                log_file=self.log_file,
+                health_timeout=0.1,
+            )
+
+        self.assertEqual(res["status"], "error")
+        self.assertEqual(res["reason"], "process_exited")
+        # The child died: reporting a timeout would send the user down the wrong path.
+        self.assertNotIn("Timeout", res["error"])
+        self.assertIn("exited", res["error"])
+        mock_proc.terminate.assert_called_once()
+        self.assertIsNone(read_pid(self.pid_file))
+        self.assertIsNone(read_daemon_info(self.info_file))
+
+    @patch("bridge.daemon.check_server_healthy", return_value=False)
+    @patch("bridge.daemon.subprocess.Popen")
+    def test_start_daemon_crashed_child_reports_log_tail_not_whole_log(self, mock_popen, mock_health):
+        mock_proc = MagicMock()
+        mock_proc.pid = 44448
+        mock_popen.return_value = mock_proc
+        self.log_file.write_text(
+            "\n".join(f"noise line {i:03d}" for i in range(40))
+            + "\nbridge.errors.AuthenticationError: Upstream authentication failure (401)\n",
+            encoding="utf-8",
+        )
+
+        with patch("bridge.daemon.is_pid_alive", return_value=False):
+            res = start_daemon(
+                port=24980,
+                host="127.0.0.1",
+                pid_file=self.pid_file,
+                info_file=self.info_file,
+                log_file=self.log_file,
+                health_timeout=0.1,
+            )
+
+        self.assertIn("Upstream authentication failure (401)", res["error"])
+        self.assertIn(str(self.log_file), res["error"])
+        # Only the tail is replayed, so the terminal stays readable.
+        self.assertNotIn("noise line 001", res["error"])
+        self.assertNotIn("noise line 020", res["error"])
+        self.assertLess(len(res["error"]), 3000)
+
+    @patch("bridge.daemon.check_server_healthy", return_value=False)
+    @patch("bridge.daemon.subprocess.Popen")
+    def test_start_daemon_crashed_child_without_log_file_still_reports_exit(self, mock_popen, mock_health):
+        mock_proc = MagicMock()
+        mock_proc.pid = 44449
+        mock_popen.return_value = mock_proc
+        missing_log = self.dir_path / "sub" / "bridge.log"
+
+        with patch("bridge.daemon.is_pid_alive", return_value=False):
+            res = start_daemon(
+                port=24980,
+                host="127.0.0.1",
+                pid_file=self.pid_file,
+                info_file=self.info_file,
+                log_file=missing_log,
+                health_timeout=0.1,
+            )
+
+        self.assertEqual(res["status"], "error")
+        self.assertEqual(res["reason"], "process_exited")
+        self.assertNotIn("Timeout", res["error"])
+        self.assertIn("no output was recorded", res["error"])
         self.assertIsNone(read_pid(self.pid_file))
 
     @patch("bridge.daemon.os.kill")
