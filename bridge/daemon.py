@@ -25,6 +25,10 @@ except ImportError:
 
 from bridge import __version__
 
+# How much of the daemon log to replay in the terminal when start fails.
+START_LOG_TAIL_LINES = 12
+START_LOG_TAIL_BYTES = 2048
+
 def get_default_daemon_dir() -> Path:
     state_dir = os.environ.get("AGY_BRIDGE_STATE_DIR")
     if state_dir:
@@ -245,6 +249,37 @@ def fetch_status_json(host: str, port: int, timeout: float = 1.0) -> dict[str, A
     return None
 
 
+def read_log_tail(
+    log_file: Path,
+    max_lines: int = START_LOG_TAIL_LINES,
+    max_bytes: int = START_LOG_TAIL_BYTES,
+) -> str:
+    """Returns the last meaningful lines of the daemon log, or '' if unreadable.
+
+    Reads only a byte window from the end of the file so a large log never
+    floods the terminal or memory.
+    """
+    try:
+        with open(log_file, "rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            size = handle.tell()
+            handle.seek(max(0, size - max_bytes))
+            chunk = handle.read()
+            truncated_by_window = size > max_bytes
+    except OSError:
+        return ""
+
+    if not chunk:
+        return ""
+
+    lines = chunk.decode("utf-8", errors="replace").splitlines()
+    if truncated_by_window and lines:
+        # The byte window usually starts mid-line; drop that partial line.
+        lines = lines[1:]
+    lines = [line for line in lines if line.strip()]
+    return "\n".join(lines[-max_lines:])
+
+
 def start_daemon(
     port: int = 24980,
     host: str = "127.0.0.1",
@@ -379,24 +414,55 @@ def start_daemon(
 
         deadline = time.time() + health_timeout
         healthy = False
+        child_alive = True
         while time.time() < deadline:
             if check_server_healthy(host, port, timeout=0.5):
                 healthy = True
                 break
-            if not is_pid_alive(pid):
+            # poll() is authoritative for our own child: a terminated child is
+            # reaped here, while is_pid_alive()/os.kill() still reports True for
+            # a zombie, which would mislabel a crash as a timeout.
+            if proc.poll() is not None or not is_pid_alive(pid):
+                child_alive = False
                 break
             time.sleep(0.05)
 
         if not healthy:
+            if child_alive and proc.poll() is not None:
+                # Died exactly at the deadline, before the health check could see it.
+                child_alive = False
             try:
                 proc.terminate()
             except OSError:
                 pass
             remove_pid(pid_file=target_pid_file)
             remove_daemon_info(info_file=target_info_file)
+            if child_alive:
+                reason = "health_timeout"
+                error = f"Timeout waiting for bridge server to respond on port {port}. Check log at {target_log_file}"
+            else:
+                # The child died before binding the port: saying "timeout" here
+                # would send the user looking for a slow start instead of the
+                # exception already recorded in the log.
+                reason = "process_exited"
+                tail = read_log_tail(target_log_file)
+                if tail:
+                    quoted = "\n".join(f"    {line}" for line in tail.splitlines())
+                    error = (
+                        f"Bridge server exited before it became healthy on port {port}, "
+                        f"so the service is not running.\n"
+                        f"Last lines from {target_log_file}:\n{quoted}\n"
+                        f"Fix the error above and run start again."
+                    )
+                else:
+                    error = (
+                        f"Bridge server exited before it became healthy on port {port}, "
+                        f"so the service is not running; no output was recorded at {target_log_file}."
+                    )
             return {
                 "status": "error",
-                "error": f"Timeout waiting for bridge server to respond on port {port}. Check log at {target_log_file}",
+                "reason": reason,
+                "error": error,
                 "port": port,
                 "url": dashboard_url,
                 "opened_browser": False,

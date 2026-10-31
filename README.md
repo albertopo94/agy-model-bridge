@@ -87,6 +87,13 @@ This launches the gateway detached in the background, waits for health check con
 
 *Use `--no-open` to prevent opening the browser automatically, or `--port PORT` to customize the port.*
 
+If the gateway cannot come up, `start` exits with `1` and reports which of the two things happened:
+
+| Report | Meaning | What to do |
+|---|---|---|
+| `Bridge server exited before it became healthy…` | The process died while starting, so nothing is listening on the port. The last log lines are printed inline (most often an authentication or project-discovery error). | Fix the reported error (usually re-authenticate in Antigravity) and run `start` again. |
+| `Timeout waiting for bridge server to respond…` | The process was still running when the health window closed. | Check `~/.agy-bridge/bridge.log` and the port/host for conflicts. |
+
 ### 2. Configure Your Terminal Coding Agents
 
 Configure your tools with a single command (with automated ISO backups and atomic file writes):
@@ -421,7 +428,7 @@ Execute the complete test suite:
 python3 -m unittest discover -s tests -v
 ```
 
-All 1049 tests run in ~3-4 seconds locally with zero external dependencies and zero network access.
+All 1054 tests run in ~3-4 seconds locally with zero external dependencies and zero network access.
 
 ### End-to-End Smoke Test
 
