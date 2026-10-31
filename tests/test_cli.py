@@ -103,6 +103,71 @@ class TestCliDaemonHandlers(unittest.TestCase):
             ret = handle_status([], prog_base="agy-bridge", status_fn=mock_status)
             self.assertEqual(ret, 0)
 
+    def test_handle_status_reports_upstream_auth_verdict(self):
+        mock_status = MagicMock(return_value={
+            "running": True,
+            "pid": 4321,
+            "url": "http://127.0.0.1:24980/",
+            "models_count": 0,
+            "status_available": True,
+            "auth": {"status": "Rejected", "email": None, "message": "Credential rejected by Google"},
+        })
+        with patch("sys.stdout", new=io.StringIO()) as out:
+            handle_status([], prog_base="agy-bridge", status_fn=mock_status)
+        text = out.getvalue()
+        self.assertIn("Rejected", text)
+        self.assertNotIn("Valid", text)
+
+    def test_handle_status_without_auth_data_does_not_claim_valid(self):
+        """Defaulting to "Valid" invents a proof nobody obtained."""
+        mock_status = MagicMock(return_value={
+            "running": True,
+            "pid": 4321,
+            "url": "http://127.0.0.1:24980/",
+            "models_count": 3,
+            "status_available": True,
+        })
+        with patch("sys.stdout", new=io.StringIO()) as out:
+            handle_status([], prog_base="agy-bridge", status_fn=mock_status)
+        text = out.getvalue()
+        self.assertIn("Unknown", text)
+        self.assertNotIn("Valid", text)
+
+    def test_handle_status_without_auth_data_reports_pending_not_unknown(self):
+        """No data from the server means the check did not complete, not that Google
+        refused or was unreachable. Conflating them sends the user to fix the wrong thing."""
+        mock_status = MagicMock(return_value={
+            "running": True,
+            "pid": 4321,
+            "url": "http://127.0.0.1:24980/",
+            "models_count": 3,
+            "status_available": False,
+        })
+        with patch("sys.stdout", new=io.StringIO()) as out:
+            handle_status([], prog_base="agy-bridge", status_fn=mock_status)
+        text = out.getvalue()
+        self.assertIn("Checking", text)
+        self.assertNotIn("Unknown", text)
+        self.assertNotIn("Valid", text)
+
+    def test_handle_status_auth_label_is_not_keychain_only(self):
+        """The verdict now comes from upstream, so the label must not claim Keychain."""
+        mock_status = MagicMock(return_value={
+            "running": True,
+            "pid": 1,
+            "url": "http://127.0.0.1:24980/",
+            "status_available": True,
+            "auth": {"status": "Valid", "email": "a@b.c"},
+        })
+        for lang_argv in ([], ["--lang", "es"]):
+            with self.subTest(argv=lang_argv):
+                with patch("sys.stdout", new=io.StringIO()) as out:
+                    handle_status(lang_argv, prog_base="agy-bridge", status_fn=mock_status)
+                text = out.getvalue()
+                self.assertNotIn("Keychain", text)
+                # The label must actually render the verdict, not fall back to pending.
+                self.assertIn("Valid", text)
+
     def test_handle_dashboard(self):
         mock_open = MagicMock()
         mock_status = MagicMock(return_value={"running": True, "url": "http://127.0.0.1:24980/"})
@@ -127,14 +192,14 @@ class TestCliDaemonHandlers(unittest.TestCase):
 
 class TestCliLifecycleHandlers(unittest.TestCase):
     def test_handle_update_updated(self):
-        mock_update = MagicMock(return_value={"status": "updated", "version": "0.29.2", "restarted_daemon": True})
+        mock_update = MagicMock(return_value={"status": "updated", "version": "0.30.0", "restarted_daemon": True})
         with patch("sys.stdout", new=io.StringIO()) as out:
             ret = handle_update([], prog_base="agy-bridge", subcmd="update", update_fn=mock_update)
             self.assertEqual(ret, 0)
-            self.assertIn("0.29.2", out.getvalue())
+            self.assertIn("0.30.0", out.getvalue())
 
     def test_handle_update_already_up_to_date(self):
-        mock_update = MagicMock(return_value={"status": "already_up_to_date", "version": "0.29.2"})
+        mock_update = MagicMock(return_value={"status": "already_up_to_date", "version": "0.30.0"})
         with patch("sys.stdout", new=io.StringIO()):
             ret = handle_update([], prog_base="agy-bridge", subcmd="update", update_fn=mock_update)
             self.assertEqual(ret, 0)
