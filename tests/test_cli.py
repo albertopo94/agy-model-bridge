@@ -111,17 +111,30 @@ class TestCliDaemonHandlers(unittest.TestCase):
             self.assertEqual(ret, 0)
             mock_open.assert_called_once_with(port=24980, host="127.0.0.1")
 
+    def test_handle_dashboard_not_running_does_not_open_browser(self):
+        mock_open = MagicMock()
+        mock_status = MagicMock(return_value={"running": False, "url": "http://127.0.0.1:24980/"})
+        with patch("sys.stdout", new=io.StringIO()) as out:
+            ret = handle_dashboard([], prog_base="agy-bridge", subcmd="dashboard", open_fn=mock_open, status_fn=mock_status)
+        self.assertEqual(ret, 1)
+        mock_open.assert_not_called()
+        text = out.getvalue()
+        self.assertIn("does not appear to be active", text)
+        self.assertIn("agy-bridge start", text)
+        # Reporting a dead URL and then launching the browser at it is the bug.
+        self.assertNotIn("Opening dashboard", text)
+
 
 class TestCliLifecycleHandlers(unittest.TestCase):
     def test_handle_update_updated(self):
-        mock_update = MagicMock(return_value={"status": "updated", "version": "0.29.1", "restarted_daemon": True})
+        mock_update = MagicMock(return_value={"status": "updated", "version": "0.29.2", "restarted_daemon": True})
         with patch("sys.stdout", new=io.StringIO()) as out:
             ret = handle_update([], prog_base="agy-bridge", subcmd="update", update_fn=mock_update)
             self.assertEqual(ret, 0)
-            self.assertIn("0.29.1", out.getvalue())
+            self.assertIn("0.29.2", out.getvalue())
 
     def test_handle_update_already_up_to_date(self):
-        mock_update = MagicMock(return_value={"status": "already_up_to_date", "version": "0.29.1"})
+        mock_update = MagicMock(return_value={"status": "already_up_to_date", "version": "0.29.2"})
         with patch("sys.stdout", new=io.StringIO()):
             ret = handle_update([], prog_base="agy-bridge", subcmd="update", update_fn=mock_update)
             self.assertEqual(ret, 0)
