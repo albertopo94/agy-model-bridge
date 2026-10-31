@@ -5,65 +5,121 @@ Zero external dependencies: pure standard library HTML/CSS/JS template.
 
 from typing import Any
 import html
+import re
 import time
 
 from bridge import __version__
 
 
-_models_cache: dict[str, tuple[float, int]] = {}
+_models_cache: dict[str, tuple[float, int, str]] = {}
+
+# How long a probe verdict stays authoritative.
+VERDICT_TTL_SECONDS = 60.0
+# After a failed probe, retry sooner so a refreshed credential shows up quickly.
+VERDICT_RETRY_SECONDS = 15.0
+
+_REJECTED_MESSAGE = "Credential rejected by Google - re-authenticate in Antigravity"
+_UNVERIFIED_MESSAGE = "Google did not confirm the credential (network or upstream error)"
+_REFRESH_MESSAGE = "Open Antigravity to refresh"
+
+
+def _read_cache_entry(project: str, now: float) -> tuple[bool, int, str | None]:
+    """Returns (is_fresh, cached_count, cached_verdict) for a project."""
+    entry = _models_cache.get(project)
+    if entry is None:
+        return False, 0, None
+    cached_ts = entry[0]
+    cached_count = entry[1]
+    cached_verdict = entry[2] if len(entry) > 2 else None
+    return (now - cached_ts) < VERDICT_TTL_SECONDS, cached_count, cached_verdict
+
+
+def _local_credential_state(token_provider: Any) -> tuple[str, str | None]:
+    """Checks only what the local credential can prove: presence and its own expiry.
+
+    A readable Keychain entry is a candidate, never proof of validity; upstream
+    decides that. Returns ("Candidate"|"Expired"|"Missing", email).
+    """
+    if token_provider is None or not hasattr(token_provider, "get_token"):
+        return "Missing", None
+    try:
+        token_provider.get_token()
+    except Exception as exc:
+        state = "Expired" if "expired" in str(exc).lower() else "Missing"
+        return state, None
+
+    raw_account = getattr(token_provider, "account", "antigravity")
+    email = raw_account if isinstance(raw_account, str) else "antigravity"
+
+    expiry_attr = getattr(token_provider, "expiry", None)
+    try:
+        cached_expiry = expiry_attr() if callable(expiry_attr) else (expiry_attr or 0.0)
+    except Exception:
+        cached_expiry = 0.0
+    if cached_expiry and float(cached_expiry) < time.time():
+        return "Expired", email
+    return "Candidate", email
+
+
+def _classify_probe_failure(exc: Exception) -> str:
+    """Maps a probe failure to a verdict. Anything unproven is "Unknown", never "Valid"."""
+    from bridge.errors import AuthenticationError, ForbiddenError
+
+    if isinstance(exc, (AuthenticationError, ForbiddenError)):
+        return "Rejected"
+    text = str(exc).lower()
+    if re.search(r"(?<![\d:])40[13](?![\d])", text) or "unauthorized" in text or "forbidden" in text:
+        return "Rejected"
+    return "Unknown"
+
+
+def _auth_payload(status: str, email: str | None, message: str) -> dict[str, Any]:
+    return {"status": status, "email": email, "message": message}
 
 
 def get_status_data(client: Any, project: str, host: str, port: int) -> dict[str, Any]:
-    """Inspects token provider and model catalog to return live gateway status data."""
-    auth_status: dict[str, Any] = {
-        "status": "Missing",
-        "email": None,
-        "message": "Open Antigravity to refresh",
-    }
+    """Builds live gateway status, verifying the credential against upstream.
 
-    token_provider = getattr(client, "token_provider", None)
-    if token_provider is not None and hasattr(token_provider, "get_token"):
-        try:
-            token_provider.get_token()
-            raw_account = getattr(token_provider, "account", "antigravity")
-            email_str = raw_account if isinstance(raw_account, str) else "antigravity"
-            auth_status = {
-                "status": "Valid",
-                "email": email_str,
-                "message": "Authenticated",
-            }
-            expiry_attr = getattr(token_provider, "expiry", None)
-            cached_expiry = expiry_attr() if callable(expiry_attr) else (expiry_attr or 0.0)
-            if cached_expiry > 0 and cached_expiry < time.time():
-                auth_status["status"] = "Expired"
-                auth_status["message"] = "Open Antigravity to refresh"
-        except Exception as exc:
-            err_text = str(exc).lower()
-            if "expired" in err_text:
-                status = "Expired"
-            else:
-                status = "Missing"
-            auth_status = {
-                "status": status,
-                "email": None,
-                "message": "Open Antigravity to refresh",
-            }
-
+    The model catalog request doubles as the credential probe, so verifying costs
+    no extra round trip; its outcome is what licenses a "Valid" badge.
+    """
     now = time.time()
-    cached_entry = _models_cache.get(project)
-    if cached_entry is not None and (now - cached_entry[0] < 60.0):
-        models_count = cached_entry[1]
-    else:
+    token_provider = getattr(client, "token_provider", None) if client is not None else None
+    fresh, cached_count, cached_verdict = _read_cache_entry(project, now)
+
+    local_state, email = _local_credential_state(token_provider)
+
+    if local_state == "Missing":
+        auth_status = _auth_payload("Missing", None, _REFRESH_MESSAGE)
         models_count = 0
-        if client is not None and hasattr(client, "fetch_available_models") and auth_status["status"] == "Valid":
-            try:
-                models = client.fetch_available_models(project)
-                if isinstance(models, list):
-                    models_count = len(models)
-                    _models_cache[project] = (now, models_count)
-            except Exception:
-                models_count = cached_entry[1] if cached_entry is not None else 0
-                _models_cache[project] = (now - 45.0, models_count)
+    elif local_state == "Expired":
+        # Nothing to send upstream; the stored credential is already known stale.
+        auth_status = _auth_payload("Expired", None, _REFRESH_MESSAGE)
+        models_count = cached_count
+    elif not hasattr(client, "fetch_available_models"):
+        # No probe available means no proof available.
+        auth_status = _auth_payload("Unknown", None, _UNVERIFIED_MESSAGE)
+        models_count = cached_count
+    elif fresh and cached_verdict is not None:
+        auth_status = _auth_payload(
+            cached_verdict,
+            email if cached_verdict == "Valid" else None,
+            "Authenticated" if cached_verdict == "Valid" else _message_for(cached_verdict),
+        )
+        models_count = cached_count
+    else:
+        try:
+            models = client.fetch_available_models(project)
+            models_count = len(models) if isinstance(models, list) else 0
+            _models_cache[project] = (now, models_count, "Valid")
+            auth_status = _auth_payload("Valid", email, "Authenticated")
+        except Exception as exc:
+            verdict = _classify_probe_failure(exc)
+            models_count = cached_count
+            # Store the entry back-dated so a failed verdict is retried after
+            # VERDICT_RETRY_SECONDS instead of the full TTL.
+            _models_cache[project] = (now - (VERDICT_TTL_SECONDS - VERDICT_RETRY_SECONDS), models_count, verdict)
+            auth_status = _auth_payload(verdict, None, _message_for(verdict))
 
     return {
         "service": "agy-model-bridge",
@@ -74,6 +130,14 @@ def get_status_data(client: Any, project: str, host: str, port: int) -> dict[str
         "auth": auth_status,
         "models_count": models_count,
     }
+
+
+def _message_for(verdict: str) -> str:
+    if verdict == "Rejected":
+        return _REJECTED_MESSAGE
+    if verdict == "Expired" or verdict == "Missing":
+        return _REFRESH_MESSAGE
+    return _UNVERIFIED_MESSAGE
 
 
 ANTIGRAVITY_ICON_SVG = (
@@ -587,6 +651,14 @@ def render_dashboard(
     elif status_name == "Expired":
         auth_badge_class = "badge-warning"
         auth_label = "Expirado — Abrí Antigravity para renovar" if is_es else f"Expired — {message}"
+    elif status_name == "Rejected":
+        # Stored locally but refused upstream: the user must re-authenticate,
+        # not just open Antigravity and wait.
+        auth_badge_class = "badge-danger"
+        auth_label = "Rechazada — Volvé a autenticarte en Antigravity" if is_es else "Rejected — Re-authenticate in Antigravity"
+    elif status_name == "Unknown":
+        auth_badge_class = "badge-warning"
+        auth_label = "Sin verificar — Google no confirmó la credencial" if is_es else "Unverified — Google did not confirm the credential"
     else:
         auth_badge_class = "badge-danger"
         auth_label = "Faltante — Abrí Antigravity para renovar" if is_es else f"Missing — {message}"
@@ -1466,6 +1538,8 @@ def render_dashboard(
         auth_valid: "Valid",
         auth_expired: "Expired — Open Antigravity to refresh",
         auth_missing: "Missing — Open Antigravity to refresh",
+        auth_rejected: "Rejected — Re-authenticate in Antigravity",
+        auth_unknown: "Unverified — Google did not confirm the credential",
         api_key_configured: "API Key: Configured",
         api_key_not_required: "API Key: Not required",
         setup_auto: "Automatic configuration",
@@ -1524,6 +1598,8 @@ def render_dashboard(
         auth_valid: "V\u00e1lido",
         auth_expired: "Expirado \u2014 Abr\u00ed Antigravity para renovar",
         auth_missing: "Faltante \u2014 Abr\u00ed Antigravity para renovar",
+        auth_rejected: "Rechazada \u2014 Volv\u00e9 a autenticarte en Antigravity",
+        auth_unknown: "Sin verificar \u2014 Google no confirm\u00f3 la credencial",
         api_key_configured: "API Key: Configurada",
         api_key_not_required: "API Key: No requerida",
         setup_auto: "Configuraci\u00f3n autom\u00e1tica",
@@ -1617,6 +1693,10 @@ def render_dashboard(
             label = email ? (validText + " (" + email + ")") : validText;
           }} else if (st === "Expired") {{
             label = dict.auth_expired || "Expired — Open Antigravity to refresh";
+          }} else if (st === "Rejected") {{
+            label = dict.auth_rejected || "Rejected — Re-authenticate in Antigravity";
+          }} else if (st === "Unknown") {{
+            label = dict.auth_unknown || "Unverified — Google did not confirm the credential";
           }} else {{
             label = dict.auth_missing || "Missing — Open Antigravity to refresh";
           }}

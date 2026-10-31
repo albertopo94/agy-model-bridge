@@ -1,6 +1,7 @@
 """Unit tests for the embedded local gateway dashboard and status endpoints."""
 
 import html
+import re
 import unittest
 from bridge import __version__
 from bridge.dashboard import render_dashboard, get_status_data
@@ -34,11 +35,198 @@ class MockClient:
         self.token_provider = token_provider or MockTokenProvider()
         self.models = models if models is not None else ["gemini-2.5-pro", "gemini-2.5-flash"]
         self.fail_models = fail_models
+        self.probe_calls = 0
 
     def fetch_available_models(self, project: str) -> list[str]:
+        self.probe_calls += 1
         if self.fail_models:
             raise self.fail_models
         return self.models
+
+
+class TestDashboardAuthVerification(unittest.TestCase):
+    """The auth badge must reflect what upstream proves, not what the Keychain holds.
+
+    Regression: a token stored in Keychain that Google answers with 401 used to
+    render "Valid / Authenticated", so the dashboard showed green while every
+    request failed.
+    """
+
+    def setUp(self):
+        from bridge.dashboard import _models_cache
+        _models_cache.clear()
+
+    def test_upstream_401_overrides_locally_valid_token(self):
+        from bridge.errors import AuthenticationError
+
+        provider = MockTokenProvider(token="stale-tok", account="user@google.com")
+        client = MockClient(token_provider=provider, fail_models=AuthenticationError("Upstream authentication failure (401)"))
+
+        data = get_status_data(client, "proj-401", "127.0.0.1", 24980)
+
+        self.assertEqual(data["auth"]["status"], "Rejected")
+        self.assertNotEqual(data["auth"]["status"], "Valid")
+        self.assertIsNone(data["auth"]["email"])
+        self.assertIn("Antigravity", data["auth"]["message"])
+        self.assertEqual(data["models_count"], 0)
+
+    def test_upstream_403_overrides_locally_valid_token(self):
+        from bridge.errors import ForbiddenError
+
+        provider = MockTokenProvider(token="tok", account="user@google.com")
+        client = MockClient(token_provider=provider, fail_models=ForbiddenError("Upstream 403: permission denied"))
+
+        data = get_status_data(client, "proj-403", "127.0.0.1", 24980)
+        self.assertEqual(data["auth"]["status"], "Rejected")
+
+    def test_upstream_unreachable_is_unknown_not_valid(self):
+        """A network failure proves nothing, so it must not be reported as Valid."""
+        from bridge.errors import UpstreamTimeoutError
+
+        provider = MockTokenProvider(token="tok", account="user@google.com")
+        client = MockClient(token_provider=provider, fail_models=UpstreamTimeoutError("Upstream timeout"))
+
+        data = get_status_data(client, "proj-timeout", "127.0.0.1", 24980)
+
+        self.assertEqual(data["auth"]["status"], "Unknown")
+        self.assertNotEqual(data["auth"]["status"], "Valid")
+        self.assertIn("not confirm", data["auth"]["message"].lower())
+
+    def test_successful_upstream_probe_is_what_makes_status_valid(self):
+        provider = MockTokenProvider(token="tok", account="user@google.com")
+        client = MockClient(token_provider=provider, models=["m1", "m2"])
+
+        data = get_status_data(client, "proj-ok", "127.0.0.1", 24980)
+
+        self.assertEqual(data["auth"]["status"], "Valid")
+        self.assertEqual(data["auth"]["email"], "user@google.com")
+        self.assertEqual(client.probe_calls, 1)
+        self.assertEqual(data["models_count"], 2)
+
+    def test_locally_expired_token_is_not_probed_and_stays_expired(self):
+        import time
+
+        provider = MockTokenProvider(token="tok", account="user@google.com", expiry=time.time() - 60.0)
+        client = MockClient(token_provider=provider)
+
+        data = get_status_data(client, "proj-exp", "127.0.0.1", 24980)
+
+        self.assertEqual(data["auth"]["status"], "Expired")
+        self.assertEqual(client.probe_calls, 0)
+
+    def test_missing_token_short_circuits_without_upstream_call(self):
+        from bridge.errors import AuthenticationError
+
+        provider = MockTokenProvider(fail_with=AuthenticationError("Failed to retrieve credentials from Keychain"))
+        client = MockClient(token_provider=provider)
+
+        data = get_status_data(client, "proj-missing", "127.0.0.1", 24980)
+
+        self.assertEqual(data["auth"]["status"], "Missing")
+        self.assertEqual(client.probe_calls, 0)
+
+    def test_client_without_token_provider_reports_missing(self):
+        data = get_status_data(None, "proj-noclient", "127.0.0.1", 24980)
+        self.assertEqual(data["auth"]["status"], "Missing")
+
+    def test_token_provider_without_probe_capability_is_unknown(self):
+        """Without an upstream probe there is no proof of validity."""
+
+        class NoProbeClient:
+            def __init__(self):
+                self.token_provider = MockTokenProvider(token="tok", account="user@google.com")
+
+        data = get_status_data(NoProbeClient(), "proj-noprobe", "127.0.0.1", 24980)
+        self.assertEqual(data["auth"]["status"], "Unknown")
+
+    def test_verdict_is_cached_with_the_probe_and_not_repeated(self):
+        provider = MockTokenProvider(token="tok", account="user@google.com")
+        client = MockClient(token_provider=provider, models=["m1"])
+
+        first = get_status_data(client, "proj-cache", "127.0.0.1", 24980)
+        second = get_status_data(client, "proj-cache", "127.0.0.1", 24980)
+
+        self.assertEqual(first["auth"]["status"], "Valid")
+        self.assertEqual(second["auth"]["status"], "Valid")
+        # One probe per TTL window: the verdict never costs an extra round trip.
+        self.assertEqual(client.probe_calls, 1)
+        self.assertEqual(second["models_count"], 1)
+
+    def test_rejected_verdict_is_cached_and_replayed(self):
+        from bridge.errors import AuthenticationError
+
+        provider = MockTokenProvider(token="tok", account="user@google.com")
+        client = MockClient(token_provider=provider, fail_models=AuthenticationError("Upstream authentication failure (401)"))
+
+        get_status_data(client, "proj-cache-401", "127.0.0.1", 24980)
+        second = get_status_data(client, "proj-cache-401", "127.0.0.1", 24980)
+
+        self.assertEqual(second["auth"]["status"], "Rejected")
+        self.assertEqual(client.probe_calls, 1)
+
+    def test_failed_probe_is_retried_sooner_than_a_healthy_one(self):
+        """A failed verdict must recover fast, without hammering upstream on every load."""
+        import time
+        from unittest.mock import patch
+
+        import bridge.dashboard as dash
+
+        from bridge.errors import AuthenticationError
+
+        provider = MockTokenProvider(token="tok", account="user@google.com")
+        client = MockClient(token_provider=provider, fail_models=AuthenticationError("Upstream authentication failure (401)"))
+
+        base = time.time()
+        with patch.object(dash.time, "time", return_value=base):
+            get_status_data(client, "proj-retry", "127.0.0.1", 24980)
+            self.assertEqual(client.probe_calls, 1)
+
+            # Within the retry window: the verdict is replayed, no new request.
+            with patch.object(dash.time, "time", return_value=base + 5.0):
+                get_status_data(client, "proj-retry", "127.0.0.1", 24980)
+            self.assertEqual(client.probe_calls, 1)
+
+            # Past the short retry window: probe again so a refreshed credential shows up.
+            with patch.object(dash.time, "time", return_value=base + 20.0):
+                data = get_status_data(client, "proj-retry", "127.0.0.1", 24980)
+        self.assertEqual(client.probe_calls, 2)
+        self.assertEqual(data["auth"]["status"], "Rejected")
+
+    def test_healthy_probe_is_not_retried_within_a_short_window(self):
+        import time
+        from unittest.mock import patch
+
+        import bridge.dashboard as dash
+
+        provider = MockTokenProvider(token="tok", account="user@google.com")
+        client = MockClient(token_provider=provider, models=["m1", "m2"])
+
+        base = time.time()
+        with patch.object(dash.time, "time", return_value=base):
+            get_status_data(client, "proj-healthy", "127.0.0.1", 24980)
+        with patch.object(dash.time, "time", return_value=base + 20.0):
+            get_status_data(client, "proj-healthy", "127.0.0.1", 24980)
+
+        # A healthy verdict holds for the full TTL; recovery speed is only for failures.
+        self.assertEqual(client.probe_calls, 1)
+
+    def test_verdict_cache_expires_and_reprobes(self):
+        import time
+        from unittest.mock import patch
+
+        provider = MockTokenProvider(token="tok", account="user@google.com")
+        client = MockClient(token_provider=provider, models=["m1"])
+        get_status_data(client, "proj-ttl", "127.0.0.1", 24980)
+        self.assertEqual(client.probe_calls, 1)
+
+        # Advance the clock past the TTL instead of reaching into cache internals.
+        import bridge.dashboard as dash
+        with patch.object(dash.time, "time", return_value=time.time() + 120.0):
+            data = get_status_data(client, "proj-ttl", "127.0.0.1", 24980)
+
+        self.assertEqual(data["auth"]["status"], "Valid")
+        self.assertEqual(client.probe_calls, 2)
+        self.assertEqual(data["models_count"], 1)
 
 
 class TestDashboardRendering(unittest.TestCase):
@@ -142,6 +330,56 @@ class TestDashboardRendering(unittest.TestCase):
 
                 self.assertIn(status, html)
                 self.assertIn("Open Antigravity to refresh", html)
+
+    # The auth badge must be asserted on the <span> itself: the class and label of
+    # a substring search can be satisfied by unrelated markup or by the I18N
+    # dictionary, which is always present in the page.
+    BADGE_SPAN = r'<span class="badge (badge-[a-z]+)" data-i18n="auth" data-status="{status}"[^>]*>([^<]*)</span>'
+
+    def _auth_badge(self, status: str, lang: str) -> tuple[str, str]:
+        html_out = render_dashboard(
+            "127.0.0.1", 24980, {"status": status, "email": None, "message": "x"}, models_count=0, lang=lang
+        )
+        match = re.search(self.BADGE_SPAN.format(status=status), html_out)
+        self.assertIsNotNone(match, f"auth badge span not found for {status}/{lang}")
+        return match.group(1), match.group(2)
+
+    def test_rejected_badge_is_danger_and_asks_to_reauthenticate_both_languages(self):
+        for lang, label in (
+            ("en", "Rejected \u2014 Re-authenticate in Antigravity"),
+            ("es", "Rechazada \u2014 Volv\u00e9 a autenticarte en Antigravity"),
+        ):
+            with self.subTest(lang=lang):
+                badge_class, badge_text = self._auth_badge("Rejected", lang)
+                self.assertEqual(badge_class, "badge-danger")
+                self.assertEqual(badge_text, f"\U0001f6e1\ufe0f {label}")
+
+    def test_unknown_badge_is_warning_not_success_both_languages(self):
+        for lang, label in (
+            ("en", "Unverified \u2014 Google did not confirm the credential"),
+            ("es", "Sin verificar \u2014 Google no confirm\u00f3 la credencial"),
+        ):
+            with self.subTest(lang=lang):
+                badge_class, badge_text = self._auth_badge("Unknown", lang)
+                self.assertEqual(badge_class, "badge-warning")
+                self.assertEqual(badge_text, f"\U0001f6e1\ufe0f {label}")
+
+    def test_only_valid_renders_a_success_auth_badge(self):
+        for status, expected in (("Valid", "badge-success"), ("Expired", "badge-warning"), ("Missing", "badge-danger")):
+            with self.subTest(status=status):
+                badge_class, _ = self._auth_badge(status, "en")
+                self.assertEqual(badge_class, expected)
+
+    def test_js_language_dictionary_covers_every_auth_state(self):
+        html = render_dashboard("127.0.0.1", 24980, {"status": "Valid", "email": "a@b.c", "message": ""}, models_count=1)
+        i18n_start = html.find("var I18N = {")
+        block = html[i18n_start:html.find("function setLanguage", i18n_start)]
+        for key in ("auth_valid", "auth_expired", "auth_missing", "auth_rejected", "auth_unknown"):
+            with self.subTest(key=key):
+                self.assertEqual(block.count(f"{key}:"), 2, f"{key} must exist in both en and es blocks")
+        # The switcher must branch on the new states instead of falling through to Missing.
+        self.assertIn('st === "Rejected"', html)
+        self.assertIn('st === "Unknown"', html)
 
     def test_interactive_setup_cards(self):
         auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}

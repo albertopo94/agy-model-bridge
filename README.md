@@ -8,7 +8,7 @@ Zero-dependency, pure Python 3 local AI gateway that bridges the Google Cloud Co
 
 - **Zero External Dependencies**: Built entirely using the Python 3 standard library (`http.server`, `urllib.request`, `subprocess`, `json`, `base64`, `threading`, `time`). No `pip install`, no virtual environment, no Node.js required.
 - **Multi-Protocol Gateway**:
-  - `GET /` — Self-contained dark-mode dashboard (Geist/Vercel styling) with live Keychain auth badges, model count, real-time Antigravity & Cursor quota cards, and one-click copyable multi-provider setup cards.
+  - `GET /` — Self-contained dark-mode dashboard (Geist/Vercel styling) with upstream-verified Google auth badges, model count, real-time Antigravity & Cursor quota cards, and one-click copyable multi-provider setup cards.
   - `GET /v1/models` — Dynamic model catalog discovered directly from upstream Cloud Code Assist and Cursor CLI (`agent models`) with Codex serde compatibility (`data`, `models`, `slug`, `display_name`).
   - `POST /v1/chat/completions` — OpenAI Chat Completions API with full streaming (SSE `text/event-stream`) and non-streaming support (for FreeLLMAPI, Hermes Agent, OpenCode, OpenClaw, Cursor, Pi, Gentle Shell, Aider). Routes models automatically to Antigravity or Cursor.
   - `POST /v1/responses` — OpenAI Responses API shim for Codex CLI (`wire_api = "responses"`).
@@ -43,10 +43,17 @@ The first time the bridge accesses the Keychain item stored by Antigravity, macO
 Click **"Always Allow"** (or enter your Mac login password) so the bridge can read the active Antigravity session without prompting on every restart.
 
 ### 2. Session & Token Freshness
-The bridge reads the active OAuth token managed by Antigravity. If you have not opened Antigravity in several days and the access token expires, the dashboard header badge will display:
-> `⚠️ Expired — Open Antigravity to refresh`
+The bridge reads the active OAuth token managed by Antigravity. The dashboard and `agy-bridge status` report what Google actually accepts, not merely what is stored on disk: every status check reuses the model-catalog request as a credential probe, so an accurate verdict costs no extra round trip.
 
-Simply launch the Antigravity application so it can renew its credentials in Keychain; the bridge will automatically pick up the refreshed token on the next request.
+| Badge (color) | What it proves | What to do |
+|---|---|---|
+| `Valid (account)` (green) | Google accepted the credential on the last probe | Nothing. |
+| `Expired — Open Antigravity to refresh` (amber) | The stored token carries a past expiry time, so it is not even sent | Launch Antigravity so it renews the credential in Keychain. |
+| `Rejected — Re-authenticate in Antigravity` (red) | A token was present and sent, but Google refused it (401/403) | Sign in again in Antigravity. Opening it and waiting is not enough. |
+| `Unverified — Google did not confirm the credential` (amber) | Nothing was proven: the probe failed (connectivity, or an upstream error that was not an auth refusal) | Check connectivity and retry. This badge says nothing about the credential in either direction. |
+| `Missing — Open Antigravity to refresh` (red) | No credential found in Keychain | Launch and sign in to Antigravity. |
+
+A verdict is cached for 60 seconds; a failed one is retried after 15 seconds so a refreshed credential shows up quickly.
 
 ### 3. Local API Key Authentication
 The bridge protects all `/v1/*` endpoints with a persistent random token stored in `~/.agy-bridge/api_key` (permissions `0600`).
@@ -429,7 +436,7 @@ Execute the complete test suite:
 python3 -m unittest discover -s tests -v
 ```
 
-All 1055 tests run in ~3-4 seconds locally with zero external dependencies and zero network access.
+All 1072 tests run in ~3-4 seconds locally with zero external dependencies and zero network access.
 
 ### End-to-End Smoke Test
 
