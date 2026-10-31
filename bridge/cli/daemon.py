@@ -169,6 +169,9 @@ def handle_dashboard(
     if not st.get("running"):
         print(t("dashboard_not_active", url=st["url"]))
         print(t("status_start_hint", prog_base=prog_base))
+        # The dashboard is served by the daemon itself, so opening a browser on a
+        # dead port only yields a browser error page.
+        return 1
     print(t("dashboard_opening", url=st["url"]))
     do_open(port=args.port, host=args.host)
     return 0
