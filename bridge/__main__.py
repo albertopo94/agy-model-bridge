@@ -82,6 +82,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"agy-bridge v{__version__}")
         return 0
 
+    # Root help must list the real subcommands, not just the foreground-server
+    # flags. `-help` is a common single-dash typo; treat it like --help.
+    if argv and argv[0] in ("-h", "--help", "-help"):
+        _print_root_help(prog_base)
+        return 0
+
     if argv and argv[0] in ("update", "upgrade"):
         return handle_update(argv[1:], prog_base, subcmd=argv[0], update_fn=update_installation)
 
@@ -196,6 +202,42 @@ def main(argv: list[str] | None = None) -> int:
 
     # Fallback to daemon server runner
     return handle_server(argv, prog_base, run_server_fn=run_server)
+
+
+
+
+
+def _print_root_help(prog_base: str) -> None:
+    """Prints a top-level help listing the available subcommands."""
+    from bridge.i18n import t
+
+    title = t("cli_description")
+    print(f"usage: {prog_base} <command> [options]\n")
+    print(title)
+    print("\nCommands:")
+    cmds = [
+        ("start", t("cli_cmd_start")),
+        ("stop", t("cli_cmd_stop")),
+        ("restart", t("cli_cmd_restart")),
+        ("status", t("cli_cmd_status")),
+        ("dashboard", t("cli_cmd_dashboard")),
+        ("setup-claude", t("cli_cmd_setup_claude")),
+        ("setup-codex", t("cli_cmd_setup_codex")),
+        ("setup-hermes", t("cli_cmd_setup_hermes")),
+        ("setup-opencode", t("cli_cmd_setup_opencode")),
+        ("setup-openclaw", t("cli_cmd_setup_openclaw")),
+        ("setup-cursor", t("cli_cmd_setup_cursor")),
+        ("setup-pi", t("cli_cmd_setup_pi")),
+        ("setup-gentle-shell", t("cli_cmd_setup_gentle")),
+        ("update", t("cli_cmd_update")),
+        ("uninstall", t("cli_cmd_uninstall")),
+        ("--version", "Show version"),
+        ("--help", "Show this help"),
+    ]
+    width = max(len(c) for c, _ in cmds)
+    for cmd, desc in cmds:
+        print(f"  {cmd.ljust(width)}  {desc}")
+    print("\nRun `{0} <command> --help` for command details.".format(prog_base))
 
 
 if __name__ == "__main__":

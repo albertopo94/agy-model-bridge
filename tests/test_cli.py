@@ -19,6 +19,7 @@ from bridge.cli.lifecycle import (
     handle_update,
 )
 from bridge.cli.server import handle_server
+from bridge.__main__ import main
 from bridge.i18n import t
 from bridge.setup.base import ConfigPath
 from bridge.cli.setup import (
@@ -418,3 +419,50 @@ class TestCliServerHandler(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestMainRootHelp(unittest.TestCase):
+    """`agy-bridge --help` (and -h / -help) must list the real subcommands, not
+    only the foreground-server flags. A fresh user runs start/setup-*/status,
+    which the server-only help hides entirely."""
+
+    def _capture(self, arg):
+        from io import StringIO
+        from contextlib import redirect_stdout, redirect_stderr
+        buf = StringIO()
+        code = None
+        try:
+            with redirect_stdout(buf), redirect_stderr(buf):
+                code = main([arg])
+        except SystemExit as e:
+            code = e.code if code is None else code
+        return code, buf.getvalue()
+
+    def test_double_dash_help_lists_subcommands(self):
+        code, out = self._capture("--help")
+        self.assertIn("start", out)
+        self.assertIn("stop", out)
+        self.assertIn("status", out)
+        self.assertIn("setup-claude", out)
+        self.assertIn("setup-opencode", out)
+        self.assertIn("update", out)
+
+    def test_single_dash_h_lists_subcommands(self):
+        code, out = self._capture("-h")
+        self.assertIn("start", out)
+        self.assertIn("setup-claude", out)
+
+    def test_short_help_flag_lists_subcommands(self):
+        # People type `-help` (single dash, full word); it must behave like --help.
+        code, out = self._capture("-help")
+        self.assertIn("start", out)
+        self.assertIn("update", out)
+
+    def test_version_still_works(self):
+        from io import StringIO
+        from contextlib import redirect_stdout
+        buf = StringIO()
+        with redirect_stdout(buf):
+            code = main(["--version"])
+        self.assertEqual(code, 0)
+        self.assertIn("v0.32.0", buf.getvalue())

@@ -856,10 +856,17 @@ class TestCLIParsing(unittest.TestCase):
             ["--help"],
         ):
             with self.subTest(subcmd=subcmd):
-                with self.assertRaises(SystemExit) as cm:
+                if subcmd == ["--help"]:
+                    # Root --help is handled by main() directly: it prints the
+                    # subcommand list and returns 0 (no argparse SystemExit).
                     with unittest.mock.patch("sys.stdout"):
-                        main(subcmd)
-                self.assertEqual(cm.exception.code, 0)
+                        code = main(subcmd)
+                    self.assertEqual(code, 0)
+                else:
+                    with self.assertRaises(SystemExit) as cm:
+                        with unittest.mock.patch("sys.stdout"):
+                            main(subcmd)
+                    self.assertEqual(cm.exception.code, 0)
 
 
 class TestCLIRestore(unittest.TestCase):
