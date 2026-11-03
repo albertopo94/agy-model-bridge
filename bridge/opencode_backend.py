@@ -402,3 +402,14 @@ class OpencodeBackend:
             raise BridgeError(
                 f"OpenCode CLI failed for model '{model}' (exit {proc.returncode}): {stderr_text[:300]}"
             )
+
+
+def is_antigravity_model(model: str) -> bool:
+    """Returns True when a model id belongs to the Antigravity upstream
+    (i.e. it is not a Cursor or OpenCode model)."""
+    if not model or not isinstance(model, str):
+        return False
+    m = model.strip().lower()
+    if m.startswith(("cursor/", "cursor-", "opencode/")):
+        return False
+    return bool(m)

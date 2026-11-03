@@ -622,6 +622,8 @@ def render_dashboard(
     models_count: int,
     lang: str = "en",
     api_key: str | None = None,
+    antigravity_available: bool = True,
+    antigravity_error: str = "",
 ) -> str:
     """Renders the self-contained dark-mode HTML dashboard for the local AI gateway."""
     is_es = bool(lang and str(lang).strip().lower().startswith("es"))
@@ -671,6 +673,13 @@ def render_dashboard(
         auth_label = "Faltante — Abrí Antigravity para renovar" if is_es else f"Missing — {message}"
 
     models_label = f"{models_count} Modelos Descubiertos" if is_es else f"{models_count} Models Discovered"
+
+    if antigravity_available:
+        agy_badge_class = "badge-success"
+        agy_label = "AGY disponible" if is_es else "AGY available"
+    else:
+        agy_badge_class = "badge-danger"
+        agy_label = "AGY no disponible" if is_es else "AGY unavailable"
     setup_auto_title = "Configuración automática" if is_es else "Automatic configuration"
     setup_manual_title = "Conexión manual" if is_es else "Manual connection"
     setup_restore_title = "Restaurar configuración" if is_es else "Restore configuration"
@@ -1464,6 +1473,7 @@ def render_dashboard(
         <span class="badge {auth_badge_class}" data-i18n="auth" data-status="{html.escape(status_name)}" data-email="{html.escape(email or '')}">🛡️ {html.escape(auth_label)}</span>
         <span class="badge {api_key_badge_class}" data-i18n="api_key_badge" data-configured="{str(has_api_key).lower()}">🔑 {html.escape(api_key_label)}</span>
         <span class="badge badge-models" data-i18n="models" data-count="{models_count}">⚡ {models_label}</span>
+        <span class="badge {agy_badge_class}" data-i18n="agy_available">⚛️ {html.escape(agy_label)}</span>
       </div>
     </header>
 

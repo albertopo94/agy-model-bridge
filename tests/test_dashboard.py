@@ -1117,3 +1117,20 @@ class TestOpencodeQuotaTab(unittest.TestCase):
         html = self._render()
         for key in ("opencode_tab_title", "opencode_status_available", "opencode_status_missing", "opencode_no_quota_note"):
             self.assertIn(key, html)
+
+
+class TestAgyAvailabilityBadge(unittest.TestCase):
+    """The dashboard reports Antigravity availability so a degraded gateway is
+    visible even when Cursor and OpenCode keep working."""
+
+    def test_badge_green_when_available(self):
+        auth = {"status": "Valid", "email": "d@e.com", "message": "ok"}
+        html = render_dashboard("127.0.0.1", 24980, auth, 10, antigravity_available=True)
+        self.assertIn("AGY available", html)
+        self.assertNotIn("AGY unavailable", html)
+
+    def test_badge_red_when_unavailable(self):
+        auth = {"status": "Expired", "message": "gone"}
+        html = render_dashboard("127.0.0.1", 24980, auth, 10, antigravity_available=False)
+        self.assertIn("AGY unavailable", html)
+        self.assertNotIn("AGY available", html)

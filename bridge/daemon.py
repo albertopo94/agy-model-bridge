@@ -18,8 +18,6 @@ import urllib.request
 import uuid
 import webbrowser
 
-from bridge.auth import check_token_health
-from bridge.i18n import t
 
 try:
     import fcntl
@@ -362,28 +360,6 @@ def start_daemon(
             else:
                 remove_pid(pid_file=target_pid_file)
                 remove_daemon_info(info_file=target_info_file)
-
-        # Preflight the Antigravity credential before spawning anything. An expired
-        # token only fails later inside project discovery, which reaches the user as
-        # a Python traceback quoted back from the daemon log. Nothing here touches the
-        # network: the Keychain payload already carries the expiry timestamp.
-        # An explicit --project skips discovery, so the daemon can still start.
-        # This runs after the already-running checks so a live service is still
-        # reported as running rather than as an auth failure.
-        if not project:
-            health = check_token_health()
-            if health.get("status") in ("expired", "missing"):
-                message = t(
-                    "daemon_auth_expired" if health.get("status") == "expired" else "daemon_auth_missing"
-                )
-                return {
-                    "status": "error",
-                    "reason": "auth_unavailable",
-                    "error": message,
-                    "port": port,
-                    "url": dashboard_url,
-                    "opened_browser": False,
-                }
 
         target_log_file.parent.mkdir(parents=True, exist_ok=True)
 

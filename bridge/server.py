@@ -64,6 +64,7 @@ from bridge.opencode_backend import (
     OpencodeBackend,
     is_opencode_model,
     resolve_opencode_model,
+    is_antigravity_model,
 )
 
 SAFE_REQUEST_ID_REGEX = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
@@ -86,6 +87,8 @@ class ServerContext:
 
     client: CloudCodeClient
     project: str
+    antigravity_available: bool = True
+    antigravity_error: str = ""
     api_key: str | None = None
     concurrency_semaphore: threading.Semaphore | None = None
     max_concurrency: int = 16
@@ -121,6 +124,7 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
     context: ServerContext | None = None
     client: CloudCodeClient = None  # type: ignore[assignment]
     project: str = ""
+    antigravity_available: bool = True
     api_key: str | None = None
     quota_provider: QuotaProvider | None = None
     cursor_quota_provider: CursorQuotaProvider | None = None
@@ -469,6 +473,8 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                 models_count=status_data["models_count"],
                 lang=client_lang,
                 api_key="configured" if self._get_expected_api_key() else None,
+                antigravity_available=self.antigravity_available,
+                antigravity_error=getattr(self, "antigravity_error", ""),
             )
             encoded = html_content.encode("utf-8")
             self._ensure_request_id()
@@ -1147,6 +1153,8 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
 
     def _handle_anthropic_messages(self, payload: dict[str, Any]) -> None:
         model = str(payload.get("model") or "")
+        if self._guard_antigravity(model):
+            return
         if is_cursor_model(model):
             self._handle_cursor_messages(payload)
             return
@@ -1214,6 +1222,9 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
             )
 
     def _handle_responses(self, payload: dict[str, Any]) -> None:
+        resp_model = str(payload.get("model") or "")
+        if self._guard_antigravity(resp_model):
+            return
         try:
             stream = bool(payload.get("stream", False))
             req = ResponsesProtocolAdapter.transform_request(payload, self.project)
@@ -1267,6 +1278,18 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                 response_builder=responses_response_builder,
             )
 
+    def _guard_antigravity(self, model: str) -> bool:
+        if self.antigravity_available or not model or not is_antigravity_model(model):
+            return False
+        code, err = build_openai_error_response(
+            503,
+            "Antigravity is not available (Google Cloud credential missing or expired). "
+            "Open Antigravity and sign in to use AGY models. Cursor and OpenCode models keep working.",
+            "antigravity_unavailable",
+        )
+        self._send_json(code, err)
+        return True
+
     def _handle_chat_completion(self, payload: dict[str, Any]) -> None:
         model = str(payload.get("model") or "")
         if is_cursor_model(model):
@@ -1274,6 +1297,8 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
             return
         if is_opencode_model(model):
             self._handle_opencode_chat_completion(payload)
+            return
+        if self._guard_antigravity(model):
             return
 
         try:
@@ -1396,24 +1421,29 @@ def create_server(
         if base_url:
             kwargs["base_url"] = base_url
         client = CloudCodeClient(**kwargs)
+    antigravity_available = True
+    antigravity_error = ""
     if project is None:
         import os
-        project = os.environ.get("GOOGLE_CLOUD_PROJECT") or os.environ.get("ANTIGRAVITY_PROJECT")
+        project = os.environ.get("GOOGLE_CLOUD_PROJECT") or os.environ.get("ANTIGRAVITY_PROJECT") or ""
+    if not project:
+        # Antigravity is one optional upstream. A dead credential must degrade
+        # AGY models, not prevent the gateway from serving Cursor, OpenCode,
+        # and the dashboard.
+        try:
+            discovery = client.load_code_assist()
+            project = discovery.get("project") or ""
+        except Exception as exc:
+            antigravity_available = False
+            antigravity_error = str(exc)
+            project = ""
         if not project:
-            try:
-                discovery = client.load_code_assist()
-            except Exception as exc:
-                raise RuntimeError(
-                    f"Could not discover Google Cloud project ID: {exc}. "
-                    "Ensure Antigravity is running and authenticated, or specify --project."
-                ) from exc
-            discovered = discovery.get("project")
-            if not discovered:
-                raise RuntimeError(
-                    "Could not discover Google Cloud project ID. "
-                    "Ensure Antigravity is running and authenticated, or specify --project."
+            if antigravity_available:
+                antigravity_available = False
+                antigravity_error = (
+                    "Google Cloud project ID could not be discovered. "
+                    "Ensure Antigravity is running and authenticated."
                 )
-            project = discovered
 
     if quota_provider is None:
         quota_provider = AgyCliQuotaProvider()
@@ -1429,6 +1459,8 @@ def create_server(
     context = ServerContext(
         client=client,
         project=project,
+        antigravity_available=antigravity_available,
+        antigravity_error=antigravity_error,
         api_key=api_key,
         concurrency_semaphore=concurrency_semaphore,
         max_concurrency=max_concurrency,
@@ -1447,6 +1479,7 @@ def create_server(
     ConfiguredHandler.context = context
     ConfiguredHandler.client = client
     ConfiguredHandler.project = project
+    ConfiguredHandler.antigravity_available = antigravity_available
     ConfiguredHandler.api_key = api_key
     ConfiguredHandler.concurrency_semaphore = concurrency_semaphore
     ConfiguredHandler.max_retries = max_retries

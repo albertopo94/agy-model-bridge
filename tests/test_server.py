@@ -615,33 +615,51 @@ class TestServerEndpoints(unittest.TestCase):
         self.assertEqual(last_chunk["usage"]["completion_tokens"], 7)
 
     @patch.dict("os.environ", {}, clear=True)
-    def test_create_server_raises_runtime_error_when_discovery_fails(self):
+    def test_create_server_degrades_gracefully_when_discovery_fails(self):
         failing_client = MagicMock()
         failing_client.load_code_assist.side_effect = Exception("network unavailable")
-        with self.assertRaises(RuntimeError) as ctx:
-            create_server(
-                host="127.0.0.1",
-                port=0,
-                client=failing_client,
-                project=None,
-            )
-        self.assertIn("Could not discover Google Cloud project ID", str(ctx.exception))
-        self.assertIn("network unavailable", str(ctx.exception))
-        self.assertIn("Ensure Antigravity is running and authenticated, or specify --project.", str(ctx.exception))
+        server = create_server(
+            host="127.0.0.1",
+            port=0,
+            client=failing_client,
+            project=None,
+            no_auth=True,
+            quota_provider=MockQuotaProvider(),
+            cursor_quota_provider=MockCursorQuotaProvider(),
+            cursor_backend=MockCursorBackend(),
+            opencode_backend=MockOpencodeBackend(),
+        )
+        try:
+            # The gateway still comes up; Antigravity is flagged unavailable.
+            self.assertIsNotNone(server.server_address)
+            ctx = getattr(server, "context", None)
+            self.assertIsNotNone(ctx)
+            self.assertFalse(getattr(ctx, "antigravity_available", True))
+            self.assertIn("network unavailable", getattr(ctx, "antigravity_error", ""))
+        finally:
+            server.server_close()
 
     @patch.dict("os.environ", {}, clear=True)
-    def test_create_server_raises_runtime_error_when_project_empty(self):
+    def test_create_server_degrades_when_project_discovery_empty(self):
         empty_client = MagicMock()
         empty_client.load_code_assist.return_value = {"project": ""}
-        with self.assertRaises(RuntimeError) as ctx:
-            create_server(
-                host="127.0.0.1",
-                port=0,
-                client=empty_client,
-                project=None,
-            )
-        self.assertIn("Could not discover Google Cloud project ID", str(ctx.exception))
-        self.assertIn("Ensure Antigravity is running and authenticated, or specify --project.", str(ctx.exception))
+        server = create_server(
+            host="127.0.0.1",
+            port=0,
+            client=empty_client,
+            project=None,
+            no_auth=True,
+            quota_provider=MockQuotaProvider(),
+            cursor_quota_provider=MockCursorQuotaProvider(),
+            cursor_backend=MockCursorBackend(),
+            opencode_backend=MockOpencodeBackend(),
+        )
+        try:
+            self.assertIsNotNone(server.server_address)
+            ctx = getattr(server, "context", None)
+            self.assertFalse(getattr(ctx, "antigravity_available", True))
+        finally:
+            server.server_close()
 
     @patch.dict("os.environ", {}, clear=True)
     def test_create_server_discovers_project_successfully(self):
@@ -2926,3 +2944,98 @@ if __name__ == "__main__":
     unittest.main()
 
 
+
+
+class _NoGoogleClient(MockCloudCodeClient):
+    """A Cloud Code client whose upstream discovery fails, as with an expired credential."""
+
+    def load_code_assist(self):
+        raise AuthenticationError("Upstream authentication failure (401)")
+
+
+class TestStartWithoutAntigravity(unittest.TestCase):
+    """Antigravity is one optional upstream: its absence must not prevent the
+    gateway from serving the dashboard, Cursor models, or OpenCode models."""
+
+    def _server(self, **kw):
+        return create_server(
+            host="127.0.0.1",
+            port=0,
+            client=_NoGoogleClient(),
+            project=None,
+            no_auth=True,
+            quota_provider=MockQuotaProvider(),
+            cursor_quota_provider=MockCursorQuotaProvider(),
+            cursor_backend=MockCursorBackend(),
+            opencode_backend=MockOpencodeBackend(),
+            **kw,
+        )
+
+    def tearDown(self):
+        for attr in ("_srv",):
+            srv = getattr(self, attr, None)
+            if srv is not None:
+                srv.server_close()
+
+    def test_create_server_does_not_raise_without_google(self) -> None:
+        self._srv = self._server()
+        self.assertIsNotNone(self._srv.server_address)
+
+    def test_status_reports_antigravity_degraded(self) -> None:
+        self._srv = self._server()
+        handler_ctx = getattr(self._srv, "context", None)
+        self.assertIsNotNone(handler_ctx)
+        self.assertFalse(getattr(handler_ctx, "antigravity_available", True))
+
+    def test_catalog_and_cursor_still_serve_without_google(self) -> None:
+        self._srv = self._server()
+        port = self._srv.server_address[1]
+        self._srv_thread = threading.Thread(target=self._srv.serve_forever, daemon=True)
+        self._srv_thread.start()
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/v1/models", timeout=5.0) as resp:
+                ids = [m["id"] for m in json.loads(resp.read().decode("utf-8"))["data"]]
+            self.assertIn("cursor/gpt-5.3-codex", ids)
+            self.assertIn("opencode/pulse-alpha-free", ids)
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{port}/v1/chat/completions",
+                data=json.dumps({
+                    "model": "cursor/gpt-5.3-codex",
+                    "messages": [{"role": "user", "content": "hi"}],
+                }).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=5.0) as resp:
+                self.assertEqual(resp.status, 200)
+        finally:
+            self._srv.shutdown()
+            self._srv_thread.join(timeout=2.0)
+
+    def test_agy_model_request_reports_unavailable_not_traceback(self) -> None:
+        self._srv = self._server()
+        port = self._srv.server_address[1]
+        self._srv_thread = threading.Thread(target=self._srv.serve_forever, daemon=True)
+        self._srv_thread.start()
+        try:
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{port}/v1/chat/completions",
+                data=json.dumps({
+                    "model": "gemini-2.5-pro",
+                    "messages": [{"role": "user", "content": "hi"}],
+                }).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=5.0) as resp:
+                    code = resp.status
+            except urllib.error.HTTPError as e:
+                code = e.code
+                body = json.loads(e.read().decode("utf-8"))
+                msg = str(body).lower()
+                self.assertIn("antigravity", msg)
+            self.assertEqual(code, 503)
+        finally:
+            self._srv.shutdown()
+            self._srv_thread.join(timeout=2.0)
