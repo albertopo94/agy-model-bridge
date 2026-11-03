@@ -622,8 +622,6 @@ def render_dashboard(
     models_count: int,
     lang: str = "en",
     api_key: str | None = None,
-    antigravity_available: bool = True,
-    antigravity_error: str = "",
 ) -> str:
     """Renders the self-contained dark-mode HTML dashboard for the local AI gateway."""
     is_es = bool(lang and str(lang).strip().lower().startswith("es"))
@@ -674,11 +672,11 @@ def render_dashboard(
 
     models_label = f"{models_count} Modelos Descubiertos" if is_es else f"{models_count} Models Discovered"
 
-    if antigravity_available:
-        agy_badge_class = "badge-success"
-        agy_label = "AGY disponible" if is_es else "AGY available"
-    else:
-        agy_badge_class = "badge-danger"
+    # AGY availability mirrors the live auth verdict (the same probe that
+    # licenses the auth badge), so it cannot go stale between boots.
+    agy_badge_class = "badge-success" if status_name == "Valid" else "badge-danger"
+    agy_label = "AGY disponible" if is_es else "AGY available"
+    if status_name != "Valid":
         agy_label = "AGY no disponible" if is_es else "AGY unavailable"
     setup_auto_title = "Configuración automática" if is_es else "Automatic configuration"
     setup_manual_title = "Conexión manual" if is_es else "Manual connection"

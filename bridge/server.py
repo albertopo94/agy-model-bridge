@@ -473,8 +473,6 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                 models_count=status_data["models_count"],
                 lang=client_lang,
                 api_key="configured" if self._get_expected_api_key() else None,
-                antigravity_available=self.antigravity_available,
-                antigravity_error=getattr(self, "antigravity_error", ""),
             )
             encoded = html_content.encode("utf-8")
             self._ensure_request_id()

@@ -1120,17 +1120,20 @@ class TestOpencodeQuotaTab(unittest.TestCase):
 
 
 class TestAgyAvailabilityBadge(unittest.TestCase):
-    """The dashboard reports Antigravity availability so a degraded gateway is
-    visible even when Cursor and OpenCode keep working."""
+    """The AGY badge must mirror the live auth verdict, so it reflects a
+    refreshed credential without a restart (the routing guard and the badge
+    are independent)."""
 
-    def test_badge_green_when_available(self):
+    def test_badge_green_when_auth_valid(self):
         auth = {"status": "Valid", "email": "d@e.com", "message": "ok"}
-        html = render_dashboard("127.0.0.1", 24980, auth, 10, antigravity_available=True)
+        html = render_dashboard("127.0.0.1", 24980, auth, 10)
         self.assertIn("AGY available", html)
         self.assertNotIn("AGY unavailable", html)
 
-    def test_badge_red_when_unavailable(self):
-        auth = {"status": "Expired", "message": "gone"}
-        html = render_dashboard("127.0.0.1", 24980, auth, 10, antigravity_available=False)
-        self.assertIn("AGY unavailable", html)
-        self.assertNotIn("AGY available", html)
+    def test_badge_red_when_auth_not_valid(self):
+        for stale in ("Expired", "Missing", "Rejected", "Unknown"):
+            with self.subTest(stale=stale):
+                auth = {"status": stale, "message": "gone"}
+                html = render_dashboard("127.0.0.1", 24980, auth, 10)
+                self.assertIn("AGY unavailable", html)
+                self.assertNotIn("AGY available", html)
