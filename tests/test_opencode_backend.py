@@ -74,6 +74,10 @@ class TestDisplayNames(unittest.TestCase):
             format_opencode_model_display_name("opencode/nemotron-3.5-super-vl-free"),
             "Nemotron 3.5 Super VL Free [OpenCode]",
         )
+        self.assertEqual(
+            format_opencode_model_display_name("opencode/glm-5.3-flash-free"),
+            "GLM 5.3 Flash Free [OpenCode]",
+        )
 
     def test_known_display_name_overrides_generation(self) -> None:
         # A curated name wins over the generated one but keeps the [OpenCode] tag.

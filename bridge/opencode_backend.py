@@ -53,7 +53,7 @@ OPENCODE_KNOWN_DISPLAY_NAMES: dict[str, str] = {
     "big-pickle": "Big Pickle",
 }
 
-_ACRONYMS = {"vl", "ai", "api", "3p"}
+_ACRONYMS = {"vl", "glm", "ai", "api", "3p"}
 
 _MODEL_LINE_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*/[a-zA-Z0-9._-]+$")
 
