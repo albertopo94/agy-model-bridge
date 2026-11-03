@@ -21,7 +21,7 @@ from bridge.opencode_acp import (
     is_opencode_auth_error,
     is_opencode_region_error,
 )
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterable, Iterator
 import contextlib
 import json
 import os
@@ -112,7 +112,7 @@ def format_opencode_model_display_name(model_id: str) -> str:
     return f"{base} [OpenCode]"
 
 
-def parse_run_events(lines: Sequence[str]) -> Iterator[tuple[str, str]]:
+def parse_run_events(lines: Iterable[str]) -> Iterator[tuple[str, str]]:
     """Parses `opencode run --format json` lines into (kind, payload) events.
 
     kind is "text" for assistant text deltas or "error" for an upstream error
@@ -371,7 +371,10 @@ class OpencodeBackend:
         except OSError as exc:
             raise BridgeError(f"Failed to execute OpenCode CLI ({self.binary_path}): {exc}") from exc
 
-        assert proc.stdout is not None
+        if proc.stdout is None:
+            if proc.poll() is None:
+                proc.kill()
+            raise BridgeError(f"OpenCode CLI produced no stdout for model '{model}'")
         start = time.time()
         error_message: str | None = None
         emitted = False
