@@ -163,6 +163,7 @@ class TestServerEndpoints(unittest.TestCase):
         cls.mock_quota_provider = MockQuotaProvider()
         cls.mock_cursor_quota_provider = MockCursorQuotaProvider()
         cls.mock_cursor_backend = MockCursorBackend()
+        cls.mock_opencode_backend = MockOpencodeBackend()
         cls.server = create_server(
             host="127.0.0.1",
             port=0,
@@ -172,6 +173,7 @@ class TestServerEndpoints(unittest.TestCase):
             quota_provider=cls.mock_quota_provider,
             cursor_quota_provider=cls.mock_cursor_quota_provider,
             cursor_backend=cls.mock_cursor_backend,
+            opencode_backend=cls.mock_opencode_backend,
         )
         cls.port = cls.server.server_address[1]
         cls.base_url = f"http://127.0.0.1:{cls.port}"
@@ -230,11 +232,16 @@ class TestServerEndpoints(unittest.TestCase):
         status, headers, body = self._http_get("/v1/models")
         self.assertEqual(status, 200)
         self.assertEqual(body["object"], "list")
-        self.assertEqual(len(body["data"]), 4)
+        # 2 Antigravity + 2 Cursor + 2 OpenCode (all injected mocks).
+        self.assertEqual(len(body["data"]), 6)
         ids = [m["id"] for m in body["data"]]
         self.assertIn("gemini-2.5-pro", ids)
         self.assertIn("cursor/gpt-5.3-codex", ids)
         self.assertIn("cursor/composer-2.5", ids)
+        self.assertIn("opencode/pulse-alpha-free", ids)
+        opencode_model = next(m for m in body["data"] if m["id"] == "opencode/pulse-alpha-free")
+        self.assertEqual(opencode_model["owned_by"], "opencode")
+        self.assertTrue(opencode_model["display_name"].endswith("[OpenCode]"))
         cursor_model = next(m for m in body["data"] if m["id"] == "cursor/gpt-5.3-codex")
         self.assertEqual(cursor_model["owned_by"], "cursor")
 
@@ -2754,6 +2761,146 @@ class TestServerErrorSanitization(unittest.TestCase):
         self.assertTrue(sem.acquire(blocking=False))
         sem.release()
         sem.release()
+
+
+class MockOpencodeBackend:
+    def __init__(self) -> None:
+        self.models = [
+            {"id": "opencode/pulse-alpha-free", "slug": "opencode/pulse-alpha-free", "display_name": "Pulse Alpha Free [OpenCode]", "owned_by": "opencode"},
+            {"id": "opencode/beam-free", "slug": "opencode/beam-free", "display_name": "Beam Free [OpenCode]", "owned_by": "opencode"},
+        ]
+        self.chat_calls: list[dict[str, Any]] = []
+
+    def list_models(self, force: bool = False) -> list[dict[str, Any]]:
+        return list(self.models)
+
+    def stream_chat(self, prompt: str, model: str = "", timeout: float = 300.0, **kwargs: Any):
+        self.chat_calls.append({"prompt": prompt, "model": model, "stream": True})
+        yield "Hello from "
+        yield f"OpenCode {model}!"
+
+    def generate_chat(self, prompt: str, model: str = "", timeout: float = 300.0, **kwargs: Any) -> str:
+        self.chat_calls.append({"prompt": prompt, "model": model, "stream": False})
+        return f"Hello from OpenCode {model}!"
+
+
+class TestOpencodeUpstreamRouting(unittest.TestCase):
+    """OpenCode upstream: catalog inclusion and routing in chat/anthropic handlers (T3)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.mock_client = MockCloudCodeClient()
+        cls.mock_opencode_backend = MockOpencodeBackend()
+        cls.mock_cursor_backend = MockCursorBackend()
+        cls.server = create_server(
+            host="127.0.0.1",
+            port=0,
+            client=cls.mock_client,
+            project="test-project",
+            no_auth=True,
+            quota_provider=MockQuotaProvider(),
+            cursor_quota_provider=MockCursorQuotaProvider(),
+            cursor_backend=cls.mock_cursor_backend,
+            opencode_backend=cls.mock_opencode_backend,
+        )
+        cls.port = cls.server.server_address[1]
+        cls.base_url = f"http://127.0.0.1:{cls.port}"
+        cls.server_thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.server_thread.start()
+        time.sleep(0.05)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+        cls.server_thread.join(timeout=2.0)
+
+    def setUp(self):
+        self.mock_client.should_fail_with = None
+        self.mock_opencode_backend.chat_calls.clear()
+        self.mock_cursor_backend.chat_calls.clear()
+
+    def _post(self, path: str, payload: dict) -> tuple[int, dict]:
+        req = urllib.request.Request(
+            f"{self.base_url}{path}",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=5.0) as resp:
+                return resp.status, json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read().decode("utf-8"))
+
+    def test_models_catalog_includes_opencode_free_models(self) -> None:
+        req = urllib.request.Request(f"{self.base_url}/v1/models", method="GET")
+        with urllib.request.urlopen(req, timeout=5.0) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        ids = [m["id"] for m in data["data"]]
+        self.assertIn("opencode/pulse-alpha-free", ids)
+        self.assertIn("opencode/beam-free", ids)
+        by_id = {m["id"]: m for m in data["data"]}
+        self.assertTrue(by_id["opencode/pulse-alpha-free"]["display_name"].endswith("[OpenCode]"))
+
+    def test_chat_completion_routes_opencode_model_to_opencode_backend(self) -> None:
+        status, body = self._post("/v1/chat/completions", {
+            "model": "opencode/pulse-alpha-free",
+            "messages": [{"role": "user", "content": "hi"}],
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(body["choices"][0]["message"]["content"], "Hello from OpenCode opencode/pulse-alpha-free!")
+        self.assertEqual(self.mock_opencode_backend.chat_calls[-1]["model"], "opencode/pulse-alpha-free")
+        # Cursor backend must not be touched for opencode models
+        self.assertEqual(self.mock_cursor_backend.chat_calls, [])
+
+    def test_chat_completion_stream_opencode_model(self) -> None:
+        req = urllib.request.Request(
+            f"{self.base_url}/v1/chat/completions",
+            data=json.dumps({
+                "model": "opencode/beam-free",
+                "messages": [{"role": "user", "content": "hi"}],
+                "stream": True,
+            }).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=5.0) as resp:
+            raw = resp.read().decode("utf-8")
+        self.assertIn("data: [DONE]", raw)
+        self.assertIn("OpenCode opencode/beam-free!", raw)
+
+    def test_anthropic_messages_routes_opencode_model(self) -> None:
+        status, body = self._post("/v1/messages", {
+            "model": "opencode/pulse-alpha-free",
+            "messages": [{"role": "user", "content": "hi"}],
+            "max_tokens": 64,
+        })
+        self.assertEqual(status, 200)
+        text = "".join(b.get("text", "") for b in body.get("content", []) if b.get("type") == "text")
+        self.assertIn("Hello from OpenCode opencode/pulse-alpha-free!", text)
+        self.assertEqual(self.mock_cursor_backend.chat_calls, [])
+
+    def test_agy_models_still_route_to_cloudcode_client(self) -> None:
+        # Regression: adding the OpenCode branch must not move Antigravity routing.
+        status, body = self._post("/v1/chat/completions", {
+            "model": "gemini-2.5-pro",
+            "messages": [{"role": "user", "content": "hi"}],
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(self.mock_opencode_backend.chat_calls, [])
+        self.assertEqual(self.mock_cursor_backend.chat_calls, [])
+        self.assertEqual(self.mock_client.last_model, "gemini-2.5-pro")
+
+    def test_cursor_models_still_route_to_cursor_backend(self) -> None:
+        # Regression: Cursor routing untouched by the OpenCode branch.
+        status, body = self._post("/v1/chat/completions", {
+            "model": "cursor/gpt-5.3-codex",
+            "messages": [{"role": "user", "content": "hi"}],
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(self.mock_cursor_backend.chat_calls[-1]["model"], "gpt-5.3-codex")
+        self.assertEqual(self.mock_opencode_backend.chat_calls, [])
 
 
 if __name__ == "__main__":

@@ -60,6 +60,11 @@ from bridge.cursor_backend import (
     messages_to_prompt,
     resolve_cursor_model,
 )
+from bridge.opencode_backend import (
+    OpencodeBackend,
+    is_opencode_model,
+    resolve_opencode_model,
+)
 
 SAFE_REQUEST_ID_REGEX = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 
@@ -90,6 +95,7 @@ class ServerContext:
     quota_provider: QuotaProvider | None = None
     cursor_quota_provider: CursorQuotaProvider | None = None
     cursor_backend: Any | None = None
+    opencode_backend: Any | None = None
 
 
 @dataclass
@@ -105,6 +111,7 @@ class CollectedStreamData:
 _default_quota_provider: QuotaProvider | None = None
 _default_cursor_quota_provider: CursorQuotaProvider | None = None
 _default_cursor_backend: CursorBackend | None = None
+_default_opencode_backend: OpencodeBackend | None = None
 
 
 class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
@@ -118,6 +125,7 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
     quota_provider: QuotaProvider | None = None
     cursor_quota_provider: CursorQuotaProvider | None = None
     cursor_backend: Any | None = None
+    opencode_backend: Any | None = None
     server: Any = None
     request_id: str = ""
     command: str = ""
@@ -205,6 +213,21 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
         if _default_cursor_backend is None:
             _default_cursor_backend = CursorBackend()
         return _default_cursor_backend
+
+    def _get_opencode_backend(self) -> OpencodeBackend:
+        if self.opencode_backend is not None:
+            return self.opencode_backend
+        if self.context is not None and self.context.opencode_backend is not None:
+            return self.context.opencode_backend
+        if self.server is not None:
+            if hasattr(self.server, "context") and getattr(self.server.context, "opencode_backend", None) is not None:
+                return self.server.context.opencode_backend
+            if hasattr(self.server, "opencode_backend") and self.server.opencode_backend is not None:
+                return self.server.opencode_backend
+        global _default_opencode_backend
+        if _default_opencode_backend is None:
+            _default_opencode_backend = OpencodeBackend()
+        return _default_opencode_backend
 
     @contextlib.contextmanager
     def _acquire_concurrency(self) -> Iterator[bool]:
@@ -505,6 +528,12 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                         models.extend(c_backend.list_models())
                 except Exception as c_err:
                     sys.stderr.write(f"Warning: failed to query Cursor models: {c_err}\n")
+                try:
+                    o_backend = self._get_opencode_backend()
+                    if o_backend is not None:
+                        models.extend(o_backend.list_models())
+                except Exception as o_err:
+                    sys.stderr.write(f"Warning: failed to query OpenCode models: {o_err}\n")
                 resp_data = build_openai_model_list(models)
                 self._send_json(200, resp_data)
             except Exception as exc:
@@ -648,6 +677,22 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
             self._handle_responses(payload)
 
     def _handle_cursor_chat_completion(self, payload: dict[str, Any]) -> None:
+        self._handle_backend_chat_completion(payload)
+
+    def _handle_opencode_chat_completion(self, payload: dict[str, Any]) -> None:
+        self._handle_backend_chat_completion(
+            payload,
+            backend=self._get_opencode_backend(),
+            target_model=resolve_opencode_model(str(payload.get("model") or "")),
+        )
+
+    def _handle_backend_chat_completion(
+        self,
+        payload: dict[str, Any],
+        backend: Any | None = None,
+        target_model: str | None = None,
+    ) -> None:
+        """CLI-backend chat handler shared by Cursor and OpenCode upstreams."""
         self._ensure_request_id()
         model = str(payload.get("model") or "auto")
         messages = payload.get("messages", [])
@@ -658,8 +703,10 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
         prompt = messages_to_prompt(messages)
         stream = bool(payload.get("stream", False))
         completion_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
-        backend = self._get_cursor_backend()
-        target_model = resolve_cursor_model(model)
+        if backend is None:
+            backend = self._get_cursor_backend()
+        if target_model is None:
+            target_model = resolve_cursor_model(model)
 
         if stream:
             self.send_response(200)
@@ -706,7 +753,7 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
             except (BrokenPipeError, ConnectionResetError):
                 pass
             except Exception as exc:
-                sys.stderr.write(f"Error during Cursor stream: {exc}\n")
+                sys.stderr.write(f"Error during CLI backend stream: {exc}\n")
                 sys.stderr.flush()
             finally:
                 self.close_connection = True
@@ -739,6 +786,22 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                 self._send_error(exc)
 
     def _handle_cursor_messages(self, payload: dict[str, Any]) -> None:
+        self._handle_backend_messages(payload)
+
+    def _handle_opencode_messages(self, payload: dict[str, Any]) -> None:
+        self._handle_backend_messages(
+            payload,
+            backend=self._get_opencode_backend(),
+            target_model=resolve_opencode_model(str(payload.get("model") or "")),
+        )
+
+    def _handle_backend_messages(
+        self,
+        payload: dict[str, Any],
+        backend: Any | None = None,
+        target_model: str | None = None,
+    ) -> None:
+        """Anthropic-messages handler shared by Cursor and OpenCode upstreams."""
         self._ensure_request_id()
         model = str(payload.get("model") or "auto")
         raw_messages = payload.get("messages", [])
@@ -754,8 +817,10 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
         prompt = messages_to_prompt(messages)
         stream = bool(payload.get("stream", False))
         msg_id = f"msg_{uuid.uuid4().hex[:12]}"
-        backend = self._get_cursor_backend()
-        target_model = resolve_cursor_model(model)
+        if backend is None:
+            backend = self._get_cursor_backend()
+        if target_model is None:
+            target_model = resolve_cursor_model(model)
 
         if stream:
             self.send_response(200)
@@ -1077,6 +1142,9 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
         if is_cursor_model(model):
             self._handle_cursor_messages(payload)
             return
+        if is_opencode_model(model):
+            self._handle_opencode_messages(payload)
+            return
 
         try:
             stream = bool(payload.get("stream", False))
@@ -1196,6 +1264,9 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
         if is_cursor_model(model):
             self._handle_cursor_chat_completion(payload)
             return
+        if is_opencode_model(model):
+            self._handle_opencode_chat_completion(payload)
+            return
 
         try:
             stream = bool(payload.get("stream", False))
@@ -1296,6 +1367,7 @@ def create_server(
     quota_provider: QuotaProvider | None = None,
     cursor_quota_provider: CursorQuotaProvider | None = None,
     cursor_backend: Any | None = None,
+    opencode_backend: Any | None = None,
 ) -> http.server.ThreadingHTTPServer:
     """Instantiates and configures a ThreadingHTTPServer instance."""
     if no_auth and not is_loopback_host(host):
@@ -1341,6 +1413,8 @@ def create_server(
         cursor_quota_provider = CursorQuotaProvider()
     if cursor_backend is None:
         cursor_backend = CursorBackend()
+    if opencode_backend is None:
+        opencode_backend = OpencodeBackend()
 
     concurrency_semaphore = threading.Semaphore(max_concurrency)
 
@@ -1356,6 +1430,7 @@ def create_server(
         quota_provider=quota_provider,
         cursor_quota_provider=cursor_quota_provider,
         cursor_backend=cursor_backend,
+        opencode_backend=opencode_backend,
     )
 
     class ConfiguredHandler(OpenAIRequestHandler):
@@ -1420,6 +1495,9 @@ def run_server(
     if hasattr(server, "cursor_backend") and server.cursor_backend is not None:
         if hasattr(server.cursor_backend, "warmup"):
             server.cursor_backend.warmup()
+    if hasattr(server, "opencode_backend") and server.opencode_backend is not None:
+        if hasattr(server.opencode_backend, "warmup"):
+            server.opencode_backend.warmup()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
