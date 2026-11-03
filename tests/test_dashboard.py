@@ -1082,3 +1082,38 @@ class TestDashboardBilingual(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestOpencodeQuotaTab(unittest.TestCase):
+    """OpenCode tab on the quota panel (S6): availability, no fake bars."""
+
+    def _render(self):
+        auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
+        return render_dashboard("127.0.0.1", 24980, auth_status, models_count=10)
+
+    def test_tab_button_and_card_present(self):
+        html = self._render()
+        self.assertIn('id="tab-quota-opencode"', html)
+        self.assertIn('id="opencode-quota-card"', html)
+        self.assertIn("/api/opencode/status", html)
+        self.assertIn("fetchOpencodeStatus", html)
+
+    def test_switch_quota_tab_supports_three_providers(self):
+        html = self._render()
+        # The switcher must hide/show all three cards and persist the choice.
+        self.assertIn('getElementById("opencode-quota-card")', html)
+        self.assertIn('tab-quota-opencode', html)
+        self.assertIn('agy_quota_tab', html)
+
+    def test_openencode_card_never_renders_quota_bars(self):
+        html = self._render()
+        card_start = html.index('id="opencode-quota-card"')
+        card_end = html.index("</aside>", card_start)
+        card = html[card_start:card_end]
+        self.assertNotIn("quota-bar", card)
+        self.assertIn("opencode-no-quota", card)
+
+    def test_openencode_strings_are_i18n(self):
+        html = self._render()
+        for key in ("opencode_tab_title", "opencode_status_available", "opencode_status_missing", "opencode_no_quota_note"):
+            self.assertIn(key, html)
