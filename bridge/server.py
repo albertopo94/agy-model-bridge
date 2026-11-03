@@ -336,7 +336,7 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
             return
 
         parsed_path = urllib.parse.urlparse(self.path).path
-        if parsed_path.startswith("/v1/") or parsed_path in ("/", "/api/status", "/api/quota", "/api/cursor/quota"):
+        if parsed_path.startswith("/v1/") or parsed_path in ("/", "/api/status", "/api/quota", "/api/cursor/quota", "/api/opencode/status"):
             # Inference and admin endpoints forbid browser cross-origin preflight requests
             self.send_response(403)
             self.send_header("X-Request-ID", self.request_id)
@@ -367,7 +367,7 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json")
         self.send_header("X-Request-ID", self.request_id)
         req_path = urllib.parse.urlparse(self.path).path
-        if not req_path.startswith("/v1/") and req_path not in ("/", "/api/status", "/api/quota", "/api/cursor/quota"):
+        if not req_path.startswith("/v1/") and req_path not in ("/", "/api/status", "/api/quota", "/api/cursor/quota", "/api/opencode/status"):
             self.send_header("Access-Control-Allow-Origin", "*")
         sent_connection = False
         if headers:
@@ -502,6 +502,14 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
             provider = self._get_cursor_quota_provider()
             snapshot = provider.fetch(force=force_refresh)
             self._send_json(200, snapshot.to_dict())
+            return
+
+        if path == "/api/opencode/status":
+            try:
+                o_backend = self._get_opencode_backend()
+                self._send_json(200, o_backend.status())
+            except Exception as exc:
+                self._send_error(exc)
             return
 
         if path == "/healthz":

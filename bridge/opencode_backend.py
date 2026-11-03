@@ -230,6 +230,39 @@ class OpencodeBackend:
         """Returns True when the OpenCode binary can be located."""
         return shutil.which(self.binary_path) is not None or Path(self.binary_path).is_file()
 
+    def status(self) -> dict[str, Any]:
+        """Reports availability for the dashboard OpenCode tab (S6).
+
+        OpenCode exposes no provider-side quota API, so `quota_supported` is
+        always False and the dashboard must not render fake limit bars.
+        """
+        available = self.is_available()
+        version: str | None = None
+        if available:
+            with contextlib.suppress(Exception):
+                raw = subprocess.check_output(  # noqa: S603
+                    [self.binary_path, "--version"],
+                    text=True,
+                    timeout=2.0,
+                    stderr=subprocess.DEVNULL,
+                )
+                if isinstance(raw, bytes):
+                    raw = raw.decode("utf-8", errors="replace")
+                version = raw.strip().splitlines()[-1].strip() or None
+
+        free_count = 0
+        if available:
+            with contextlib.suppress(Exception):
+                free_count = len(self.list_models())
+
+        return {
+            "available": available,
+            "binary_path": self.binary_path if available else None,
+            "version": version,
+            "free_model_count": free_count,
+            "quota_supported": False,
+        }
+
     def list_models(self, force: bool = False) -> list[dict[str, Any]]:
         """Discovers free-tier OpenCode models, cached, with a static fallback."""
         now = time.time()

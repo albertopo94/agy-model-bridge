@@ -309,3 +309,43 @@ class TestBackendWarmup(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestBackendStatus(unittest.TestCase):
+    """Availability status for the dashboard OpenCode tab (S6)."""
+
+    def test_status_reports_availability_and_free_count(self) -> None:
+        backend = OpencodeBackend(binary_path="/usr/bin/opencode")
+        backend._acp_client = MagicMock()
+        run = MagicMock(return_value=MagicMock(returncode=0, stdout=MODELS_STDOUT, stderr=""))
+        with patch("bridge.opencode_backend.subprocess.run", run), \
+             patch("bridge.opencode_backend.shutil.which", return_value="/usr/bin/opencode"), \
+             patch("bridge.opencode_backend.subprocess.check_output", return_value="1.19.5\n"):
+            st = backend.status()
+        self.assertTrue(st["available"])
+        self.assertEqual(st["version"], "1.19.5")
+        self.assertEqual(st["free_model_count"], 3)
+        self.assertTrue(st["binary_path"].endswith("opencode"))
+        # OpenCode has no upstream quota API: the dashboard must not fake bars.
+        self.assertFalse(st["quota_supported"])
+
+    def test_status_when_binary_missing(self) -> None:
+        backend = OpencodeBackend(binary_path="/no/such/opencode")
+        with patch("bridge.opencode_backend.shutil.which", return_value=None), \
+             patch("bridge.opencode_backend.Path.is_file", return_value=False):
+            st = backend.status()
+        self.assertFalse(st["available"])
+        self.assertIsNone(st["version"])
+        self.assertEqual(st["free_model_count"], 0)
+        self.assertFalse(st["quota_supported"])
+
+    def test_status_version_failure_stays_available(self) -> None:
+        import subprocess as sp
+        backend = OpencodeBackend(binary_path="/usr/bin/opencode")
+        backend._acp_client = MagicMock()
+        with patch("bridge.opencode_backend.shutil.which", return_value="/usr/bin/opencode"), \
+             patch("bridge.opencode_backend.subprocess.check_output", side_effect=sp.TimeoutExpired("opencode", 2)), \
+             patch("bridge.opencode_backend.subprocess.run", return_value=MagicMock(returncode=0, stdout="", stderr="")):
+            st = backend.status()
+        self.assertTrue(st["available"])
+        self.assertIsNone(st["version"])

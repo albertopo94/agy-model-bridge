@@ -2783,6 +2783,15 @@ class MockOpencodeBackend:
         self.chat_calls.append({"prompt": prompt, "model": model, "stream": False})
         return f"Hello from OpenCode {model}!"
 
+    def status(self) -> dict[str, Any]:
+        return {
+            "available": True,
+            "binary_path": "/usr/bin/opencode",
+            "version": "1.19.5",
+            "free_model_count": len(self.models),
+            "quota_supported": False,
+        }
+
 
 class TestOpencodeUpstreamRouting(unittest.TestCase):
     """OpenCode upstream: catalog inclusion and routing in chat/anthropic handlers (T3)."""
@@ -2880,6 +2889,16 @@ class TestOpencodeUpstreamRouting(unittest.TestCase):
         text = "".join(b.get("text", "") for b in body.get("content", []) if b.get("type") == "text")
         self.assertIn("Hello from OpenCode opencode/pulse-alpha-free!", text)
         self.assertEqual(self.mock_cursor_backend.chat_calls, [])
+
+    def test_openstatus_endpoint_reports_backend_status(self) -> None:
+        req = urllib.request.Request(f"{self.base_url}/api/opencode/status", method="GET")
+        with urllib.request.urlopen(req, timeout=5.0) as resp:
+            self.assertEqual(resp.status, 200)
+            data = json.loads(resp.read().decode("utf-8"))
+        self.assertTrue(data["available"])
+        self.assertEqual(data["version"], "1.19.5")
+        self.assertEqual(data["free_model_count"], 2)
+        self.assertFalse(data["quota_supported"])
 
     def test_agy_models_still_route_to_cloudcode_client(self) -> None:
         # Regression: adding the OpenCode branch must not move Antigravity routing.

@@ -258,6 +258,13 @@ CURSOR_ICON_SVG = (
     '</svg>'
 )
 
+OPENCODE_ICON_SVG = (
+    '<svg class="card-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+    '<polyline points="16 18 22 12 16 6"/>'
+    '<polyline points="8 6 2 12 8 18"/>'
+    '</svg>'
+)
+
 PI_ICON_SVG = (
     '<svg class="card-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 470 470" width="24" height="24" aria-hidden="true">'
     '<path fill="#F09082" d="M0 0H352.07V234.71H234.71V117.36H0Z"/>'
@@ -1465,6 +1472,7 @@ def render_dashboard(
         <div class="quota-tabs" role="tablist" aria-label="Quota Provider">
           <button type="button" id="tab-quota-agy" class="quota-tab-btn active" role="tab" aria-selected="true" onclick="switchQuotaTab('agy')">Antigravity</button>
           <button type="button" id="tab-quota-cursor" class="quota-tab-btn" role="tab" aria-selected="false" onclick="switchQuotaTab('cursor')">Cursor</button>
+          <button type="button" id="tab-quota-opencode" class="quota-tab-btn" role="tab" aria-selected="false" onclick="switchQuotaTab('opencode')">OpenCode</button>
         </div>
 
         <div id="quota-card" class="quota-card">
@@ -1515,6 +1523,30 @@ def render_dashboard(
           </div>
           <div id="cursor-quota-notice" style="display: none;"></div>
           <div id="cursor-quota-footnote" class="quota-footnote" style="display: none;"></div>
+        </div>
+
+        <div id="opencode-quota-card" class="quota-card" style="display: none;">
+          <div class="quota-header">
+            <div class="quota-title-row">
+              {OPENCODE_ICON_SVG}
+              <div class="quota-title-text">
+                <span class="quota-title" data-i18n="opencode_tab_title">OpenCode</span>
+                <span id="opencode-quota-subtitle" class="quota-subtitle" data-i18n="quota_loading">{quota_loading_text}</span>
+              </div>
+            </div>
+            <button type="button" id="opencode-quota-refresh-btn" class="quota-refresh-btn" aria-label="{quota_refresh_text}" onclick="refreshOpencodeStatus()" title="{quota_refresh_text}">
+              {REFRESH_ICON_SVG}
+            </button>
+          </div>
+          <div class="quota-divider"></div>
+          <div id="opencode-quota-body" class="quota-buckets">
+            <div class="quota-skeleton">
+              <div class="skeleton-line" style="width: 70%;"></div>
+              <div class="skeleton-line" style="width: 100%; height: 6px;"></div>
+              <div class="skeleton-line" style="width: 45%;"></div>
+            </div>
+          </div>
+          <div id="opencode-no-quota" class="quota-footnote" data-i18n="opencode_no_quota_note">OpenCode does not expose a provider quota API. Free models run on upstream free pools and may be region-restricted; the bridge reports those errors verbatim.</div>
         </div>
       </aside>
 
@@ -1581,6 +1613,12 @@ def render_dashboard(
         quota_loading: "Loading quota...",
         quota_unavailable: "Quota unavailable",
         quota_error_stale: "Showing cached quota (refresh failed)",
+        opencode_tab_title: "OpenCode",
+        opencode_status_available: "CLI ready",
+        opencode_status_missing: "OpenCode CLI not found",
+        opencode_free_models: "{{n}} free models exposed",
+        opencode_version: "CLI v{{v}}",
+        opencode_no_quota_note: "OpenCode does not expose a provider quota API. Free models run on upstream free pools and may be region-restricted; the bridge reports those errors verbatim.",
         quota_group_gemini: "Gemini Models",
         quota_group_claude_gpt: "Claude and GPT models",
         quota_group_argon: "Gemini 4 Argon",
@@ -1641,6 +1679,12 @@ def render_dashboard(
         quota_loading: "Cargando cuota...",
         quota_unavailable: "Cuota no disponible",
         quota_error_stale: "Mostrando cuota en caché (falló la actualización)",
+        opencode_tab_title: "OpenCode",
+        opencode_status_available: "CLI listo",
+        opencode_status_missing: "No se encontró el CLI de OpenCode",
+        opencode_free_models: "{{n}} modelos gratuitos expuestos",
+        opencode_version: "CLI v{{v}}",
+        opencode_no_quota_note: "OpenCode no expone una API de cuota del proveedor. Los modelos gratuitos usan pools gratuitos y pueden estar restringidos por región; el bridge reporta esos errores tal cual.",
         quota_group_gemini: "Modelos Gemini",
         quota_group_claude_gpt: "Modelos Claude y GPT",
         quota_group_argon: "Gemini 4 Argon",
@@ -2144,6 +2188,68 @@ def render_dashboard(
       fetchCursorQuota(true);
     }}
 
+    function renderOpencodeStatus(data) {{
+      var dict = I18N[currentLang] || I18N.en;
+      var subtitleEl = document.getElementById("opencode-quota-subtitle");
+      var bodyEl = document.getElementById("opencode-quota-body");
+      if (!bodyEl) return;
+      bodyEl.innerHTML = "";
+
+      if (!data || !data.available) {{
+        if (subtitleEl) subtitleEl.textContent = dict.opencode_status_missing || "OpenCode CLI not found";
+        var miss = document.createElement("div");
+        miss.className = "quota-footnote";
+        miss.textContent = "opencode";
+        var pre = document.createElement("div");
+        pre.className = "quota-bucket";
+        var cmd = document.createElement("code");
+        cmd.textContent = "curl -fsSL https://opencode.ai/install | bash";
+        pre.appendChild(document.createTextNode("Install: "));
+        pre.appendChild(cmd);
+        bodyEl.appendChild(miss);
+        bodyEl.appendChild(pre);
+        return;
+      }}
+
+      if (subtitleEl) subtitleEl.textContent = dict.opencode_status_available || "CLI ready";
+
+      var row1 = document.createElement("div");
+      row1.className = "quota-bucket";
+      var label1 = document.createElement("span");
+      label1.className = "quota-bucket-label";
+      label1.textContent = (dict.opencode_free_models || "{{n}} free models exposed").replace("{{n}}", String(data.free_model_count || 0));
+      row1.appendChild(label1);
+      bodyEl.appendChild(row1);
+
+      if (data.version) {{
+        var row2 = document.createElement("div");
+        row2.className = "quota-bucket";
+        var label2 = document.createElement("span");
+        label2.className = "quota-bucket-label";
+        label2.textContent = (dict.opencode_version || "CLI v{{v}}").replace("{{v}}", String(data.version));
+        row2.appendChild(label2);
+        bodyEl.appendChild(row2);
+      }}
+    }}
+
+    function fetchOpencodeStatus() {{
+      fetch("/api/opencode/status")
+        .then(function(res) {{
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          return res.json();
+        }})
+        .then(function(data) {{
+          renderOpencodeStatus(data);
+        }})
+        .catch(function(err) {{
+          renderOpencodeStatus({{ available: false, error: String(err) }});
+        }});
+    }}
+
+    function refreshOpencodeStatus() {{
+      fetchOpencodeStatus();
+    }}
+
     (function initLang() {{
       var saved = null;
       try {{
@@ -2154,12 +2260,13 @@ def render_dashboard(
       }}
       try {{
         var savedQuotaTab = localStorage.getItem("agy_quota_tab");
-        if (savedQuotaTab === "cursor") {{
-          switchQuotaTab("cursor");
+        if (savedQuotaTab === "cursor" || savedQuotaTab === "opencode") {{
+          switchQuotaTab(savedQuotaTab);
         }}
       }} catch (e) {{}}
       fetchQuota(false);
       fetchCursorQuota(false);
+      fetchOpencodeStatus();
     }})();
 
     setInterval(function() {{
@@ -2179,35 +2286,31 @@ def render_dashboard(
     }}, 300000);
 
     function switchQuotaTab(tabId) {{
-      var isCursor = (tabId === "cursor");
       var agyCard = document.getElementById("quota-card");
       var cursorCard = document.getElementById("cursor-quota-card");
+      var opencodeCard = document.getElementById("opencode-quota-card");
       var agyBtn = document.getElementById("tab-quota-agy");
       var cursorBtn = document.getElementById("tab-quota-cursor");
+      var opencodeBtn = document.getElementById("tab-quota-opencode");
 
-      if (agyCard) agyCard.style.display = isCursor ? "none" : "flex";
-      if (cursorCard) cursorCard.style.display = isCursor ? "flex" : "none";
+      if (agyCard) agyCard.style.display = (tabId === "agy") ? "flex" : "none";
+      if (cursorCard) cursorCard.style.display = (tabId === "cursor") ? "flex" : "none";
+      if (opencodeCard) opencodeCard.style.display = (tabId === "opencode") ? "flex" : "none";
 
-      if (agyBtn) {{
-        if (!isCursor) {{
-          agyBtn.classList.add("active");
-          agyBtn.setAttribute("aria-selected", "true");
+      var pairs = [[agyBtn, "agy"], [cursorBtn, "cursor"], [opencodeBtn, "opencode"]];
+      for (var i = 0; i < pairs.length; i++) {{
+        var btn = pairs[i][0];
+        if (!btn) continue;
+        if (pairs[i][1] === tabId) {{
+          btn.classList.add("active");
+          btn.setAttribute("aria-selected", "true");
         }} else {{
-          agyBtn.classList.remove("active");
-          agyBtn.setAttribute("aria-selected", "false");
-        }}
-      }}
-      if (cursorBtn) {{
-        if (isCursor) {{
-          cursorBtn.classList.add("active");
-          cursorBtn.setAttribute("aria-selected", "true");
-        }} else {{
-          cursorBtn.classList.remove("active");
-          cursorBtn.setAttribute("aria-selected", "false");
+          btn.classList.remove("active");
+          btn.setAttribute("aria-selected", "false");
         }}
       }}
       try {{
-        localStorage.setItem("agy_quota_tab", isCursor ? "cursor" : "agy");
+        localStorage.setItem("agy_quota_tab", tabId);
       }} catch (e) {{}}
     }}
 
