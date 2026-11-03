@@ -1470,10 +1470,10 @@ def render_dashboard(
       </div>
       <div class="badges">
         <span class="badge">🌐 {address}</span>
+        <span class="badge {agy_badge_class}" data-i18n="agy_available">⚛️ {html.escape(agy_label)}</span>
         <span class="badge {auth_badge_class}" data-i18n="auth" data-status="{html.escape(status_name)}" data-email="{html.escape(email or '')}">🛡️ {html.escape(auth_label)}</span>
         <span class="badge {api_key_badge_class}" data-i18n="api_key_badge" data-configured="{str(has_api_key).lower()}">🔑 {html.escape(api_key_label)}</span>
         <span class="badge badge-models" data-i18n="models" data-count="{models_count}">⚡ {models_label}</span>
-        <span class="badge {agy_badge_class}" data-i18n="agy_available">⚛️ {html.escape(agy_label)}</span>
       </div>
     </header>
 
