@@ -8,6 +8,7 @@ from datetime import datetime, timezone, timedelta
 import threading
 
 from bridge.auth import (
+    check_token_health,
     KeychainTokenProvider,
     TokenProvider,
     AuthenticationError,
@@ -371,6 +372,47 @@ class TestTokenProviderProtocol(unittest.TestCase):
         self.assertIsNone(provider._cached_token)
         self.assertEqual(provider.expiry, 0.0)
         self.assertEqual(provider._cached_expiry, 0.0)
+
+
+class TestCheckTokenHealth(unittest.TestCase):
+    """Local-only credential health used by the daemon preflight."""
+
+    class _Provider:
+        def __init__(self, expiry, exc=None):
+            self.expiry = expiry
+            self._exc = exc
+
+        def get_token(self, force_refresh=False):
+            if self._exc:
+                raise self._exc
+            return "tok"
+
+    def test_ok_when_not_expired(self):
+        st = check_token_health(self._Provider(now_plus := 1000.0), now=500.0)
+        self.assertEqual(st["status"], "ok")
+        self.assertEqual(st["expires_at"], now_plus)
+
+    def test_expired_when_now_past_expiry(self):
+        st = check_token_health(self._Provider(100.0), now=200.0)
+        self.assertEqual(st["status"], "expired")
+        self.assertEqual(st["expires_at"], 100.0)
+
+    def test_expired_exactly_at_expiry(self):
+        st = check_token_health(self._Provider(100.0), now=100.0)
+        self.assertEqual(st["status"], "expired")
+
+    def test_missing_when_keychain_raises(self):
+        prov = self._Provider(0.0, exc=AuthenticationError("no item in keychain"))
+        st = check_token_health(prov, now=1.0)
+        self.assertEqual(st["status"], "missing")
+        self.assertIsNone(st["expires_at"])
+        self.assertIn("no item", st["detail"])
+
+    def test_ok_when_expiry_unknown(self):
+        # An unparseable expiry must not block startup by itself.
+        st = check_token_health(self._Provider(0.0), now=1.0)
+        self.assertEqual(st["status"], "ok")
+        self.assertIsNone(st["expires_at"])
 
 
 if __name__ == "__main__":

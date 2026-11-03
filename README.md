@@ -99,7 +99,7 @@ If the gateway cannot come up, `start` exits with `1` and reports which of the t
 
 | Report | Meaning | What to do |
 |---|---|---|
-| `Bridge server exited before it became healthy…` | The process died while starting, so nothing is listening on the port. The last log lines are printed inline (most often an authentication or project-discovery error). | Fix the reported error (usually re-authenticate in Antigravity) and run `start` again. |
+| `Your Antigravity session expired…` (or `No Antigravity credential was found…`) | The stored credential is past its expiry or missing, so the bridge cannot reach Google. `start` detects this **before** launching anything and never spawns a doomed process. | Open the Antigravity app and sign in again to refresh the Keychain credential, then run `start` again. Pass `--project` to skip project discovery if you only need the dashboard. |\n| `Bridge server exited before it became healthy…` | The process died while starting, so nothing is listening on the port. The last log lines are printed inline (most often an authentication or project-discovery error). | Fix the reported error (usually re-authenticate in Antigravity) and run `start` again. |
 | `Timeout waiting for bridge server to respond…` | The process was still running when the health window closed. | Check `~/.agy-bridge/bridge.log` and the port/host for conflicts. |
 
 ### 2. Configure Your Terminal Coding Agents
@@ -437,7 +437,7 @@ Execute the complete test suite:
 python3 -m unittest discover -s tests -v
 ```
 
-All 1132 tests run in ~3-4 seconds locally with zero external dependencies and zero network access.
+All 1141 tests run in ~3-4 seconds locally with zero external dependencies and zero network access.
 
 ### End-to-End Smoke Test
 

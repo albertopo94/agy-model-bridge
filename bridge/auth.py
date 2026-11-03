@@ -39,6 +39,34 @@ class TokenProvider(Protocol):
         ...
 
 
+
+def check_token_health(provider: "TokenProvider | None" = None, now: float | None = None) -> dict[str, Any]:
+    """Reports the local health of the Antigravity credential without any network call.
+
+    Returns a dict with:
+      status: "ok" | "expired" | "missing"
+      expires_at: epoch seconds when known, else None
+      detail: human-readable detail useful in a message
+
+    The Keychain payload already carries an expiry timestamp, so an expired
+    credential can be reported before spawning a daemon that would only fail
+    later with an upstream 401 and a Python traceback.
+    """
+    prov = provider if provider is not None else KeychainTokenProvider()
+    current = time.time() if now is None else now
+    try:
+        prov.get_token()
+    except AuthenticationError as exc:
+        return {"status": "missing", "expires_at": None, "detail": str(exc)}
+    except Exception as exc:  # unexpected Keychain failure still means "cannot proceed"
+        return {"status": "missing", "expires_at": None, "detail": str(exc)}
+
+    expiry = getattr(prov, "expiry", 0.0) or 0.0
+    expires_at = float(expiry) if expiry else None
+    if expires_at is not None and current >= expires_at:
+        return {"status": "expired", "expires_at": expires_at, "detail": ""}
+    return {"status": "ok", "expires_at": expires_at, "detail": ""}
+
 class KeychainTokenProvider:
     """Extracts, parses, and caches access tokens from macOS Keychain."""
 

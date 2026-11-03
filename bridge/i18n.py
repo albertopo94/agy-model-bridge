@@ -104,6 +104,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "daemon_stop_hint": "➜ To stop the service: {prog_base} stop",
         "daemon_already_running": "AGY Model Bridge is already running{pid_str}",
         "daemon_start_failed": "Failed to start daemon",
+        "daemon_auth_expired": (
+            "Your Antigravity session expired, so the bridge cannot reach Google.\n"
+            "Open the Antigravity app and sign in again to refresh the credential, then run start once more.\n"
+            "(If you only need the dashboard, start with an explicit --project to skip project discovery.)"
+        ),
+        "daemon_auth_missing": (
+            "No Antigravity credential was found in the macOS Keychain.\n"
+            "Open the Antigravity app and sign in, then run start once more.\n"
+            "(If you only need the dashboard, start with an explicit --project to skip project discovery.)"
+        ),
         "daemon_stopped": "✔ AGY Model Bridge stopped{pid_str}",
         "daemon_restarted": "✔ AGY Model Bridge restarted (PID {pid})",
         "daemon_not_running": "AGY Model Bridge is not running.",
@@ -209,6 +219,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "daemon_stop_hint": "➜ Para detener el servicio: {prog_base} stop",
         "daemon_already_running": "AGY Model Bridge ya está corriendo{pid_str}",
         "daemon_start_failed": "Fallo al iniciar el daemon",
+        "daemon_auth_expired": (
+            "Tu sesión de Antigravity venció, así que el bridge no puede llegar a Google.\n"
+            "Abrí la app de Antigravity y volvé a iniciar sesión para renovar la credencial, después ejecutá start otra vez.\n"
+            "(Si solo necesitás el dashboard, iniciá con --project explícito para saltear el descubrimiento del proyecto.)"
+        ),
+        "daemon_auth_missing": (
+            "No se encontró ninguna credencial de Antigravity en el Keychain de macOS.\n"
+            "Abrí la app de Antigravity e iniciá sesión, después ejecutá start otra vez.\n"
+            "(Si solo necesitás el dashboard, iniciá con --project explícito para saltear el descubrimiento del proyecto.)"
+        ),
         "daemon_stopped": "✔ AGY Model Bridge detenido{pid_str}",
         "daemon_restarted": "✔ AGY Model Bridge reiniciado (PID {pid})",
         "daemon_not_running": "AGY Model Bridge no está corriendo.",

@@ -27,6 +27,27 @@ from bridge.daemon import (
 )
 
 
+HEALTHY_TOKEN = {"status": "ok", "expires_at": 9e9, "detail": ""}
+
+
+class _HealthyTokenMixin:
+    """Daemon mechanics tests must not depend on the machine's real Antigravity
+    credential: an expired token on the developer machine would otherwise make
+    them fail for an unrelated reason. Applied at class level because these
+    classes define their own setUp without chaining to super()."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._token_patcher = patch(
+            "bridge.daemon.check_token_health", return_value=dict(HEALTHY_TOKEN)
+        )
+        cls._token_patcher.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._token_patcher.stop()
+
+
 class TestPidManagement(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -79,7 +100,7 @@ class TestPidManagement(unittest.TestCase):
         self.assertFalse(is_pid_alive(0))
 
 
-class TestDaemonLifecycle(unittest.TestCase):
+class TestDaemonLifecycle(_HealthyTokenMixin, unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.dir_path = Path(self.temp_dir.name)
@@ -682,7 +703,7 @@ class TestHealthCheck(unittest.TestCase):
     def test_check_server_healthy_matches_valid_service_identity(self, mock_urlopen):
         resp = MagicMock()
         resp.status = 200
-        resp.read.return_value = b'{"status": "ok", "service": "agy-model-bridge", "version": "0.31.0"}'
+        resp.read.return_value = b'{"status": "ok", "service": "agy-model-bridge", "version": "0.31.1"}'
         resp.__enter__.return_value = resp
         mock_urlopen.return_value = resp
 
@@ -719,7 +740,7 @@ class TestHealthCheck(unittest.TestCase):
         self.assertFalse(check_server_healthy("127.0.0.1", 24980))
 
 
-class TestDaemonDescriptorAndPortBinding(unittest.TestCase):
+class TestDaemonDescriptorAndPortBinding(_HealthyTokenMixin, unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.dir_path = Path(self.temp_dir.name)
@@ -736,7 +757,7 @@ class TestDaemonDescriptorAndPortBinding(unittest.TestCase):
             "host": "127.0.0.1",
             "port": 24980,
             "service": "agy-model-bridge",
-            "version": "0.31.0",
+            "version": "0.31.1",
         }
         write_daemon_info(info_data, info_file=self.info_file)
         self.assertTrue(self.info_file.exists())
@@ -789,7 +810,7 @@ class TestDaemonDescriptorAndPortBinding(unittest.TestCase):
                 "host": "127.0.0.1",
                 "port": 24980,
                 "service": "agy-model-bridge",
-                "version": "0.31.0",
+                "version": "0.31.1",
             },
             info_file=self.info_file,
         )
@@ -828,7 +849,7 @@ class TestDaemonDescriptorAndPortBinding(unittest.TestCase):
                 "host": "127.0.0.1",
                 "port": 24980,
                 "service": "agy-model-bridge",
-                "version": "0.31.0",
+                "version": "0.31.1",
             },
             info_file=self.info_file,
         )
@@ -850,13 +871,13 @@ class TestDaemonDescriptorAndPortBinding(unittest.TestCase):
                 "host": "127.0.0.1",
                 "port": 24999,
                 "service": "agy-model-bridge",
-                "version": "0.31.0",
+                "version": "0.31.1",
             },
             info_file=self.info_file,
         )
         mock_fetch.return_value = {
             "service": "agy-model-bridge",
-            "version": "0.31.0",
+            "version": "0.31.1",
             "models_count": 5,
             "auth": {"status": "Valid"},
         }
@@ -959,7 +980,7 @@ class TestDaemonDescriptorAndPortBinding(unittest.TestCase):
                 "host": "127.0.0.1",
                 "port": 24980,
                 "service": "agy-model-bridge",
-                "version": "0.31.0",
+                "version": "0.31.1",
             },
             info_file=self.info_file,
         )
@@ -983,7 +1004,7 @@ class TestDaemonDescriptorAndPortBinding(unittest.TestCase):
                 "host": "127.0.0.1",
                 "port": 24980,
                 "service": "agy-model-bridge",
-                "version": "0.31.0",
+                "version": "0.31.1",
             },
             info_file=self.info_file,
         )
@@ -1007,7 +1028,7 @@ class TestDaemonDescriptorAndPortBinding(unittest.TestCase):
                 "host": "127.0.0.1",
                 "port": 24980,
                 "service": "agy-model-bridge",
-                "version": "0.31.0",
+                "version": "0.31.1",
             },
             info_file=self.info_file,
         )
@@ -1168,6 +1189,89 @@ class TestRestartDaemon(unittest.TestCase):
             api_key=None,
             no_auth=False,
         )
+
+
+
+class TestStartDaemonAuthPreflight(unittest.TestCase):
+    """An expired or missing Antigravity credential must be reported in plain
+    language before a child process is spawned, instead of surfacing as a
+    Python traceback quoted back from the daemon log."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.dir_path = Path(self.temp_dir.name)
+        self.pid_file = self.dir_path / "bridge.pid"
+        self.info_file = self.dir_path / "bridge.json"
+        self.log_file = self.dir_path / "bridge.log"
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    @patch("bridge.daemon.webbrowser.open")
+    @patch("bridge.daemon.subprocess.Popen")
+    def test_expired_token_aborts_without_spawning(self, mock_popen, mock_browser):
+        expired = {"status": "expired", "expires_at": 1.0, "detail": "2026-11-03T13:26:27+01:00"}
+        with patch("bridge.daemon.check_token_health", return_value=expired):
+            res = start_daemon(
+                port=24980, no_open=True,
+                pid_file=self.pid_file, info_file=self.info_file, log_file=self.log_file,
+            )
+        self.assertEqual(res["status"], "error")
+        self.assertEqual(res["reason"], "auth_unavailable")
+        mock_popen.assert_not_called()
+        self.assertIn("Antigravity", res["error"])
+        self.assertNotIn("Traceback", res["error"])
+        self.assertNotIn("RuntimeError", res["error"])
+
+    @patch("bridge.daemon.webbrowser.open")
+    @patch("bridge.daemon.subprocess.Popen")
+    def test_missing_token_aborts_without_spawning(self, mock_popen, mock_browser):
+        missing = {"status": "missing", "expires_at": None, "detail": "no item"}
+        with patch("bridge.daemon.check_token_health", return_value=missing):
+            res = start_daemon(
+                port=24980, no_open=True,
+                pid_file=self.pid_file, info_file=self.info_file, log_file=self.log_file,
+            )
+        self.assertEqual(res["status"], "error")
+        self.assertEqual(res["reason"], "auth_unavailable")
+        mock_popen.assert_not_called()
+        self.assertIn("Antigravity", res["error"])
+
+    @patch("bridge.daemon.webbrowser.open")
+    @patch("bridge.daemon.check_server_healthy", return_value=True)
+    @patch("bridge.daemon.subprocess.Popen")
+    def test_explicit_project_skips_the_preflight(self, mock_popen, mock_health, mock_browser):
+        # With --project the server can still start, so the preflight must not block it.
+        expired = {"status": "expired", "expires_at": 1.0, "detail": "gone"}
+        mock_proc = MagicMock()
+        mock_proc.pid = 4242
+        mock_proc.poll.return_value = None
+        mock_popen.return_value = mock_proc
+        with patch("bridge.daemon.check_token_health", return_value=expired) as chk:
+            res = start_daemon(
+                port=24980, no_open=True, project="my-proj",
+                pid_file=self.pid_file, info_file=self.info_file, log_file=self.log_file,
+            )
+        self.assertEqual(res["status"], "started")
+        mock_popen.assert_called_once()
+        chk.assert_not_called()
+
+    @patch("bridge.daemon.webbrowser.open")
+    @patch("bridge.daemon.check_server_healthy", return_value=True)
+    @patch("bridge.daemon.subprocess.Popen")
+    def test_healthy_token_does_not_block(self, mock_popen, mock_health, mock_browser):
+        healthy = {"status": "ok", "expires_at": 9e9, "detail": ""}
+        mock_proc = MagicMock()
+        mock_proc.pid = 4343
+        mock_proc.poll.return_value = None
+        mock_popen.return_value = mock_proc
+        with patch("bridge.daemon.check_token_health", return_value=healthy):
+            res = start_daemon(
+                port=24980, no_open=True,
+                pid_file=self.pid_file, info_file=self.info_file, log_file=self.log_file,
+            )
+        self.assertEqual(res["status"], "started")
+        mock_popen.assert_called_once()
 
 
 if __name__ == "__main__":
