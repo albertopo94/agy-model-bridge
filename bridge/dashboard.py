@@ -346,8 +346,8 @@ def _make_client_providers(
     providers.append(
         {
             "id": "all",
-            "label_en": "All (AGY + Cursor)",
-            "label_es": "Todos (AGY + Cursor)",
+            "label_en": "All",
+            "label_es": "Todos",
             "auto_cmd": lambda addr: (
                 f"agy-bridge setup-{client_id} --provider all --port {addr.rsplit(':', 1)[1]}"
                 if ":" in addr and addr.rsplit(":", 1)[1].isdigit() and addr.rsplit(":", 1)[1] != "24980"
@@ -1634,12 +1634,12 @@ def render_dashboard(
         "desc_gentle-shell": "An isolated terminal companion for Pi with focused subagents, review mode, and ODD harness.",
         "tab_gentle-shell_agy": "AGY (Antigravity)",
         "tab_gentle-shell_cursor": "Cursor (Agent)",
-        "tab_gentle-shell_all": "All (AGY + Cursor)",
+        "tab_gentle-shell_all": "All",
         "tab_gentle-shell_freellmapi": "FreeLLMAPI",
         "tab_agy": "AGY (Antigravity)",
         "tab_cursor": "Cursor (Agent)",
         "tab_opencode": "OpenCode (Free)",
-        "tab_all": "All (AGY + Cursor)",
+        "tab_all": "All",
         "tab_freellmapi": "FreeLLMAPI",
         "tip_warning_gentle-shell_freellmapi": "⚠️ Requires FreeLLMAPI gateway running on http://127.0.0.1:31415",
         "tip_warning_cursor_free": "On Cursor's Free plan, only 'cursor/auto' is available due to Cursor restrictions (upgrade to Pro for named models).",
@@ -1701,12 +1701,12 @@ def render_dashboard(
         "desc_gentle-shell": "Un entorno de terminal aislado para Pi con subagentes enfocados, modo review y arn\u00e9s ODD.",
         "tab_gentle-shell_agy": "AGY (Antigravity)",
         "tab_gentle-shell_cursor": "Cursor (Agent)",
-        "tab_gentle-shell_all": "Todos (AGY + Cursor)",
+        "tab_gentle-shell_all": "Todos",
         "tab_gentle-shell_freellmapi": "FreeLLMAPI",
         "tab_agy": "AGY (Antigravity)",
         "tab_cursor": "Cursor (Agent)",
         "tab_opencode": "OpenCode (Gratis)",
-        "tab_all": "Todos (AGY + Cursor)",
+        "tab_all": "Todos",
         "tab_freellmapi": "FreeLLMAPI",
         "tip_warning_gentle-shell_freellmapi": "⚠️ Requiere el gateway de FreeLLMAPI corriendo en http://127.0.0.1:31415",
         "tip_warning_cursor_free": "En el plan Free de Cursor solo está disponible el modelo 'cursor/auto' por restricciones de Cursor (los modelos específicos requieren plan Pro).",

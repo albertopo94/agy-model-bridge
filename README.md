@@ -115,6 +115,14 @@ agy-bridge setup-claude
 agy-bridge setup-codex
 ```
 
+#### Multi-Provider Selection ("All" / "Todos" tab)
+
+Each client setup card on the web dashboard provides tabs for one-click configuration:
+- **AGY**: Configures Google Cloud Code Assist models exclusively (`gemini-*`, `claude-*`).
+- **Cursor**: Configures local Cursor CLI models (`cursor/auto`, `cursor/gpt-5.3-codex`, etc.).
+- **OpenCode**: Configures local OpenCode CLI free-tier models (`opencode/*-free`).
+- **All / Todos**: Configures multiple model providers side-by-side in your tool's settings (via CLI flag: `--provider all`). In tools with model pickers (Claude Code, Pi, Gentle Shell, Codex), this allows you to seamlessly switch between Antigravity, Cursor, and OpenCode models on the fly without re-running setup commands.
+
 ### 3. Manage the Background Service
 
 ```bash
@@ -277,7 +285,7 @@ availability could not be verified. Pass `--no-check-availability` to always wri
 full preset without the query. `cursor` models are never filtered.
 
 Options:
-- `--provider <agy|cursor|all>`: Choose provider to configure (default: `agy`).
+- `--provider <agy|cursor|opencode|all>`: Choose provider to configure (default: `agy`).
 - `--set-default`: Also sets the provider and default model in `~/.pi/agent/settings.json`.
 - `--model <name>`: Specify a default model (default: `gemini-3.8-flash-high` for AGY, `cursor/auto` for Cursor).
 
@@ -316,7 +324,7 @@ This surgically configures `~/.gentle-shell/agent/models.json` with:
 - Base URL: `http://127.0.0.1:24980/v1`
 
 Options:
-- `--provider <agy|cursor|all|freellmapi>`: Choose provider to configure (default: `agy`).
+- `--provider <agy|cursor|opencode|all|freellmapi>`: Choose provider to configure (default: `agy`).
 - `--api-key <key>`: Provider API key (required for FreeLLMAPI).
 - `--set-default`: Also sets the provider and model as defaults in `~/.gentle-shell/agent/settings.json`.
 - `--model <name>`: Specify a default model (default: `gemini-3.8-flash-high` for AGY, `cursor/auto` for Cursor).

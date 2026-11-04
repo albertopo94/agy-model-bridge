@@ -1077,7 +1077,7 @@ class TestDashboardBilingual(unittest.TestCase):
         # Spanish translation
         html_es = render_dashboard("127.0.0.1", 24980, auth_status, models_count=10, lang="es")
         self.assertIn("En el plan Free de Cursor solo está disponible el modelo 'cursor/auto'", html_es)
-        self.assertIn("Todos (AGY + Cursor)", html_es)
+        self.assertIn(">Todos</button>", html_es)
 
 
 if __name__ == "__main__":
