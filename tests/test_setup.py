@@ -1496,7 +1496,7 @@ class TestUninstall(unittest.TestCase):
         core_dir.mkdir(parents=True, exist_ok=True)
         (core_dir / "bridge").mkdir(parents=True, exist_ok=True)
         (core_dir / "bridge" / "__init__.py").write_text("# core\n", encoding="utf-8")
-        (core_dir / ".agy-bridge-installed").write_text("v0.33.0\n", encoding="utf-8")
+        (core_dir / ".agy-bridge-installed").write_text("v0.34.0\n", encoding="utf-8")
 
         with unittest.mock.patch("bridge.daemon.stop_daemon", return_value={"status": "not_running"}):
             result = uninstall(
@@ -1675,7 +1675,7 @@ class TestUpdateInstallation(unittest.TestCase):
 
         self.assertEqual(result["status"], "updated")
         self.assertTrue(result["restarted_daemon"])
-        self.assertEqual(result["version"], "0.33.0")
+        self.assertEqual(result["version"], "0.34.0")
         mock_run.assert_called_once_with(
             ["git", "-C", str(self.repo_dir), "pull", "--ff-only"],
             capture_output=True,
@@ -1873,7 +1873,7 @@ class TestUpdateInstallation(unittest.TestCase):
         fetch_res = unittest.mock.MagicMock(returncode=0)
         tags_res = unittest.mock.MagicMock(
             returncode=0,
-            stdout="v0.33.0\nv0.27.1\n",
+            stdout="v0.34.0\nv0.27.1\n",
         )
         checkout_res = unittest.mock.MagicMock(
             returncode=0,
@@ -2056,7 +2056,7 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main([flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.33.0")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.34.0")
 
     def test_cli_subcommand_version_flags(self):
         from bridge.__main__ import main
@@ -2068,7 +2068,7 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main(["update", flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.33.0")
+            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.34.0")
 
     def test_cli_restart_dispatch(self):
         from bridge.__main__ import main
@@ -2084,12 +2084,12 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
         from pathlib import Path
         import re
 
-        self.assertEqual(bridge.__version__, "0.33.0")
+        self.assertEqual(bridge.__version__, "0.34.0")
         pyproject_path = Path(__file__).resolve().parent.parent / "pyproject.toml"
         pyproject_text = pyproject_path.read_text(encoding="utf-8")
         match = re.search(r'version\s*=\s*"([^"]+)"', pyproject_text)
         self.assertIsNotNone(match)
-        self.assertEqual(match.group(1), "0.33.0")
+        self.assertEqual(match.group(1), "0.34.0")
 
     def test_config_path_instantiation_and_backup_attribute(self):
         from bridge.setup.base import ConfigPath
@@ -2199,6 +2199,20 @@ class TestClaudeConfiguratorStrategy(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
+    def test_setup_provider_opencode_writes_opencode_models(self):
+        """RED (T1/S2): --provider opencode configura el cliente contra modelos opencode/*."""
+        target = self.dir_path / "settings.json"
+        self.configurator.setup(config_path=target, provider="opencode")
+        data = json.loads(target.read_text(encoding="utf-8"))
+        env = data["env"]
+        self.assertTrue(env["ANTHROPIC_MODEL"].startswith("opencode/"), env["ANTHROPIC_MODEL"])
+        self.assertTrue(env["ANTHROPIC_BASE_URL"].startswith("http://127.0.0.1"))
+        opts = data["modelPicker"]["options"]
+        models = [o["model"] for o in opts]
+        self.assertTrue(all(m.startswith("opencode/") for m in models), models)
+        self.assertTrue(any("[OpenCode]" in o["label"] for o in opts), [o["label"] for o in opts][:3])
+        self.assertIn("opencode/pulse-alpha-free", models)
+
     def test_paths(self):
         with unittest.mock.patch("pathlib.Path.home", return_value=self.dir_path):
             self.assertEqual(
@@ -2281,6 +2295,17 @@ class TestCodexConfiguratorStrategy(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
+    def test_setup_provider_opencode_writes_opencode_block(self):
+        """RED (T2/S2): --provider opencode escribe bloque con model opencode/* y provider opencode."""
+        target = self.dir_path / "config.toml"
+        self.configurator.setup(config_path=target, provider="opencode")
+        content = target.read_text(encoding="utf-8")
+        self.assertIn('model = "opencode/pulse-alpha-free"', content)
+        self.assertIn('model_provider = "opencode"', content)
+        self.assertIn("[model_providers.opencode]", content)
+        self.assertIn("# agy:start", content)
+        self.assertIn("http://127.0.0.1:24980/v1", content)
+
     def test_paths(self):
         with unittest.mock.patch("pathlib.Path.home", return_value=self.dir_path):
             self.assertEqual(
@@ -2352,6 +2377,15 @@ class TestHermesConfiguratorStrategy(unittest.TestCase):
 
     def tearDown(self):
         self.temp_dir.cleanup()
+
+    def test_setup_provider_opencode_default_model(self):
+        """RED (T3/S2): --provider opencode pone default opencode/* en el bloque hermes."""
+        target = self.dir_path / "config.yaml"
+        self.configurator.setup(config_path=target, provider="opencode")
+        content = target.read_text(encoding="utf-8")
+        self.assertIn('default: "opencode/pulse-alpha-free"', content)
+        self.assertIn("# agy:start", content)
+        self.assertIn("http://127.0.0.1:24980/v1", content)
 
     def test_paths(self):
         with unittest.mock.patch("pathlib.Path.home", return_value=self.dir_path):
@@ -3084,6 +3118,21 @@ class TestOpenClawConfigurator(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
+    def test_setup_provider_opencode_writes_opencode_provider(self):
+        """RED (T4c/S2): OpenClaw --provider opencode crea providers.opencode con modelos opencode/*."""
+        target = self.dir_path / "openclaw.json"
+        self.configurator.setup(config_path=target, provider="opencode")
+        data = json.loads(target.read_text(encoding="utf-8"))
+        provs = data["models"]["providers"]
+        self.assertIn("opencode", provs)
+        self.assertNotIn("agy", provs)
+        self.assertNotIn("cursor", provs)
+        ids = [m["id"] for m in provs["opencode"]["models"]]
+        self.assertTrue(all(i.startswith("opencode/") for i in ids), ids[:3])
+        self.assertIn("opencode/pulse-alpha-free", ids)
+        self.assertTrue(all("[OpenCode]" in m["name"] for m in provs["opencode"]["models"]))
+        self.assertEqual(data["agents"]["defaults"]["model"]["primary"], "opencode/pulse-alpha-free")
+
     def test_default_config_path_precedence(self):
         # 1. OPENCLAW_CONFIG_PATH override
         custom_path = self.dir_path / "custom" / "custom_openclaw.json"
@@ -3676,6 +3725,20 @@ class TestPiConfigurator(unittest.TestCase):
 
     def tearDown(self):
         self.temp_dir.cleanup()
+
+    def test_setup_provider_opencode_writes_opencode_provider(self):
+        """RED (T4a/S2): --provider opencode crea providers.opencode con modelos opencode/*."""
+        target = self.dir_path / "models.json"
+        self.configurator.setup(config_path=target, provider="opencode")
+        data = json.loads(target.read_text(encoding="utf-8"))
+        provs = data["providers"]
+        self.assertIn("opencode", provs)
+        self.assertNotIn("agy", provs)
+        self.assertNotIn("cursor", provs)
+        ids = [m["id"] for m in provs["opencode"]["models"]]
+        self.assertTrue(all(i.startswith("opencode/") for i in ids), ids[:3])
+        self.assertIn("opencode/pulse-alpha-free", ids)
+        self.assertTrue(all("[OpenCode]" in m["name"] for m in provs["opencode"]["models"]))
 
     def test_properties(self):
         self.assertEqual(self.configurator.name, "pi")
@@ -4352,6 +4415,20 @@ class TestGentleShellConfigurator(unittest.TestCase):
 
     def tearDown(self):
         self.temp_dir.cleanup()
+
+    def test_setup_provider_opencode_writes_opencode_provider(self):
+        """RED (T4b/S2): GentleShell --provider opencode crea providers.opencode con modelos opencode/*."""
+        target = self.dir_path / "models.json"
+        self.configurator.setup(config_path=target, provider="opencode")
+        data = json.loads(target.read_text(encoding="utf-8"))
+        provs = data["providers"]
+        self.assertIn("opencode", provs)
+        self.assertNotIn("agy", provs)
+        self.assertNotIn("cursor", provs)
+        ids = [m["id"] for m in provs["opencode"]["models"]]
+        self.assertTrue(all(i.startswith("opencode/") for i in ids), ids[:3])
+        self.assertIn("opencode/pulse-alpha-free", ids)
+        self.assertTrue(all("[OpenCode]" in m["name"] for m in provs["opencode"]["models"]))
 
     def test_properties(self):
         self.assertEqual(self.configurator.name, "gentle-shell")
@@ -5309,7 +5386,7 @@ class TestInstallScript(unittest.TestCase):
         sentinel = self.state_dir / "core" / ".agy-bridge-installed"
         self.assertTrue(sentinel.exists())
         self.assertEqual(stat.S_IMODE(sentinel.stat().st_mode), 0o600)
-        self.assertEqual(sentinel.read_text(encoding="utf-8").strip(), "v0.33.0")
+        self.assertEqual(sentinel.read_text(encoding="utf-8").strip(), "v0.34.0")
 
     def test_install_script_launcher_immune_to_cwd_hijacking(self):
         res = subprocess.run(

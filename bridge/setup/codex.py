@@ -6,6 +6,7 @@ from typing import Any, cast
 
 from bridge.setup.base import ClientConfigurator, ConfigPath, get_configurator
 from bridge.setup.common import (
+    DEFAULT_OPENCODE_UPSTREAM_MODEL,
     atomic_write_file,
     create_backup,
     get_active_api_key,
@@ -42,6 +43,22 @@ def build_codex_block(
             "model_auto_compact_token_limit = 180000\n\n"
             "[model_providers.cursor]\n"
             'name = "cursor"\n'
+            f'base_url = "{base_url}"\n'
+            'wire_api = "responses"\n'
+            "requires_openai_auth = false\n"
+            f"{headers_line}"
+            "# agy:end"
+        )
+    elif p == "opencode":
+        def_model = model if model and model.startswith("opencode/") else DEFAULT_OPENCODE_UPSTREAM_MODEL
+        return (
+            "# agy:start\n"
+            f'model = "{def_model}"\n'
+            'model_provider = "opencode"\n'
+            "model_context_window = 1048576\n"
+            "model_auto_compact_token_limit = 943718\n\n"
+            "[model_providers.opencode]\n"
+            'name = "opencode"\n'
             f'base_url = "{base_url}"\n'
             'wire_api = "responses"\n'
             "requires_openai_auth = false\n"

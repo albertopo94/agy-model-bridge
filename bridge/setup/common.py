@@ -283,3 +283,18 @@ def restore_backup(config_path: Path, backup_path: Path | None = None) -> Path:
 def get_active_api_key(daemon_dir: Path | None = None) -> str:
     """Returns the active persistent API key for the bridge."""
     return get_or_create_api_key(daemon_dir=daemon_dir)
+
+
+def opencode_provider_models() -> list[tuple[str, str]]:
+    """Devuelve (model_id, label) para los modelos free de OpenCode como upstream.
+
+    Centraliza el picker de modelos que cada configurador de cliente usa cuando
+    se configura con --provider opencode, para que el tag [OpenCode] y el set
+    free-tier sean consistentes entre todos los agentes.
+    """
+    from bridge.opencode_backend import OPENCODE_FREE_MODELS, format_opencode_model_display_name
+
+    return [(m, format_opencode_model_display_name(m)) for m in sorted(OPENCODE_FREE_MODELS)]
+
+
+DEFAULT_OPENCODE_UPSTREAM_MODEL = "opencode/pulse-alpha-free"

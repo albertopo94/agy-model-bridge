@@ -8,6 +8,8 @@ from typing import Any, cast
 from bridge.setup.availability import split_by_availability
 from bridge.setup.base import ClientConfigurator, ConfigPath, get_configurator
 from bridge.setup.common import (
+    DEFAULT_OPENCODE_UPSTREAM_MODEL,
+    opencode_provider_models,
     _strip_json_comments,
     atomic_write_file,
     create_backup,
@@ -71,6 +73,20 @@ DEFAULT_CURSOR_OPENCLAW_MODELS: list[dict[str, Any]] = [
         "contextWindow": 256000,
         "maxTokens": 32000,
     },
+]
+
+
+DEFAULT_OPENCODE_OPENCLAW_MODELS: list[dict[str, Any]] = [
+    {
+        "id": mid,
+        "name": label,
+        "reasoning": False,
+        "input": ["text"],
+        "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+        "contextWindow": 1048576,
+        "maxTokens": 65536,
+    }
+    for mid, label in opencode_provider_models()
 ]
 
 
@@ -260,13 +276,31 @@ class OpenClawConfigurator(ClientConfigurator):
         agents = config.setdefault("agents", {})
         defaults = agents.setdefault("defaults", {})
         model_dict = defaults.setdefault("model", {})
-        model_dict["primary"] = f"agy/{model}"
+        provider = str(kwargs.get("provider") or "agy").lower()
+
+        if provider == "opencode":
+            def_model = model if (model and model.startswith("opencode/")) else DEFAULT_OPENCODE_UPSTREAM_MODEL
+            model_dict["primary"] = def_model
+        elif provider == "cursor":
+            def_model = model if model != "gemini-3.8-flash-high" else "cursor/auto"
+            model_dict["primary"] = def_model if def_model.startswith("cursor/") else f"cursor/{def_model}"
+        elif provider in ("all", "todos"):
+            model_dict["primary"] = model if model.startswith("cursor/") or model.startswith("opencode/") else f"agy/{model or 'gemini-3.8-flash-high'}"
+        else:
+            model_dict["primary"] = f"agy/{model}"
 
         models_dict = config.setdefault("models", {})
         providers = models_dict.setdefault("providers", {})
-        provider = str(kwargs.get("provider") or "agy").lower()
 
-        if provider in ("cursor", "all", "todos"):
+        if provider == "opencode":
+            providers["opencode"] = {
+                "baseUrl": resolved_url,
+                "apiKey": auth_token,
+                "api": "openai-completions",
+                "headers": {"User-Agent": "openclaw"},
+                "models": [dict(m) for m in DEFAULT_OPENCODE_OPENCLAW_MODELS],
+            }
+        elif provider in ("cursor", "all", "todos"):
             providers["cursor"] = {
                 "baseUrl": resolved_url,
                 "apiKey": auth_token,
@@ -336,11 +370,14 @@ class OpenClawConfigurator(ClientConfigurator):
                         if isinstance(models_dict, dict):
                             prov = models_dict.get("providers")
                             if isinstance(prov, dict):
-                                if provider == "cursor":
+                                if provider == "opencode":
+                                    prov.pop("opencode", None)
+                                elif provider == "cursor":
                                     prov.pop("cursor", None)
                                 elif provider in ("all", "todos"):
                                     prov.pop("agy", None)
                                     prov.pop("cursor", None)
+                                    prov.pop("opencode", None)
                                 else:
                                     prov.pop("agy", None)
                         agents = config.get("agents")
@@ -350,7 +387,7 @@ class OpenClawConfigurator(ClientConfigurator):
                                 model_dict = defaults.get("model")
                                 if isinstance(model_dict, dict):
                                     prim = str(model_dict.get("primary", ""))
-                                    if prim.startswith("agy/") or prim.startswith("cursor/"):
+                                    if prim.startswith("agy/") or prim.startswith("cursor/") or prim.startswith("opencode/"):
                                         model_dict.pop("primary", None)
 
                         formatted_json = json.dumps(config, indent=2) + "\n"

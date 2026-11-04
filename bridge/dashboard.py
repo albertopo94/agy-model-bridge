@@ -294,8 +294,9 @@ def _make_client_providers(
     agy_restore: Any,
     docs_url: str,
     cursor_snippet: Any = None,
+    opencode_snippet: Any = None,
 ) -> list[dict[str, Any]]:
-    return [
+    providers: list[dict[str, Any]] = [
         {
             "id": "agy",
             "label_en": "AGY (Antigravity)",
@@ -320,6 +321,29 @@ def _make_client_providers(
             "restore_cmd": lambda addr: f"agy-bridge restore-{client_id} --provider cursor",
             "docs_url": "https://cursor.com/docs/cli/overview",
         },
+    ]
+
+    # OpenCode is a third upstream, so client cards that configure against bridge
+    # upstreams gain an opencode tab. The opencode card itself never configures
+    # against itself, and guide-only cards (cursor, freellmapi) have no providers.
+    if client_id != "opencode":
+        providers.append(
+            {
+                "id": "opencode",
+                "label_en": "OpenCode (Free)",
+                "label_es": "OpenCode (Gratis)",
+                "auto_cmd": lambda addr: (
+                    f"agy-bridge setup-{client_id} --provider opencode --model opencode/pulse-alpha-free --port {addr.rsplit(':', 1)[1]}"
+                    if ":" in addr and addr.rsplit(":", 1)[1].isdigit() and addr.rsplit(":", 1)[1] != "24980"
+                    else f"agy-bridge setup-{client_id} --provider opencode --model opencode/pulse-alpha-free"
+                ),
+                "manual_snippet": opencode_snippet if opencode_snippet is not None else agy_snippet,
+                "restore_cmd": lambda addr: f"agy-bridge restore-{client_id} --provider opencode",
+                "docs_url": "https://opencode.ai/docs",
+            }
+        )
+
+    providers.append(
         {
             "id": "all",
             "label_en": "All (AGY + Cursor)",
@@ -332,8 +356,10 @@ def _make_client_providers(
             "manual_snippet": agy_snippet,
             "restore_cmd": lambda addr: f"agy-bridge restore-{client_id} --provider all",
             "docs_url": docs_url,
-        },
-    ]
+        }
+    )
+
+    return providers
 
 
 CLIENT_CARDS: list[dict[str, Any]] = [
@@ -363,6 +389,7 @@ CLIENT_CARDS: list[dict[str, Any]] = [
             lambda addr: "agy-bridge restore-claude",
             "https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview",
             cursor_snippet=lambda addr, api_key='$(cat ~/.agy-bridge/api_key)': f'export ANTHROPIC_BASE_URL="http://{addr}"\nexport ANTHROPIC_AUTH_TOKEN="{api_key}"\nexport ANTHROPIC_MODEL="cursor/auto"',
+            opencode_snippet=lambda addr, api_key='$(cat ~/.agy-bridge/api_key)': f'export ANTHROPIC_BASE_URL="http://{addr}"\nexport ANTHROPIC_AUTH_TOKEN="{api_key}"\nexport ANTHROPIC_MODEL="opencode/pulse-alpha-free"',
         ),
     },
     {
@@ -424,6 +451,19 @@ CLIENT_CARDS: list[dict[str, Any]] = [
                 f'model_auto_compact_token_limit = 180000\n\n'
                 f'[model_providers.cursor]\n'
                 f'name = "cursor"\n'
+                f'base_url = "http://{addr}/v1"\n'
+                f'wire_api = "responses"\n'
+                f'requires_openai_auth = false\n'
+                f'http_headers = {{ Authorization = "Bearer {api_key if not str(api_key).startswith("$(") else "<YOUR_API_KEY>"}" }}'
+            ),
+            opencode_snippet=lambda addr, api_key='<YOUR_API_KEY>': (
+                f'# ~/.codex/config.toml\n'
+                f'model = "opencode/pulse-alpha-free"\n'
+                f'model_provider = "opencode"\n'
+                f'model_context_window = 1048576\n'
+                f'model_auto_compact_token_limit = 943718\n\n'
+                f'[model_providers.opencode]\n'
+                f'name = "opencode"\n'
                 f'base_url = "http://{addr}/v1"\n'
                 f'wire_api = "responses"\n'
                 f'requires_openai_auth = false\n'
@@ -1598,6 +1638,7 @@ def render_dashboard(
         "tab_gentle-shell_freellmapi": "FreeLLMAPI",
         "tab_agy": "AGY (Antigravity)",
         "tab_cursor": "Cursor (Agent)",
+        "tab_opencode": "OpenCode (Free)",
         "tab_all": "All (AGY + Cursor)",
         "tab_freellmapi": "FreeLLMAPI",
         "tip_warning_gentle-shell_freellmapi": "⚠️ Requires FreeLLMAPI gateway running on http://127.0.0.1:31415",
@@ -1664,6 +1705,7 @@ def render_dashboard(
         "tab_gentle-shell_freellmapi": "FreeLLMAPI",
         "tab_agy": "AGY (Antigravity)",
         "tab_cursor": "Cursor (Agent)",
+        "tab_opencode": "OpenCode (Gratis)",
         "tab_all": "Todos (AGY + Cursor)",
         "tab_freellmapi": "FreeLLMAPI",
         "tip_warning_gentle-shell_freellmapi": "⚠️ Requiere el gateway de FreeLLMAPI corriendo en http://127.0.0.1:31415",

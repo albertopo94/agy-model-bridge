@@ -19,7 +19,7 @@ Zero-dependency, pure Python 3 local AI gateway that bridges the Google Cloud Co
   - Transparently routes `cursor/*` and exclusive Cursor models (`gpt-5.3-codex`, `composer-2.5`, `grok-4.7`, etc.) to Cursor while serving Google models (`gemini-*`, `claude-*`) via Antigravity.
   - On Cursor Free tier, defaults to `cursor/auto` with clear notices, while supporting named models on Pro/Business tiers.
   - **OpenCode Free Tier**: Exposes the free-tier models discovered from `opencode models` (ids ending in `-free`, e.g. `opencode/pulse-alpha-free`) with `[OpenCode]` display-name tags, executed through a pre-warmed `opencode acp` process with an `opencode run` fallback. Upstream region blocks (free pools run on third-party clouds) are reported as clear 403 errors naming the model instead of silent stream interruptions.
-- **Built-in Setup CLI**: Native subcommands (`setup-claude`, `setup-codex`, `setup-hermes`, `setup-opencode`, `setup-openclaw`, `setup-cursor`, `setup-pi`, `setup-gentle-shell`) that surgically configure client environments with atomic writes, file permissions `0o600`, automatic timestamped backups, and multi-provider selection (`--provider agy|cursor|all`).
+- **Built-in Setup CLI**: Native subcommands (`setup-claude`, `setup-codex`, `setup-hermes`, `setup-opencode`, `setup-openclaw`, `setup-cursor`, `setup-pi`, `setup-gentle-shell`) that surgically configure client environments with atomic writes, file permissions `0o600`, automatic timestamped backups, and multi-provider selection (`--provider agy|cursor|opencode|all`).
 - **Automatic Local API Key Security**: Automatically generates a persistent random API key stored at `~/.agy-bridge/api_key` (`0600` permissions) to protect `/v1/*` gateway endpoints against cross-origin access.
 - **macOS Keychain OAuth Integration**: Seamlessly extracts Google OAuth credentials (`service="gemini"`, `account="antigravity"`) and Cursor session JWTs (`service="cursor-access-token"`, `account="cursor-user"`) directly from macOS Keychain with thread-safe TTL caching.
 - **Antigravity & Cursor Model Quota Tracking**: Real-time quota monitoring on the dashboard and JSON endpoints (`GET /api/quota` and `GET /api/cursor/quota`). Displays visual usage bars and reset countdowns for Antigravity pools (Gemini and 3P) and Cursor buckets (`Cursor Models`, `Other Models`, `Plan`). `GET /api/opencode/status` reports OpenCode CLI availability, version, and exposed free model count (OpenCode exposes no provider quota API, so no limit bars are shown).
@@ -438,7 +438,7 @@ Execute the complete test suite:
 python3 -m unittest discover -s tests -v
 ```
 
-All 1143 tests run in ~3-4 seconds locally with zero external dependencies and zero network access.
+All 1155 tests run in ~3-4 seconds locally with zero external dependencies and zero network access.
 
 ### End-to-End Smoke Test
 

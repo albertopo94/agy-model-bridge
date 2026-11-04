@@ -1137,3 +1137,30 @@ class TestAgyAvailabilityBadge(unittest.TestCase):
                 html = render_dashboard("127.0.0.1", 24980, auth, 10)
                 self.assertIn("AGY unavailable", html)
                 self.assertNotIn("AGY available", html)
+
+
+class TestOpencodeProviderTabOnClientCards(unittest.TestCase):
+    """RED (T5/S1/S4): The opencode provider tab must be added to client cards
+    that configure against bridge upstreams (claude, codex, hermes, pi,
+    gentle-shell, openclaw), but MUST NOT appear on opencode itself (no self-
+    injection), cursor, or freellmapi."""
+
+    def _render(self):
+        auth = {"status": "Valid", "email": "d@e.com", "message": "ok"}
+        return render_dashboard("127.0.0.1", 24980, auth, 10)
+
+    def test_opencode_tab_present_on_eligible_clients(self):
+        html = self._render()
+        for cid in ("claude", "codex", "hermes", "pi", "gentle-shell", "openclaw"):
+            with self.subTest(client=cid):
+                self.assertIn(f'data-card="{cid}" data-provider="opencode"', html)
+                # auto command points to setup-<cid> --provider opencode
+                self.assertIn(f"setup-{cid} --provider opencode", html)
+
+    def test_opencode_tab_excluded_from_ineligible_cards(self):
+        html = self._render()
+        # 1. opencode card must never offer to configure itself against opencode
+        self.assertNotIn('data-card="opencode" data-provider="opencode"', html)
+        # 2. cursor and freellmapi cards must never have opencode provider tabs
+        self.assertNotIn('data-card="cursor" data-provider="opencode"', html)
+        self.assertNotIn('data-card="freellmapi" data-provider="opencode"', html)

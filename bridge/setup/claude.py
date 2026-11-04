@@ -6,6 +6,8 @@ from typing import Any, cast
 
 from bridge.setup.base import ClientConfigurator, ConfigPath, get_configurator
 from bridge.setup.common import (
+    DEFAULT_OPENCODE_UPSTREAM_MODEL,
+    opencode_provider_models,
     atomic_write_file,
     create_backup,
     get_active_api_key,
@@ -209,6 +211,15 @@ class ClaudeConfigurator(ClientConfigurator):
                 effective_model = model or "gemini-3.8-flash-high"
             model_options = [dict(opt) for opt in DEFAULT_CLAUDE_MODEL_PICKER_OPTIONS] + [
                 dict(opt) for opt in DEFAULT_CURSOR_CLAUDE_MODEL_PICKER_OPTIONS
+            ]
+        elif provider == "opencode":
+            if model and model.startswith("opencode/"):
+                effective_model = model
+            else:
+                effective_model = DEFAULT_OPENCODE_UPSTREAM_MODEL
+            model_options = [
+                {"model": mid, "label": label, "behavesAs": "claude-3-7-sonnet"}
+                for mid, label in opencode_provider_models()
             ]
         else:
             model_options = [dict(opt) for opt in DEFAULT_CLAUDE_MODEL_PICKER_OPTIONS]
