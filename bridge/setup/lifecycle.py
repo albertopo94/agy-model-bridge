@@ -63,15 +63,24 @@ def uninstall(
             "backups_purged": bool,
         }
     """
-    default_daemon = Path(os.environ.get("AGY_BRIDGE_STATE_DIR", Path.home() / ".agy-bridge"))
+    state_env = os.environ.get("ABRIDGE_STATE_DIR") or os.environ.get("AGY_BRIDGE_STATE_DIR")
+    if state_env:
+        default_daemon = Path(state_env)
+    elif (Path.home() / ".abridge").exists():
+        default_daemon = Path.home() / ".abridge"
+    elif (Path.home() / ".agy-bridge").exists():
+        default_daemon = Path.home() / ".agy-bridge"
+    else:
+        default_daemon = Path.home() / ".abridge"
+
     resolved_daemon_dir = Path(daemon_dir) if daemon_dir is not None else default_daemon
     if bin_dir is not None:
         resolved_bin_dir = Path(bin_dir)
-    elif os.environ.get("AGY_BRIDGE_BIN"):
-        resolved_bin_dir = Path(os.environ["AGY_BRIDGE_BIN"])
+    elif os.environ.get("ABRIDGE_BIN") or os.environ.get("AGY_BRIDGE_BIN"):
+        resolved_bin_dir = Path(os.environ.get("ABRIDGE_BIN") or os.environ["AGY_BRIDGE_BIN"])
     else:
         resolved_bin_dir = Path.home() / ".local" / "bin"
-    core_dir_env = os.environ.get("AGY_BRIDGE_CORE_DIR")
+    core_dir_env = os.environ.get("ABRIDGE_CORE_DIR") or os.environ.get("AGY_BRIDGE_CORE_DIR")
     resolved_core_dir = Path(core_dir_env) if core_dir_env else None
 
     # 1. Stop daemon if running
@@ -116,7 +125,7 @@ def uninstall(
 
     # 4. Remove launcher scripts
     binaries_removed: list[str] = []
-    for binary_name in ("agy-bridge", "agy-model-bridge"):
+    for binary_name in ("abridge", "agy-bridge", "agy-model-bridge"):
         target_bin = resolved_bin_dir / binary_name
         if target_bin.exists() or target_bin.is_symlink():
             try:
@@ -258,25 +267,30 @@ def update_installation(
     target_dir: Path | None = None
     if core_dir is not None:
         target_dir = Path(core_dir)
-    elif os.environ.get("AGY_BRIDGE_CORE_DIR"):
-        target_dir = Path(os.environ["AGY_BRIDGE_CORE_DIR"])
+    elif os.environ.get("ABRIDGE_CORE_DIR") or os.environ.get("AGY_BRIDGE_CORE_DIR"):
+        target_dir = Path(os.environ.get("ABRIDGE_CORE_DIR") or os.environ["AGY_BRIDGE_CORE_DIR"])
     else:
-        state_dir_env = os.environ.get("AGY_BRIDGE_STATE_DIR")
-        base_state = Path(state_dir_env) if state_dir_env else Path.home() / ".agy-bridge"
-        persisted_core = base_state / ".core_dir"
-        if persisted_core.is_file():
-            try:
-                candidate = persisted_core.read_text(encoding="utf-8").strip()
-                target_dir = Path(candidate) if candidate else None
-            except OSError:
-                target_dir = None
+        state_dir_env = os.environ.get("ABRIDGE_STATE_DIR") or os.environ.get("AGY_BRIDGE_STATE_DIR")
+        if state_dir_env:
+            base_states = [Path(state_dir_env)]
         else:
-            target_dir = None
+            base_states = [Path.home() / ".abridge", Path.home() / ".agy-bridge"]
 
-        if target_dir is None:
-            default_dir = base_state / "core"
-            if (default_dir / ".git").exists():
-                target_dir = default_dir
+        for base_state in base_states:
+            persisted_core = base_state / ".core_dir"
+            if persisted_core.is_file():
+                try:
+                    candidate = persisted_core.read_text(encoding="utf-8").strip()
+                    if candidate and Path(candidate).exists():
+                        target_dir = Path(candidate)
+                        break
+                except OSError:
+                    target_dir = None
+            if target_dir is None:
+                default_dir = base_state / "core"
+                if (default_dir / ".git").exists():
+                    target_dir = default_dir
+                    break
             else:
                 repo_root = Path(__file__).resolve().parents[2]
                 if (repo_root / ".git").exists():

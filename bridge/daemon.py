@@ -31,9 +31,13 @@ START_LOG_TAIL_LINES = 12
 START_LOG_TAIL_BYTES = 2048
 
 def get_default_daemon_dir() -> Path:
-    state_dir = os.environ.get("AGY_BRIDGE_STATE_DIR")
+    state_dir = os.environ.get("ABRIDGE_STATE_DIR") or os.environ.get("AGY_BRIDGE_STATE_DIR")
     if state_dir:
         return Path(state_dir)
+    return Path.home() / ".abridge"
+
+
+def get_legacy_daemon_dir() -> Path:
     return Path.home() / ".agy-bridge"
 
 
@@ -103,14 +107,18 @@ def write_pid(pid: int, pid_file: Path | None = None) -> None:
 
 def read_pid(pid_file: Path | None = None) -> int | None:
     """Reads and parses the PID from the PID file. Returns None if invalid or missing."""
-    target = Path(pid_file) if pid_file is not None else get_default_pid_file()
-    if not target.exists() or not target.is_file():
-        return None
-    try:
-        content = target.read_text(encoding="utf-8").strip()
-        return int(content)
-    except (ValueError, OSError):
-        return None
+    if pid_file is not None:
+        targets = [Path(pid_file)]
+    else:
+        targets = [get_default_pid_file(), get_legacy_daemon_dir() / "bridge.pid"]
+    for target in targets:
+        if target.exists() and target.is_file():
+            try:
+                content = target.read_text(encoding="utf-8").strip()
+                return int(content)
+            except (ValueError, OSError):
+                continue
+    return None
 
 
 def remove_pid(pid_file: Path | None = None) -> None:
@@ -154,15 +162,20 @@ def write_daemon_info(info: dict[str, Any], info_file: Path | None = None) -> No
 
 def read_daemon_info(info_file: Path | None = None) -> dict[str, Any] | None:
     """Reads and parses daemon info from bridge.json. Returns None if invalid or missing."""
-    target = Path(info_file) if info_file is not None else get_default_info_file()
-    if not target.exists() or not target.is_file():
-        return None
-    try:
-        content = target.read_text(encoding="utf-8").strip()
-        data = json.loads(content)
-        return data if isinstance(data, dict) else None
-    except (ValueError, OSError, json.JSONDecodeError):
-        return None
+    if info_file is not None:
+        targets = [Path(info_file)]
+    else:
+        targets = [get_default_info_file(), get_legacy_daemon_dir() / "bridge.json"]
+    for target in targets:
+        if target.exists() and target.is_file():
+            try:
+                content = target.read_text(encoding="utf-8").strip()
+                data = json.loads(content)
+                if isinstance(data, dict):
+                    return data
+            except (ValueError, OSError, json.JSONDecodeError):
+                continue
+    return None
 
 
 def remove_daemon_info(info_file: Path | None = None) -> None:
@@ -204,6 +217,8 @@ def is_bridge_process(pid: int | None) -> bool:
             return True
 
         for token in tokens:
+            if token == "abridge" or token.endswith("/abridge"):
+                return True
             if token == "agy-bridge" or token.endswith("/agy-bridge"):
                 return True
             if token == "agy-model-bridge" or token.endswith("/agy-model-bridge"):
@@ -228,7 +243,7 @@ def check_server_healthy(host: str, port: int, timeout: float = 1.0) -> bool:
             data = json.loads(raw)
             return (
                 isinstance(data, dict)
-                and data.get("service") == "agy-model-bridge"
+                and data.get("service") in ("abridge", "abridge-ai", "agy-model-bridge")
                 and data.get("status") == "ok"
             )
     except (urllib.error.URLError, OSError, TimeoutError, json.JSONDecodeError):

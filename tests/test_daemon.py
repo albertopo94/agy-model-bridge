@@ -55,6 +55,16 @@ class TestPidManagement(unittest.TestCase):
         self.pid_file.write_text("invalid_pid_string\n", encoding="utf-8")
         self.assertIsNone(read_pid(pid_file=self.pid_file))
 
+    def test_read_pid_default_falls_back_to_legacy(self):
+        legacy_dir = Path(self.temp_dir.name) / "legacy_daemon"
+        legacy_dir.mkdir(parents=True, exist_ok=True)
+        (legacy_dir / "bridge.pid").write_text("54321\n", encoding="utf-8")
+
+        empty_primary = Path(self.temp_dir.name) / "empty_primary"
+        with patch("bridge.daemon.get_default_daemon_dir", return_value=empty_primary), \
+             patch("bridge.daemon.get_legacy_daemon_dir", return_value=legacy_dir):
+            self.assertEqual(read_pid(), 54321)
+
     def test_remove_pid_existing_and_missing(self):
         write_pid(999, pid_file=self.pid_file)
         self.assertTrue(self.pid_file.exists())
@@ -657,6 +667,11 @@ class TestProcessIdentity(unittest.TestCase):
         self.assertTrue(is_bridge_process(12345))
 
     @patch("subprocess.run")
+    def test_is_bridge_process_matches_abridge_binary(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="/usr/local/bin/abridge start\n")
+        self.assertTrue(is_bridge_process(12345))
+
+    @patch("subprocess.run")
     def test_is_bridge_process_rejects_malicious_module_suffix(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="/usr/bin/python3 -m bridge-malicious\n")
         self.assertFalse(is_bridge_process(12345))
@@ -680,6 +695,16 @@ class TestProcessIdentity(unittest.TestCase):
 class TestHealthCheck(unittest.TestCase):
     @patch("urllib.request.urlopen")
     def test_check_server_healthy_matches_valid_service_identity(self, mock_urlopen):
+        resp = MagicMock()
+        resp.status = 200
+        resp.read.return_value = b'{"status": "ok", "service": "abridge", "version": "0.35.0"}'
+        resp.__enter__.return_value = resp
+        mock_urlopen.return_value = resp
+
+        self.assertTrue(check_server_healthy("127.0.0.1", 24980))
+
+    @patch("urllib.request.urlopen")
+    def test_check_server_healthy_matches_legacy_service_identity(self, mock_urlopen):
         resp = MagicMock()
         resp.status = 200
         resp.read.return_value = b'{"status": "ok", "service": "agy-model-bridge", "version": "0.34.1"}'

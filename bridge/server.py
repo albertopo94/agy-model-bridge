@@ -521,7 +521,7 @@ class OpenAIRequestHandler(http.server.BaseHTTPRequestHandler):
                 200,
                 {
                     "status": "ok",
-                    "service": "agy-model-bridge",
+                    "service": "abridge",
                     "version": __version__,
                 },
             )

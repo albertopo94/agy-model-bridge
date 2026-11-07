@@ -1128,6 +1128,8 @@ class TestUninstall(unittest.TestCase):
         self.assertFalse(self.daemon_dir.exists())
 
     def test_uninstall_removes_launcher_binaries(self):
+        bin0 = self.bin_dir / "abridge"
+        bin0.write_text("#!/bin/sh\n", encoding="utf-8")
         bin1 = self.bin_dir / "agy-bridge"
         bin1.write_text("#!/bin/sh\n", encoding="utf-8")
         bin2 = self.bin_dir / "agy-model-bridge"
@@ -1141,9 +1143,11 @@ class TestUninstall(unittest.TestCase):
             hermes_config_path=self.hermes_config,
         )
 
+        self.assertFalse(bin0.exists())
         self.assertFalse(bin1.exists())
         self.assertFalse(bin2.exists())
         self.assertFalse(bin2.is_symlink())
+        self.assertIn(str(bin0), result["binaries_removed"])
         self.assertIn(str(bin1), result["binaries_removed"])
         self.assertIn(str(bin2), result["binaries_removed"])
 

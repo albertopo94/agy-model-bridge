@@ -49,6 +49,27 @@ class TestSecurityModule(unittest.TestCase):
             key = get_or_create_api_key(daemon_dir=self.daemon_dir)
             self.assertEqual(key, "env-provided-secret-token")
 
+    def test_get_or_create_api_key_respects_abridge_env_var(self):
+        with mock.patch.dict(os.environ, {"ABRIDGE_API_KEY": "abridge-env-token", "AGY_API_KEY": ""}):
+            key = get_or_create_api_key(daemon_dir=self.daemon_dir)
+            self.assertEqual(key, "abridge-env-token")
+
+    def test_get_or_create_api_key_adopts_legacy_agy_bridge_key(self):
+        legacy_dir = Path(self.temp_dir.name) / "legacy_agy_bridge"
+        legacy_dir.mkdir(parents=True, exist_ok=True)
+        (legacy_dir / "api_key").write_text("legacy-secret-token-from-agy\n", encoding="utf-8")
+
+        new_abridge_dir = Path(self.temp_dir.name) / "new_abridge_dir"
+
+        with mock.patch("bridge.security.get_legacy_daemon_dir", return_value=legacy_dir):
+            key = get_or_create_api_key(daemon_dir=new_abridge_dir)
+            self.assertEqual(key, "legacy-secret-token-from-agy")
+            # Verify it was adopted into new directory
+            new_key_file = new_abridge_dir / "api_key"
+            self.assertTrue(new_key_file.exists())
+            self.assertEqual(new_key_file.read_text(encoding="utf-8").strip(), "legacy-secret-token-from-agy")
+
+
     def test_validate_api_key_bearer(self):
         headers = {"Authorization": "Bearer secret-123"}
         self.assertTrue(validate_api_key("secret-123", headers))

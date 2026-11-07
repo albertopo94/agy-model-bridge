@@ -15,7 +15,18 @@ import stat
 from typing import Any
 import uuid
 
-DEFAULT_DAEMON_DIR = Path(os.environ.get("AGY_BRIDGE_STATE_DIR", Path.home() / ".agy-bridge"))
+def get_default_daemon_dir() -> Path:
+    state_dir = os.environ.get("ABRIDGE_STATE_DIR") or os.environ.get("AGY_BRIDGE_STATE_DIR")
+    if state_dir:
+        return Path(state_dir)
+    return Path.home() / ".abridge"
+
+
+def get_legacy_daemon_dir() -> Path:
+    return Path.home() / ".agy-bridge"
+
+
+DEFAULT_DAEMON_DIR = get_default_daemon_dir()
 DEFAULT_API_KEY_FILE = DEFAULT_DAEMON_DIR / "api_key"
 
 
@@ -63,24 +74,33 @@ def write_secret_file(path: Path, content: str | bytes, mode: int = 0o600, encod
 
 def write_api_key(api_key: str, daemon_dir: Path | None = None) -> None:
     """Persists the API key to <daemon_dir>/api_key with 0o600 permissions."""
-    target_dir = Path(daemon_dir) if daemon_dir is not None else DEFAULT_DAEMON_DIR
+    target_dir = Path(daemon_dir) if daemon_dir is not None else get_default_daemon_dir()
     target_file = target_dir / "api_key"
     write_secret_file(target_file, f"{api_key.strip()}\n", mode=0o600)
+
+    # Sync with legacy directory if it exists and we wrote to default directory
+    legacy_dir = get_legacy_daemon_dir()
+    if daemon_dir is None and legacy_dir.exists() and legacy_dir.is_dir() and legacy_dir != target_dir:
+        try:
+            write_secret_file(legacy_dir / "api_key", f"{api_key.strip()}\n", mode=0o600)
+        except OSError:
+            pass
 
 
 def get_or_create_api_key(daemon_dir: Path | None = None) -> str:
     """Retrieves existing API key or generates a new 48-char hex secret.
 
     Priority:
-    1. AGY_API_KEY environment variable.
+    1. ABRIDGE_API_KEY or AGY_API_KEY environment variable.
     2. Contents of <daemon_dir>/api_key.
-    3. Generate new random token via secrets.token_hex(24) and persist with 0o600.
+    3. Adopt contents of legacy ~/.agy-bridge/api_key if present.
+    4. Generate new random token via secrets.token_hex(24) and persist with 0o600.
     """
-    env_key = os.environ.get("AGY_API_KEY")
+    env_key = os.environ.get("ABRIDGE_API_KEY") or os.environ.get("AGY_API_KEY")
     if env_key and env_key.strip():
         return env_key.strip()
 
-    target_dir = Path(daemon_dir) if daemon_dir is not None else DEFAULT_DAEMON_DIR
+    target_dir = Path(daemon_dir) if daemon_dir is not None else get_default_daemon_dir()
     target_file = target_dir / "api_key"
 
     if target_file.exists() and target_file.is_file():
@@ -90,6 +110,17 @@ def get_or_create_api_key(daemon_dir: Path | None = None) -> str:
             content = target_file.read_text(encoding="utf-8").strip()
             if content:
                 return content
+        except OSError:
+            pass
+
+    # Adopt legacy API key if available
+    legacy_file = get_legacy_daemon_dir() / "api_key"
+    if legacy_file.exists() and legacy_file.is_file():
+        try:
+            legacy_content = legacy_file.read_text(encoding="utf-8").strip()
+            if legacy_content:
+                write_api_key(legacy_content, daemon_dir=target_dir)
+                return legacy_content
         except OSError:
             pass
 
