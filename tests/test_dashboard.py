@@ -520,7 +520,7 @@ class TestDashboardRendering(unittest.TestCase):
         self.assertIn("FreeLLMAPI", card_titles)
 
         card_ids = [c["id"] for c in CLIENT_CARDS]
-        self.assertEqual(card_ids, ["claude", "codex", "hermes", "pi", "gentle-shell", "opencode", "openclaw", "cursor", "freellmapi"])
+        self.assertEqual(card_ids, ["gentle-shell", "pi", "claude", "codex", "hermes", "opencode", "openclaw", "cursor", "freellmapi"])
 
         by_id = {c["id"]: c for c in CLIENT_CARDS}
         self.assertEqual(

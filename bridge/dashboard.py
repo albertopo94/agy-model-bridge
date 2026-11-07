@@ -364,6 +364,74 @@ def _make_client_providers(
 
 CLIENT_CARDS: list[dict[str, Any]] = [
     {
+        "id": "gentle-shell",
+        "title": "Gentle Shell",
+        "desc": "An isolated terminal companion for Pi with focused subagents, review mode, and ODD harness.",
+        "desc_en": "An isolated terminal companion for Pi with focused subagents, review mode, and ODD harness.",
+        "desc_es": "Un entorno de terminal aislado para Pi con subagentes enfocados, modo review y arnés ODD.",
+        "icon_svg": GENTLE_SHELL_ICON_SVG,
+        "auto_cmd": lambda addr: (
+            f"abridge setup-gentle-shell --port {addr.rsplit(':', 1)[1]}"
+            if ":" in addr and addr.rsplit(":", 1)[1].isdigit() and addr.rsplit(":", 1)[1] != "24980"
+            else "abridge setup-gentle-shell"
+        ),
+        "restore_cmd": lambda addr: "abridge restore-gentle-shell",
+        "manual_snippet": lambda addr, api_key='$(cat ~/.abridge/api_key 2>/dev/null || cat ~/.agy-bridge/api_key)': f'BASE_URL=http://{addr}/v1\nAPI_KEY="{api_key}"',
+        "docs_url": "https://github.com/Gentleman-Programming/gentle-shell",
+        "providers": _make_client_providers(
+            "gentle-shell",
+            lambda addr: (
+                f"abridge setup-gentle-shell --port {addr.rsplit(':', 1)[1]}"
+                if ":" in addr and addr.rsplit(":", 1)[1].isdigit() and addr.rsplit(":", 1)[1] != "24980"
+                else "abridge setup-gentle-shell"
+            ),
+            lambda addr, api_key='$(cat ~/.abridge/api_key 2>/dev/null || cat ~/.agy-bridge/api_key)': f'BASE_URL=http://{addr}/v1\nAPI_KEY="{api_key}"',
+            lambda addr: "abridge restore-gentle-shell",
+            "https://github.com/Gentleman-Programming/gentle-shell",
+        ) + [
+            {
+                "id": "freellmapi",
+                "label_en": "FreeLLMAPI",
+                "label_es": "FreeLLMAPI",
+                "warning_tip_en": "Requires FreeLLMAPI gateway running on http://127.0.0.1:31415",
+                "warning_tip_es": "Requiere el gateway de FreeLLMAPI corriendo en http://127.0.0.1:31415",
+                "auto_cmd": lambda addr: 'abridge setup-gentle-shell --provider freellmapi --api-key "<YOUR_KEY>"',
+                "manual_snippet": lambda addr, api_key=None: 'BASE_URL=http://127.0.0.1:31415/v1\nAPI_KEY="<YOUR_KEY>"',
+                "restore_cmd": lambda addr: "abridge restore-gentle-shell",
+                "docs_url": "https://github.com/tashfeenahmed/freellmapi",
+            },
+        ],
+    },
+    {
+        "id": "pi",
+        "title": "Pi",
+        "desc": "A minimal, highly extensible terminal coding agent with tree-structured history.",
+        "desc_en": "A minimal, highly extensible terminal coding agent with tree-structured history.",
+        "desc_es": "Un agente de código minimalista y extensible para terminal con historial en árbol.",
+        "tip_en": "Tip: Run abridge setup-pi --set-default to make AGY the default provider in settings.json.",
+        "tip_es": "Tip: Ejecutá abridge setup-pi --set-default para fijar AGY como proveedor por defecto en settings.json.",
+        "icon_svg": PI_ICON_SVG,
+        "auto_cmd": lambda addr: (
+            f"abridge setup-pi --port {addr.rsplit(':', 1)[1]}"
+            if ":" in addr and addr.rsplit(":", 1)[1].isdigit() and addr.rsplit(":", 1)[1] != "24980"
+            else "abridge setup-pi"
+        ),
+        "restore_cmd": lambda addr: "abridge restore-pi",
+        "manual_snippet": lambda addr, api_key='$(cat ~/.abridge/api_key 2>/dev/null || cat ~/.agy-bridge/api_key)': f'BASE_URL=http://{addr}/v1\nAPI_KEY="{api_key}"',
+        "docs_url": "https://pi.dev/docs/latest",
+        "providers": _make_client_providers(
+            "pi",
+            lambda addr: (
+                f"abridge setup-pi --port {addr.rsplit(':', 1)[1]}"
+                if ":" in addr and addr.rsplit(":", 1)[1].isdigit() and addr.rsplit(":", 1)[1] != "24980"
+                else "abridge setup-pi"
+            ),
+            lambda addr, api_key='$(cat ~/.abridge/api_key 2>/dev/null || cat ~/.agy-bridge/api_key)': f'BASE_URL=http://{addr}/v1\nAPI_KEY="{api_key}"',
+            lambda addr: "abridge restore-pi",
+            "https://pi.dev/docs/latest",
+        ),
+    },
+    {
         "id": "claude",
         "title": "Claude Code",
         "desc": "Anthropic Messages API CLI (Base URL without /v1)",
@@ -497,74 +565,6 @@ CLIENT_CARDS: list[dict[str, Any]] = [
             lambda addr: "abridge restore-hermes",
             "https://hermes-agent.nousresearch.com",
         ),
-    },
-    {
-        "id": "pi",
-        "title": "Pi",
-        "desc": "A minimal, highly extensible terminal coding agent with tree-structured history.",
-        "desc_en": "A minimal, highly extensible terminal coding agent with tree-structured history.",
-        "desc_es": "Un agente de código minimalista y extensible para terminal con historial en árbol.",
-        "tip_en": "Tip: Run abridge setup-pi --set-default to make AGY the default provider in settings.json.",
-        "tip_es": "Tip: Ejecutá abridge setup-pi --set-default para fijar AGY como proveedor por defecto en settings.json.",
-        "icon_svg": PI_ICON_SVG,
-        "auto_cmd": lambda addr: (
-            f"abridge setup-pi --port {addr.rsplit(':', 1)[1]}"
-            if ":" in addr and addr.rsplit(":", 1)[1].isdigit() and addr.rsplit(":", 1)[1] != "24980"
-            else "abridge setup-pi"
-        ),
-        "restore_cmd": lambda addr: "abridge restore-pi",
-        "manual_snippet": lambda addr, api_key='$(cat ~/.abridge/api_key 2>/dev/null || cat ~/.agy-bridge/api_key)': f'BASE_URL=http://{addr}/v1\nAPI_KEY="{api_key}"',
-        "docs_url": "https://pi.dev/docs/latest",
-        "providers": _make_client_providers(
-            "pi",
-            lambda addr: (
-                f"abridge setup-pi --port {addr.rsplit(':', 1)[1]}"
-                if ":" in addr and addr.rsplit(":", 1)[1].isdigit() and addr.rsplit(":", 1)[1] != "24980"
-                else "abridge setup-pi"
-            ),
-            lambda addr, api_key='$(cat ~/.abridge/api_key 2>/dev/null || cat ~/.agy-bridge/api_key)': f'BASE_URL=http://{addr}/v1\nAPI_KEY="{api_key}"',
-            lambda addr: "abridge restore-pi",
-            "https://pi.dev/docs/latest",
-        ),
-    },
-    {
-        "id": "gentle-shell",
-        "title": "Gentle Shell",
-        "desc": "An isolated terminal companion for Pi with focused subagents, review mode, and ODD harness.",
-        "desc_en": "An isolated terminal companion for Pi with focused subagents, review mode, and ODD harness.",
-        "desc_es": "Un entorno de terminal aislado para Pi con subagentes enfocados, modo review y arnés ODD.",
-        "icon_svg": GENTLE_SHELL_ICON_SVG,
-        "auto_cmd": lambda addr: (
-            f"abridge setup-gentle-shell --port {addr.rsplit(':', 1)[1]}"
-            if ":" in addr and addr.rsplit(":", 1)[1].isdigit() and addr.rsplit(":", 1)[1] != "24980"
-            else "abridge setup-gentle-shell"
-        ),
-        "restore_cmd": lambda addr: "abridge restore-gentle-shell",
-        "manual_snippet": lambda addr, api_key='$(cat ~/.abridge/api_key 2>/dev/null || cat ~/.agy-bridge/api_key)': f'BASE_URL=http://{addr}/v1\nAPI_KEY="{api_key}"',
-        "docs_url": "https://github.com/Gentleman-Programming/gentle-shell",
-        "providers": _make_client_providers(
-            "gentle-shell",
-            lambda addr: (
-                f"abridge setup-gentle-shell --port {addr.rsplit(':', 1)[1]}"
-                if ":" in addr and addr.rsplit(":", 1)[1].isdigit() and addr.rsplit(":", 1)[1] != "24980"
-                else "abridge setup-gentle-shell"
-            ),
-            lambda addr, api_key='$(cat ~/.abridge/api_key 2>/dev/null || cat ~/.agy-bridge/api_key)': f'BASE_URL=http://{addr}/v1\nAPI_KEY="{api_key}"',
-            lambda addr: "abridge restore-gentle-shell",
-            "https://github.com/Gentleman-Programming/gentle-shell",
-        ) + [
-            {
-                "id": "freellmapi",
-                "label_en": "FreeLLMAPI",
-                "label_es": "FreeLLMAPI",
-                "warning_tip_en": "Requires FreeLLMAPI gateway running on http://127.0.0.1:31415",
-                "warning_tip_es": "Requiere el gateway de FreeLLMAPI corriendo en http://127.0.0.1:31415",
-                "auto_cmd": lambda addr: 'abridge setup-gentle-shell --provider freellmapi --api-key "<YOUR_KEY>"',
-                "manual_snippet": lambda addr, api_key=None: 'BASE_URL=http://127.0.0.1:31415/v1\nAPI_KEY="<YOUR_KEY>"',
-                "restore_cmd": lambda addr: "abridge restore-gentle-shell",
-                "docs_url": "https://github.com/tashfeenahmed/freellmapi",
-            },
-        ],
     },
     {
         "id": "opencode",
