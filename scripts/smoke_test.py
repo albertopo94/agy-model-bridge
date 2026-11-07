@@ -27,8 +27,8 @@ def test_healthz(base_url: str) -> None:
             if resp.status != 200:
                 raise AssertionError(f"Expected HTTP 200, got {resp.status}")
             data = json.loads(resp.read().decode("utf-8"))
-            if data.get("status") != "ok" or data.get("service") != "agy-model-bridge":
-                raise AssertionError(f"Expected status 'ok' and service 'agy-model-bridge', got {data}")
+            if data.get("status") != "ok" or data.get("service") not in ("abridge", "abridge-ai", "agy-model-bridge"):
+                raise AssertionError(f"Expected status 'ok' and valid service identity, got {data}")
     except Exception as e:
         print("FAILED")
         print(f"Error in health check: {e}", file=sys.stderr)
@@ -78,8 +78,8 @@ def test_dashboard(base_url: str) -> None:
             if "text/html" not in content_type:
                 raise AssertionError(f"Expected text/html content type, got {content_type}")
             html_body = resp.read().decode("utf-8")
-            if "AGY Model Bridge" not in html_body:
-                raise AssertionError("Missing 'AGY Model Bridge' title in dashboard HTML")
+            if "Abridge" not in html_body:
+                raise AssertionError("Missing 'Abridge' title in dashboard HTML")
             for card in ("Claude Code", "Codex CLI", "Hermes Agent", "FreeLLMAPI"):
                 if card not in html_body:
                     raise AssertionError(f"Missing client card '{card}' in dashboard HTML")
@@ -418,11 +418,11 @@ def test_responses_streaming(base_url: str, model: str, api_key: str = "local-br
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Multi-protocol smoke test for Antigravity Model Bridge")
+    parser = argparse.ArgumentParser(description="Multi-protocol smoke test for Abridge local AI gateway")
     parser.add_argument("--host", type=str, default="127.0.0.1", help="Bridge host (default: 127.0.0.1)")
     parser.add_argument("--port", type=int, default=24980, help="Bridge port (default: 24980)")
     parser.add_argument("--model", type=str, default=None, help="Model override")
-    parser.add_argument("--api-key", type=str, default=None, help="Bridge API key (default: read from ~/.agy-bridge/api_key)")
+    parser.add_argument("--api-key", type=str, default=None, help="Bridge API key (default: read from ~/.abridge/api_key)")
     args = parser.parse_args()
 
     api_key = args.api_key or get_default_api_key()
