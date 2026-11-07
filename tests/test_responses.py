@@ -92,6 +92,26 @@ class TestResponsesRequestTranslation(unittest.TestCase):
         self.assertEqual(contents[2]["parts"], [{"text": "Tell me more."}])
         self.assertIsNone(tools)
 
+    def test_input_with_multimodal_image(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "input": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": "What is this?"},
+                        {"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="}},
+                    ],
+                }
+            ],
+        }
+        _, contents, _, _, _ = responses_to_cloudcode_request(payload, "test-project")
+        self.assertEqual(len(contents), 1)
+        self.assertEqual(contents[0]["role"], "user")
+        self.assertEqual(len(contents[0]["parts"]), 2)
+        self.assertEqual(contents[0]["parts"][0], {"text": "What is this?"})
+        self.assertEqual(contents[0]["parts"][1], {"inlineData": {"mimeType": "image/png", "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="}})
+
     def test_input_as_string_normalized(self):
         payload = {
             "model": "gemini-2.5-pro",

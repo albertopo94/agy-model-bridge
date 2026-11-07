@@ -78,7 +78,7 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
                 anthropic_to_cloudcode_request(payload, project="test-project")
             self.assertEqual(str(ctx.exception), "Parameter 'max_tokens' must be a positive integer")
 
-    def test_anthropic_multimodal_image_block_rejected(self):
+    def test_anthropic_multimodal_image_block_accepted(self):
         payload = {
             "model": "gemini-2.5-pro",
             "messages": [
@@ -91,11 +91,14 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
                 }
             ],
         }
-        with self.assertRaises(InvalidRequestError) as ctx:
-            anthropic_to_cloudcode_request(payload, project="test-project")
-        self.assertIn("Multimodal image content is not supported by agy-model-bridge", str(ctx.exception))
+        _, contents, _, _, _, _ = anthropic_to_cloudcode_request(payload, project="test-project")
+        self.assertEqual(len(contents), 1)
+        self.assertEqual(contents[0]["role"], "user")
+        self.assertEqual(len(contents[0]["parts"]), 2)
+        self.assertIn({"text": "What is this?"}, contents[0]["parts"])
+        self.assertIn({"inlineData": {"mimeType": "image/png", "data": "abc"}}, contents[0]["parts"])
 
-    def test_anthropic_content_with_source_block_rejected(self):
+    def test_anthropic_content_with_source_block_accepted(self):
         payload = {
             "model": "gemini-2.5-pro",
             "messages": [
@@ -107,9 +110,27 @@ class TestAnthropicRequestTranslation(unittest.TestCase):
                 }
             ],
         }
+        _, contents, _, _, _, _ = anthropic_to_cloudcode_request(payload, project="test-project")
+        self.assertEqual(
+            contents,
+            [{"role": "user", "parts": [{"inlineData": {"mimeType": "image/png", "data": "abc"}}]}],
+        )
+
+    def test_anthropic_remote_image_url_rejected(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image", "source": {"type": "url", "url": "https://example.com/img.png"}},
+                    ],
+                }
+            ],
+        }
         with self.assertRaises(InvalidRequestError) as ctx:
             anthropic_to_cloudcode_request(payload, project="test-project")
-        self.assertIn("Multimodal image content is not supported by agy-model-bridge", str(ctx.exception))
+        self.assertIn("Remote image URLs are not supported", str(ctx.exception))
 
     def test_request_translation_with_tools(self):
         payload = {

@@ -22,6 +22,7 @@ from bridge.events import (
 )
 from bridge.transform import (
     DUMMY_THOUGHT_SIGNATURE,
+    _parse_data_uri,
     cache_thought_signature,
     cache_tool_name,
     get_thought_signature,
@@ -124,7 +125,7 @@ def anthropic_to_cloudcode_request(
         for item in raw_system:
             if isinstance(item, dict):
                 if item.get("type") == "image" or "source" in item:
-                    raise InvalidRequestError("Multimodal image content is not supported by agy-model-bridge")
+                    raise InvalidRequestError("System messages do not support image content")
                 if item.get("type") == "text" or "text" in item:
                     txt = str(item.get("text") or "")
                     if txt.strip():
@@ -188,7 +189,37 @@ def anthropic_to_cloudcode_request(
                 if isinstance(block, dict):
                     b_type = block.get("type")
                     if b_type == "image" or "source" in block:
-                        raise InvalidRequestError("Multimodal image content is not supported by agy-model-bridge")
+                        source = block.get("source")
+                        if isinstance(source, dict):
+                            src_type = source.get("type")
+                            if src_type == "base64":
+                                b64_data = str(source.get("data") or "")
+                                mime = str(source.get("media_type") or "image/png")
+                                if not b64_data:
+                                    raise InvalidRequestError("Missing base64 data in image source")
+                                img_part: dict[str, Any] = {"inlineData": {"mimeType": mime, "data": b64_data.strip()}}
+                                part_role = "model" if role == "assistant" else "user"
+                                _add_part(part_role, img_part)
+                                parts_added += 1
+                            elif src_type == "url":
+                                raise InvalidRequestError(
+                                    "Remote image URLs are not supported by the local bridge; "
+                                    "please pass images as base64 data (type: base64)"
+                                )
+                            else:
+                                raise InvalidRequestError(f"Unsupported image source type: {src_type}")
+                        elif block.get("image") or block.get("data"):
+                            img_data = block.get("image") or block.get("data")
+                            if isinstance(img_data, str) and img_data.startswith("data:"):
+                                mime, b64_data = _parse_data_uri(img_data)
+                                img_part = {"inlineData": {"mimeType": mime, "data": b64_data}}
+                            else:
+                                mime = str(block.get("mime_type") or block.get("media_type") or "image/png")
+                                img_part = {"inlineData": {"mimeType": mime, "data": str(img_data).strip()}}
+                            part_role = "model" if role == "assistant" else "user"
+                            _add_part(part_role, img_part)
+                            parts_added += 1
+                        continue
                     if b_type == "thinking":
                         sig = (
                             block.get("signature")
@@ -279,10 +310,38 @@ def anthropic_to_cloudcode_request(
                 _add_part(part_role, {"text": " "})
         elif isinstance(raw_content, dict):
             if raw_content.get("type") == "image" or "source" in raw_content:
-                raise InvalidRequestError("Multimodal image content is not supported by agy-model-bridge")
-            text_str = str(raw_content.get("text") or "")
-            part_role = "model" if role == "assistant" else "user"
-            _add_part(part_role, {"text": text_str if text_str.strip() else " "})
+                source = raw_content.get("source")
+                if isinstance(source, dict):
+                    src_type = source.get("type")
+                    if src_type == "base64":
+                        b64_data = str(source.get("data") or "")
+                        mime = str(source.get("media_type") or "image/png")
+                        if not b64_data:
+                            raise InvalidRequestError("Missing base64 data in image source")
+                        dict_img_part: dict[str, Any] = {"inlineData": {"mimeType": mime, "data": b64_data.strip()}}
+                        part_role = "model" if role == "assistant" else "user"
+                        _add_part(part_role, dict_img_part)
+                    elif src_type == "url":
+                        raise InvalidRequestError(
+                            "Remote image URLs are not supported by the local bridge; "
+                            "please pass images as base64 data (type: base64)"
+                        )
+                    else:
+                        raise InvalidRequestError(f"Unsupported image source type: {src_type}")
+                else:
+                    img_data = raw_content.get("image") or raw_content.get("data")
+                    if isinstance(img_data, str) and img_data.startswith("data:"):
+                        mime, b64_data = _parse_data_uri(img_data)
+                        dict_img_part = {"inlineData": {"mimeType": mime, "data": b64_data}}
+                    else:
+                        mime = str(raw_content.get("mime_type") or raw_content.get("media_type") or "image/png")
+                        dict_img_part = {"inlineData": {"mimeType": mime, "data": str(img_data).strip()}}
+                    part_role = "model" if role == "assistant" else "user"
+                    _add_part(part_role, dict_img_part)
+            else:
+                text_str = str(raw_content.get("text") or "")
+                part_role = "model" if role == "assistant" else "user"
+                _add_part(part_role, {"text": text_str if text_str.strip() else " "})
         elif isinstance(raw_content, str):
             text_str = raw_content if raw_content.strip() else " "
             part_role = "model" if role == "assistant" else "user"

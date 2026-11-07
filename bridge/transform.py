@@ -587,7 +587,7 @@ def extract_message_parts(raw_content: Any) -> list[dict[str, Any]]:
             parts.append({"text": item})
         elif isinstance(item, dict):
             item_type = item.get("type")
-            if item_type == "text" or ("text" in item and item_type is None):
+            if item_type in ("text", "input_text", "output_text") or ("text" in item and item_type is None):
                 txt = str(item.get("text") or "")
                 parts.append({"text": txt})
             elif item_type == "image_url" or "image_url" in item:
