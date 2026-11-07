@@ -121,7 +121,7 @@ class CursorAcpClient:
 
     def stream_prompt(
         self,
-        prompt_text: str,
+        prompt_text: str | list[dict[str, Any]],
         timeout: float = 120.0,
     ) -> Iterator[str]:
         """Sends prompt_text over the live ACP session and streams content chunks in real time."""
@@ -145,13 +145,20 @@ class CursorAcpClient:
         with self._pending_lock:
             self._pending[prompt_id] = pending
 
+        if isinstance(prompt_text, list):
+            prompt_blocks = prompt_text
+        elif isinstance(prompt_text, str):
+            prompt_blocks = [{"type": "text", "text": prompt_text}]
+        else:
+            prompt_blocks = [{"type": "text", "text": str(prompt_text)}]
+
         req_payload = {
             "jsonrpc": "2.0",
             "id": prompt_id,
             "method": "session/prompt",
             "params": {
                 "sessionId": self._session_id,
-                "prompt": [{"type": "text", "text": prompt_text}],
+                "prompt": prompt_blocks,
             },
         }
 

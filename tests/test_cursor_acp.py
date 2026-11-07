@@ -136,6 +136,45 @@ class TestCursorAcpClient(unittest.TestCase):
         mock_stdout.close()
 
     @patch("subprocess.Popen")
+    def test_stream_prompt_with_structured_blocks(self, mock_popen: MagicMock) -> None:
+        mock_proc = MagicMock()
+        mock_proc.poll.return_value = None
+        mock_proc.stderr = MagicMock()
+        mock_stdout = MockPipe()
+        mock_proc.stdout = mock_stdout
+        mock_proc.stdin = MagicMock()
+        mock_popen.return_value = mock_proc
+
+        def respond_prompt(data: bytes) -> None:
+            obj = json.loads(data.decode("utf-8").strip())
+            if obj.get("method") == "initialize":
+                mock_stdout.write_line(json.dumps({"jsonrpc": "2.0", "id": obj["id"], "result": {"protocolVersion": 1}}))
+            elif obj.get("method") == "authenticate":
+                mock_stdout.write_line(json.dumps({"jsonrpc": "2.0", "id": obj["id"], "result": {}}))
+            elif obj.get("method") == "session/new":
+                mock_stdout.write_line(json.dumps({"jsonrpc": "2.0", "id": obj["id"], "result": {"sessionId": "s-123"}}))
+            elif obj.get("method") == "session/prompt":
+                self.assertEqual(
+                    obj["params"]["prompt"],
+                    [{"type": "text", "text": "Look:"}, {"type": "image", "data": "xyz"}],
+                )
+                mock_stdout.write_line(json.dumps({
+                    "jsonrpc": "2.0",
+                    "method": "session/update",
+                    "params": {"sessionId": "s-123", "update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "Seen!"}}},
+                }))
+                mock_stdout.write_line(json.dumps({"jsonrpc": "2.0", "id": obj["id"], "result": {}}))
+
+        mock_proc.stdin.write.side_effect = respond_prompt
+
+        client = CursorAcpClient(binary_path="/usr/local/bin/agent")
+        client.start()
+        chunks = list(client.stream_prompt([{"type": "text", "text": "Look:"}, {"type": "image", "data": "xyz"}]))
+        self.assertEqual(chunks, ["Seen!"])
+        client.close()
+        mock_stdout.close()
+
+    @patch("subprocess.Popen")
     def test_start_binary_not_found(self, mock_popen: MagicMock) -> None:
         mock_popen.side_effect = FileNotFoundError("No such file: agent")
         client = CursorAcpClient(binary_path="nonexistent-agent")
