@@ -259,13 +259,13 @@ class TestDashboardRendering(unittest.TestCase):
 
         # Restore section heading in supported cards
         self.assertIn("Restaurar configuración", html)
-        self.assertIn("agy-bridge restore-claude", html)
-        self.assertIn("agy-bridge restore-codex", html)
-        self.assertIn("agy-bridge restore-hermes", html)
-        self.assertIn("agy-bridge restore-opencode", html)
-        self.assertIn("agy-bridge restore-openclaw", html)
-        self.assertIn("agy-bridge restore-pi", html)
-        self.assertIn("agy-bridge restore-gentle-shell", html)
+        self.assertIn("abridge restore-claude", html)
+        self.assertIn("abridge restore-codex", html)
+        self.assertIn("abridge restore-hermes", html)
+        self.assertIn("abridge restore-opencode", html)
+        self.assertIn("abridge restore-openclaw", html)
+        self.assertIn("abridge restore-pi", html)
+        self.assertIn("abridge restore-gentle-shell", html)
 
         # Copy buttons and pre IDs for restore
         self.assertIn('id="claude-restore"', html)
@@ -403,12 +403,12 @@ class TestDashboardRendering(unittest.TestCase):
         self.assertIn("http://127.0.0.1:24980/v1", html)
 
         # Setup commands and keywords (100% native, zero external package dependencies)
-        self.assertIn("agy-bridge setup-claude", html)
-        self.assertIn("agy-bridge setup-codex", html)
-        self.assertIn("agy-bridge setup-hermes", html)
-        self.assertIn("agy-bridge setup-opencode", html)
-        self.assertIn("agy-bridge setup-openclaw", html)
-        self.assertIn("agy-bridge setup-pi", html)
+        self.assertIn("abridge setup-claude", html)
+        self.assertIn("abridge setup-codex", html)
+        self.assertIn("abridge setup-hermes", html)
+        self.assertIn("abridge setup-opencode", html)
+        self.assertIn("abridge setup-openclaw", html)
+        self.assertIn("abridge setup-pi", html)
         self.assertIn('class="card-tip"', html)
         self.assertIn('data-i18n="tip_pi"', html)
         self.assertNotIn("ANTHROPIC_CUSTOM_MODEL_OPTION", html)
@@ -434,7 +434,7 @@ class TestDashboardRendering(unittest.TestCase):
         unescaped_html = html_lib.unescape(html)
         expected_codex_toml = (
             '# ~/.codex/config.toml\n'
-            '# Replace <YOUR_API_KEY> with key from ~/.agy-bridge/api_key\n'
+            '# Replace <YOUR_API_KEY> with key from ~/.abridge/api_key\n'
             'model = "gemini-3.8-flash-high"\n'
             'model_provider = "agy"\n'
             'model_context_window = 1048576\n'
@@ -447,10 +447,10 @@ class TestDashboardRendering(unittest.TestCase):
             'http_headers = { Authorization = "Bearer <YOUR_API_KEY>" }'
         )
         self.assertIn(expected_codex_toml, unescaped_html)
-        self.assertIn('export ANTHROPIC_BASE_URL="http://127.0.0.1:24980"\nexport ANTHROPIC_AUTH_TOKEN="$(cat ~/.agy-bridge/api_key)"', unescaped_html)
-        expected_hermes_snippet = 'BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY="$(cat ~/.agy-bridge/api_key)"'
+        self.assertIn('export ANTHROPIC_BASE_URL="http://127.0.0.1:24980"\nexport ANTHROPIC_AUTH_TOKEN="$(cat ~/.abridge/api_key 2>/dev/null || cat ~/.agy-bridge/api_key)"', unescaped_html)
+        expected_hermes_snippet = 'BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY="$(cat ~/.abridge/api_key 2>/dev/null || cat ~/.agy-bridge/api_key)"'
         self.assertIn(expected_hermes_snippet, unescaped_html)
-        self.assertIn('BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY="$(cat ~/.agy-bridge/api_key)"', unescaped_html)
+        self.assertIn('BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY="$(cat ~/.abridge/api_key 2>/dev/null || cat ~/.agy-bridge/api_key)"', unescaped_html)
 
         # Clipboard copy functionality
 
@@ -525,21 +525,21 @@ class TestDashboardRendering(unittest.TestCase):
         by_id = {c["id"]: c for c in CLIENT_CARDS}
         self.assertEqual(
             by_id["codex"]["auto_cmd"]("127.0.0.1:24980"),
-            "agy-bridge setup-codex",
+            "abridge setup-codex",
         )
         self.assertEqual(
             by_id["codex"]["auto_cmd"]("127.0.0.1:9090"),
-            "agy-bridge setup-codex --port 9090",
+            "abridge setup-codex --port 9090",
         )
         self.assertEqual(
             by_id["codex"]["restore_cmd"]("127.0.0.1:24980"),
-            "agy-bridge restore-codex",
+            "abridge restore-codex",
         )
         self.assertEqual(
             by_id["codex"]["manual_snippet"]("127.0.0.1:24980"),
             (
                 '# ~/.codex/config.toml\n'
-                '# Replace <YOUR_API_KEY> with key from ~/.agy-bridge/api_key\n'
+                '# Replace <YOUR_API_KEY> with key from ~/.abridge/api_key\n'
                 'model = "gemini-3.8-flash-high"\n'
                 'model_provider = "agy"\n'
                 'model_context_window = 1048576\n'
@@ -555,7 +555,7 @@ class TestDashboardRendering(unittest.TestCase):
         # Shell expansion placeholder in api_key falls back to <YOUR_API_KEY> in TOML
         self.assertIn(
             'Authorization = "Bearer <YOUR_API_KEY>"',
-            by_id["codex"]["manual_snippet"]("127.0.0.1:24980", api_key='$(cat ~/.agy-bridge/api_key)'),
+            by_id["codex"]["manual_snippet"]("127.0.0.1:24980", api_key='$(cat ~/.abridge/api_key 2>/dev/null || cat ~/.agy-bridge/api_key)'),
         )
         # Explicit key is preserved in TOML
         self.assertIn(
@@ -566,19 +566,19 @@ class TestDashboardRendering(unittest.TestCase):
 
         self.assertEqual(
             by_id["claude"]["auto_cmd"]("127.0.0.1:24980"),
-            "agy-bridge setup-claude",
+            "abridge setup-claude",
         )
         self.assertEqual(
             by_id["claude"]["auto_cmd"]("127.0.0.1:9090"),
-            "agy-bridge setup-claude --port 9090",
+            "abridge setup-claude --port 9090",
         )
         self.assertEqual(
             by_id["claude"]["restore_cmd"]("127.0.0.1:24980"),
-            "agy-bridge restore-claude",
+            "abridge restore-claude",
         )
         self.assertEqual(
             by_id["claude"]["manual_snippet"]("127.0.0.1:24980"),
-            'export ANTHROPIC_BASE_URL="http://127.0.0.1:24980"\nexport ANTHROPIC_AUTH_TOKEN="$(cat ~/.agy-bridge/api_key)"',
+            'export ANTHROPIC_BASE_URL="http://127.0.0.1:24980"\nexport ANTHROPIC_AUTH_TOKEN="$(cat ~/.abridge/api_key 2>/dev/null || cat ~/.agy-bridge/api_key)"',
         )
         self.assertEqual(
             by_id["claude"]["docs_url"],
@@ -590,73 +590,73 @@ class TestDashboardRendering(unittest.TestCase):
         self.assertIn('fill="currentColor"', by_id["hermes"].get("icon_svg", ""))
         self.assertEqual(
             by_id["hermes"]["auto_cmd"]("127.0.0.1:24980"),
-            "agy-bridge setup-hermes",
+            "abridge setup-hermes",
         )
         self.assertEqual(
             by_id["hermes"]["auto_cmd"]("127.0.0.1:9090"),
-            "agy-bridge setup-hermes --port 9090",
+            "abridge setup-hermes --port 9090",
         )
         self.assertEqual(
             by_id["hermes"]["restore_cmd"]("127.0.0.1:24980"),
-            "agy-bridge restore-hermes",
+            "abridge restore-hermes",
         )
         self.assertEqual(
             by_id["hermes"]["manual_snippet"]("127.0.0.1:24980"),
-            'BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY="$(cat ~/.agy-bridge/api_key)"',
+            'BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY="$(cat ~/.abridge/api_key 2>/dev/null || cat ~/.agy-bridge/api_key)"',
         )
         self.assertEqual(by_id["hermes"]["docs_url"], "https://hermes-agent.nousresearch.com")
 
         self.assertIn('viewBox="0 0 24 24"', by_id["opencode"].get("icon_svg", ""))
         self.assertEqual(
             by_id["opencode"]["auto_cmd"]("127.0.0.1:24980"),
-            "agy-bridge setup-opencode",
+            "abridge setup-opencode",
         )
         self.assertEqual(
             by_id["opencode"]["auto_cmd"]("127.0.0.1:9090"),
-            "agy-bridge setup-opencode --port 9090",
+            "abridge setup-opencode --port 9090",
         )
         self.assertEqual(
             by_id["opencode"]["restore_cmd"]("127.0.0.1:24980"),
-            "agy-bridge restore-opencode",
+            "abridge restore-opencode",
         )
         self.assertEqual(
             by_id["opencode"]["manual_snippet"]("127.0.0.1:24980"),
-            'BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY="$(cat ~/.agy-bridge/api_key)"',
+            'BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY="$(cat ~/.abridge/api_key 2>/dev/null || cat ~/.agy-bridge/api_key)"',
         )
         self.assertEqual(by_id["opencode"]["docs_url"], "https://opencode.ai/docs")
 
         self.assertIn('viewBox="0 0 24 24"', by_id["openclaw"].get("icon_svg", ""))
         self.assertEqual(
             by_id["openclaw"]["auto_cmd"]("127.0.0.1:24980"),
-            "agy-bridge setup-openclaw",
+            "abridge setup-openclaw",
         )
         self.assertEqual(
             by_id["openclaw"]["auto_cmd"]("127.0.0.1:9090"),
-            "agy-bridge setup-openclaw --port 9090",
+            "abridge setup-openclaw --port 9090",
         )
         self.assertEqual(
             by_id["openclaw"]["restore_cmd"]("127.0.0.1:24980"),
-            "agy-bridge restore-openclaw",
+            "abridge restore-openclaw",
         )
         self.assertEqual(
             by_id["openclaw"]["manual_snippet"]("127.0.0.1:24980"),
-            'BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY="$(cat ~/.agy-bridge/api_key)"',
+            'BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY="$(cat ~/.abridge/api_key 2>/dev/null || cat ~/.agy-bridge/api_key)"',
         )
         self.assertEqual(by_id["openclaw"]["docs_url"], "https://docs.openclaw.ai/gateway/config-tools/custom-providers")
 
         self.assertIn('viewBox="0 0 24 24"', by_id["cursor"].get("icon_svg", ""))
         self.assertEqual(
             by_id["cursor"]["auto_cmd"]("127.0.0.1:24980"),
-            "agy-bridge setup-cursor",
+            "abridge setup-cursor",
         )
         self.assertEqual(
             by_id["cursor"]["auto_cmd"]("127.0.0.1:9090"),
-            "agy-bridge setup-cursor --port 9090",
+            "abridge setup-cursor --port 9090",
         )
         self.assertNotIn("restore_cmd", by_id["cursor"])
         self.assertEqual(
             by_id["cursor"]["manual_snippet"]("127.0.0.1:24980"),
-            'BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY="$(cat ~/.agy-bridge/api_key)"',
+            'BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY="$(cat ~/.abridge/api_key 2>/dev/null || cat ~/.agy-bridge/api_key)"',
         )
         self.assertEqual(by_id["cursor"]["docs_url"], "https://docs.cursor.com")
 
@@ -664,19 +664,19 @@ class TestDashboardRendering(unittest.TestCase):
         self.assertIn('viewBox="0 0 470 470"', by_id["pi"].get("icon_svg", ""))
         self.assertEqual(
             by_id["pi"]["auto_cmd"]("127.0.0.1:24980"),
-            "agy-bridge setup-pi",
+            "abridge setup-pi",
         )
         self.assertEqual(
             by_id["pi"]["auto_cmd"]("127.0.0.1:9090"),
-            "agy-bridge setup-pi --port 9090",
+            "abridge setup-pi --port 9090",
         )
         self.assertEqual(
             by_id["pi"]["restore_cmd"]("127.0.0.1:24980"),
-            "agy-bridge restore-pi",
+            "abridge restore-pi",
         )
         self.assertEqual(
             by_id["pi"]["manual_snippet"]("127.0.0.1:24980"),
-            'BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY="$(cat ~/.agy-bridge/api_key)"',
+            'BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY="$(cat ~/.abridge/api_key 2>/dev/null || cat ~/.agy-bridge/api_key)"',
         )
         self.assertEqual(by_id["pi"]["docs_url"], "https://pi.dev/docs/latest")
         self.assertIn("tip_en", by_id["pi"])
@@ -688,19 +688,19 @@ class TestDashboardRendering(unittest.TestCase):
         self.assertIn('viewBox="0 0 5000 5000"', by_id["gentle-shell"].get("icon_svg", ""))
         self.assertEqual(
             by_id["gentle-shell"]["auto_cmd"]("127.0.0.1:24980"),
-            "agy-bridge setup-gentle-shell",
+            "abridge setup-gentle-shell",
         )
         self.assertEqual(
             by_id["gentle-shell"]["auto_cmd"]("127.0.0.1:9090"),
-            "agy-bridge setup-gentle-shell --port 9090",
+            "abridge setup-gentle-shell --port 9090",
         )
         self.assertEqual(
             by_id["gentle-shell"]["restore_cmd"]("127.0.0.1:24980"),
-            "agy-bridge restore-gentle-shell",
+            "abridge restore-gentle-shell",
         )
         self.assertEqual(
             by_id["gentle-shell"]["manual_snippet"]("127.0.0.1:24980"),
-            'BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY="$(cat ~/.agy-bridge/api_key)"',
+            'BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY="$(cat ~/.abridge/api_key 2>/dev/null || cat ~/.agy-bridge/api_key)"',
         )
         self.assertEqual(
             by_id["gentle-shell"]["docs_url"],
@@ -712,7 +712,7 @@ class TestDashboardRendering(unittest.TestCase):
         self.assertIn('viewBox="0 0 64 64"', by_id["freellmapi"]["icon_svg"])
         self.assertEqual(
             by_id["freellmapi"]["manual_snippet"]("127.0.0.1:24980"),
-            'BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY="$(cat ~/.agy-bridge/api_key)"',
+            'BASE_URL=http://127.0.0.1:24980/v1\nAPI_KEY="$(cat ~/.abridge/api_key 2>/dev/null || cat ~/.agy-bridge/api_key)"',
         )
         self.assertEqual(by_id["freellmapi"]["docs_url"], "https://github.com/tashfeenahmed/freellmapi")
 
@@ -885,7 +885,7 @@ class TestDashboardBilingual(unittest.TestCase):
         self.assertIn("Manual connection", html)
         self.assertIn("Restore configuration", html)
         self.assertIn("10 Models Discovered", html)
-        self.assertIn(f"AGY Model Bridge &bull; v{__version__} &bull; Local Gateway", html)
+        self.assertIn(f"Abridge &bull; v{__version__} &bull; Local Gateway", html)
 
     def test_render_dashboard_spanish(self):
         auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
@@ -897,7 +897,7 @@ class TestDashboardBilingual(unittest.TestCase):
         self.assertIn("Conexión manual", html)
         self.assertIn("Restaurar configuración", html)
         self.assertIn("10 Modelos Descubiertos", html)
-        self.assertIn(f"AGY Model Bridge &bull; v{__version__} &bull; Gateway local", html)
+        self.assertIn(f"Abridge &bull; v{__version__} &bull; Gateway local", html)
 
     def test_render_dashboard_client_side_i18n_script(self):
         auth_status = {"status": "Valid", "email": "dev@example.com", "message": "Authenticated"}
@@ -1041,7 +1041,7 @@ class TestDashboardBilingual(unittest.TestCase):
 
         # FreeLLMAPI commands and tooltip
         self.assertIn(
-            html.escape('agy-bridge setup-gentle-shell --provider freellmapi --api-key "<YOUR_KEY>"'),
+            html.escape('abridge setup-gentle-shell --provider freellmapi --api-key "<YOUR_KEY>"'),
             html_en,
         )
         self.assertIn("Requires FreeLLMAPI gateway running on http://127.0.0.1:31415", html_en)

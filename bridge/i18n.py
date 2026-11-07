@@ -16,10 +16,10 @@ _current_locale: str | None = None
 def detect_locale() -> str:
     """Detects system or configured locale.
 
-    Checks AGY_LANG, LC_ALL, LC_MESSAGES, and LANG in priority order.
+    Checks ABRIDGE_LANG, AGY_LANG, LC_ALL, LC_MESSAGES, and LANG in priority order.
     Returns 'es' if language starts with 'es' (case-insensitive), otherwise 'en'.
     """
-    for var in ("AGY_LANG", "LC_ALL", "LC_MESSAGES", "LANG"):
+    for var in ("ABRIDGE_LANG", "AGY_LANG", "LC_ALL", "LC_MESSAGES", "LANG"):
         val = os.environ.get(var, "").strip()
         if val:
             if val.lower().startswith("es"):
@@ -148,13 +148,13 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "setup_pi_success": "Pi configured successfully at {target}\n",
         "setup_pi_auto_read": "Pi will read this configuration automatically.",
         "setup_pi_run_hint": "Run 'pi' and switch models with /model (or run 'pi --model agy/gemini-3.8-flash-high').",
-        "setup_pi_set_default_tip": "Tip: Run 'agy-bridge setup-pi --set-default' to set AGY as Pi's default provider.",
+        "setup_pi_set_default_tip": "Tip: Run 'abridge setup-pi --set-default' to set AGY as Pi's default provider.",
         "setup_pi_set_default_done": "✔ AGY configured as default provider in settings.json.",
         # Gentle Shell
         "setup_gentle_shell_success": "Gentle Shell configured successfully at {target}\n",
         "setup_gentle_shell_auto_read": "Gentle Shell will read this configuration automatically.",
         "setup_gentle_shell_run_hint": "Run 'gentle-shell' and switch models with /model (or run 'gentle-shell --model agy/gemini-3.8-flash-high').",
-        "setup_gentle_shell_set_default_tip": "Tip: Run 'agy-bridge setup-gentle-shell --set-default' to set AGY as Gentle Shell's default provider.",
+        "setup_gentle_shell_set_default_tip": "Tip: Run 'abridge setup-gentle-shell --set-default' to set AGY as Gentle Shell's default provider.",
         "setup_gentle_shell_set_default_done": "✔ AGY configured as default provider in settings.json.",
         # Cursor
         "setup_cursor_title": "=== Cursor Configuration Guide ===",
@@ -175,12 +175,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "restore_factory_reset_option": "Factory default clean state (Clean Reset)",
         "restore_factory_reset_success": "Restored {client_name} to factory default clean state.",
         # Uninstall
-        "uninstall_confirm_prompt": "Are you sure you want to uninstall AGY Model Bridge? [{choice}]: ",
+        "uninstall_confirm_prompt": "Are you sure you want to uninstall Abridge? [{choice}]: ",
         "uninstall_cancelled": "Uninstall operation cancelled.",
-        "uninstall_success": "✔ AGY Model Bridge uninstalled successfully.",
+        "uninstall_success": "✔ Abridge uninstalled successfully.",
         "uninstall_daemon_stopped": "  - Background service stopped.",
         "uninstall_binaries_removed": "  - Binaries removed: {binaries}",
-        "uninstall_daemon_dir_removed": "  - Directory ~/.agy-bridge removed.",
+        "uninstall_daemon_dir_removed": "  - Directory ~/.abridge removed.",
         "uninstall_claude_restored": "  - Claude Code configuration restored.",
         "uninstall_codex_restored": "  - Codex CLI configuration restored.",
         "uninstall_hermes_restored": "  - Hermes Agent configuration restored.",
@@ -200,7 +200,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "update_up_to_date": "Repository is already up to date.",
         "update_completed": "Repository updated successfully.",
         # Common / CLI descriptions
-        "cli_description": "Antigravity Model Bridge - Local AI Gateway",
+        "cli_description": "Abridge - Local AI Gateway",
         "cli_cmd_start": "Start the bridge in the background",
         "cli_cmd_stop": "Stop the background service",
         "cli_cmd_restart": "Restart the background service",
@@ -278,13 +278,13 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "setup_pi_success": "Pi configurado correctamente en {target}\n",
         "setup_pi_auto_read": "Pi leerá esta configuración automáticamente.",
         "setup_pi_run_hint": "Ejecutá 'pi' y cambiá de modelo con /model (o ejecutá 'pi --model agy/gemini-3.8-flash-high').",
-        "setup_pi_set_default_tip": "Tip: Ejecutá 'agy-bridge setup-pi --set-default' para dejar AGY como proveedor por defecto.",
+        "setup_pi_set_default_tip": "Tip: Ejecutá 'abridge setup-pi --set-default' para dejar AGY como proveedor por defecto.",
         "setup_pi_set_default_done": "✔ AGY configurado como proveedor por defecto en settings.json.",
         # Gentle Shell
         "setup_gentle_shell_success": "Gentle Shell configurado correctamente en {target}\n",
         "setup_gentle_shell_auto_read": "Gentle Shell leerá esta configuración automáticamente.",
         "setup_gentle_shell_run_hint": "Ejecutá 'gentle-shell' y cambiá de modelo con /model (o ejecutá 'gentle-shell --model agy/gemini-3.8-flash-high').",
-        "setup_gentle_shell_set_default_tip": "Tip: Ejecutá 'agy-bridge setup-gentle-shell --set-default' para dejar AGY como proveedor por defecto.",
+        "setup_gentle_shell_set_default_tip": "Tip: Ejecutá 'abridge setup-gentle-shell --set-default' para dejar AGY como proveedor por defecto.",
         "setup_gentle_shell_set_default_done": "✔ AGY configurado como proveedor por defecto en settings.json.",
         # Cursor
         "setup_cursor_title": "=== Guía de Configuración para Cursor ===",
@@ -305,12 +305,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "restore_factory_reset_option": "Estado de fábrica original (Clean Reset)",
         "restore_factory_reset_success": "Se restauró {client_name} al estado original de fábrica.",
         # Uninstall
-        "uninstall_confirm_prompt": "¿Estás seguro de que deseas desinstalar AGY Model Bridge? [{choice}]: ",
+        "uninstall_confirm_prompt": "¿Estás seguro de que deseas desinstalar Abridge? [{choice}]: ",
         "uninstall_cancelled": "Operación de desinstalación cancelada.",
-        "uninstall_success": "✔ AGY Model Bridge desinstalado correctamente.",
+        "uninstall_success": "✔ Abridge desinstalado correctamente.",
         "uninstall_daemon_stopped": "  - Servicio en segundo plano detenido.",
         "uninstall_binaries_removed": "  - Binarios eliminados: {binaries}",
-        "uninstall_daemon_dir_removed": "  - Directorio ~/.agy-bridge eliminado.",
+        "uninstall_daemon_dir_removed": "  - Directorio ~/.abridge eliminado.",
         "uninstall_claude_restored": "  - Configuración de Claude Code restaurada.",
         "uninstall_codex_restored": "  - Configuración de Codex CLI restaurada.",
         "uninstall_hermes_restored": "  - Configuración de Hermes Agent restaurada.",
@@ -330,7 +330,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "update_up_to_date": "Repositorio ya está actualizado.",
         "update_completed": "Repositorio actualizado correctamente.",
         # Common / CLI descriptions
-        "cli_description": "Antigravity Model Bridge - Gateway local de IA",
+        "cli_description": "Abridge - Gateway local de IA",
         "cli_cmd_start": "Inicia el bridge en segundo plano",
         "cli_cmd_stop": "Detiene el servicio en segundo plano",
         "cli_cmd_restart": "Reinicia el servicio en segundo plano",

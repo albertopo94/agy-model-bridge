@@ -14,7 +14,7 @@ from bridge.setup.common import (
 )
 
 HERMES_BLOCK_REGEX = re.compile(
-    r"^[ \t]*# agy:start[\s\S]*?^[ \t]*# agy:end[ \t]*(?:\r?\n)?",
+    r"^[ \t]*# (?:abridge|agy):start[\s\S]*?^[ \t]*# (?:abridge|agy):end[ \t]*(?:\r?\n)?",
     re.MULTILINE,
 )
 
