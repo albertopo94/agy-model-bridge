@@ -3210,7 +3210,7 @@ class TestOpenClawConfigurator(unittest.TestCase):
                 "id": "gemini-3.8-flash-high",
                 "name": "Gemini 3.8 Flash (High)",
                 "reasoning": True,
-                "input": ["text"],
+                "input": ["text", "image"],
                 "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
                 "contextWindow": 1048576,
                 "maxTokens": 65536,
@@ -3219,7 +3219,7 @@ class TestOpenClawConfigurator(unittest.TestCase):
                 "id": "claude-sonnet-5-5-high",
                 "name": "Claude Sonnet 5.5 (High - AGY)",
                 "reasoning": True,
-                "input": ["text"],
+                "input": ["text", "image"],
                 "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
                 "contextWindow": 1000000,
                 "maxTokens": 128000,
@@ -3228,7 +3228,7 @@ class TestOpenClawConfigurator(unittest.TestCase):
                 "id": "claude-sonnet-5-5-medium",
                 "name": "Claude Sonnet 5.5 (Medium - AGY)",
                 "reasoning": True,
-                "input": ["text"],
+                "input": ["text", "image"],
                 "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
                 "contextWindow": 1000000,
                 "maxTokens": 128000,
@@ -3237,7 +3237,7 @@ class TestOpenClawConfigurator(unittest.TestCase):
                 "id": "claude-sonnet-5-5-low",
                 "name": "Claude Sonnet 5.5 (Low - AGY)",
                 "reasoning": True,
-                "input": ["text"],
+                "input": ["text", "image"],
                 "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
                 "contextWindow": 1000000,
                 "maxTokens": 128000,
@@ -3246,7 +3246,7 @@ class TestOpenClawConfigurator(unittest.TestCase):
                 "id": "claude-opus-5-5-high",
                 "name": "Claude Opus 5.5 (High - AGY)",
                 "reasoning": True,
-                "input": ["text"],
+                "input": ["text", "image"],
                 "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
                 "contextWindow": 1000000,
                 "maxTokens": 128000,
@@ -3255,7 +3255,7 @@ class TestOpenClawConfigurator(unittest.TestCase):
                 "id": "claude-opus-5-5-medium",
                 "name": "Claude Opus 5.5 (Medium - AGY)",
                 "reasoning": True,
-                "input": ["text"],
+                "input": ["text", "image"],
                 "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
                 "contextWindow": 1000000,
                 "maxTokens": 128000,
@@ -3264,7 +3264,7 @@ class TestOpenClawConfigurator(unittest.TestCase):
                 "id": "claude-opus-5-5-low",
                 "name": "Claude Opus 5.5 (Low - AGY)",
                 "reasoning": True,
-                "input": ["text"],
+                "input": ["text", "image"],
                 "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
                 "contextWindow": 1000000,
                 "maxTokens": 128000,
@@ -3273,7 +3273,7 @@ class TestOpenClawConfigurator(unittest.TestCase):
                 "id": "gemini-2.5-pro",
                 "name": "Gemini 2.5 Pro",
                 "reasoning": False,
-                "input": ["text"],
+                "input": ["text", "image"],
                 "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
                 "contextWindow": 1048576,
                 "maxTokens": 65536,
@@ -3282,7 +3282,7 @@ class TestOpenClawConfigurator(unittest.TestCase):
                 "id": "gemini-2.5-flash",
                 "name": "Gemini 2.5 Flash",
                 "reasoning": False,
-                "input": ["text"],
+                "input": ["text", "image"],
                 "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
                 "contextWindow": 1048576,
                 "maxTokens": 65536,
@@ -3866,7 +3866,7 @@ class TestPiConfigurator(unittest.TestCase):
                 self.assertFalse(m["reasoning"])
             else:
                 self.assertTrue(m["reasoning"])
-            self.assertEqual(m["input"], ["text"])
+            self.assertEqual(m["input"], ["text", "image"])
             if m["id"].startswith("claude-"):
                 self.assertEqual(m["contextWindow"], 1000000)
                 self.assertEqual(m["maxTokens"], 128000)
@@ -4556,7 +4556,7 @@ class TestGentleShellConfigurator(unittest.TestCase):
                 self.assertFalse(m["reasoning"])
             else:
                 self.assertTrue(m["reasoning"])
-            self.assertEqual(m["input"], ["text"])
+            self.assertEqual(m["input"], ["text", "image"])
             if m["id"].startswith("claude-"):
                 self.assertEqual(m["contextWindow"], 1000000)
                 self.assertEqual(m["maxTokens"], 128000)
