@@ -561,33 +561,130 @@ def validate_generation_parameters(payload: dict[str, Any]) -> None:
                 raise InvalidRequestError("Parameter 'max_tokens' must be a positive integer")
 
 
-def _extract_text_and_parts_from_content(raw_content: Any) -> str:
-    """Extracts text content, rejecting multimodal image content with 400 InvalidRequestError."""
+def _parse_data_uri(data_uri: str) -> tuple[str, str]:
+    """Parses a data: URI into (mime_type, base64_data)."""
+    if not data_uri.startswith("data:"):
+        raise InvalidRequestError("Invalid data URI: must start with 'data:'")
+    header, sep, b64_data = data_uri.partition(",")
+    if not sep or not b64_data:
+        raise InvalidRequestError("Invalid data URI: missing comma separator or base64 payload")
+
+    meta = header[5:]  # after 'data:'
+    mime_type = "image/png"
+    if ";" in meta:
+        mime_type = meta.split(";", 1)[0].strip() or "image/png"
+    elif meta.strip():
+        mime_type = meta.strip()
+    return mime_type, b64_data.strip()
+
+
+def extract_message_parts(raw_content: Any) -> list[dict[str, Any]]:
+    """Extracts text and multimodal parts (inlineData) from message content."""
+    parts: list[dict[str, Any]] = []
+
+    def process_item(item: Any) -> None:
+        if isinstance(item, str):
+            parts.append({"text": item})
+        elif isinstance(item, dict):
+            item_type = item.get("type")
+            if item_type == "text" or ("text" in item and item_type is None):
+                txt = str(item.get("text") or "")
+                parts.append({"text": txt})
+            elif item_type == "image_url" or "image_url" in item:
+                img_val = item.get("image_url")
+                if isinstance(img_val, dict):
+                    url = img_val.get("url")
+                elif isinstance(img_val, str):
+                    url = img_val
+                else:
+                    url = None
+
+                if not url or not isinstance(url, str):
+                    raise InvalidRequestError("Missing or invalid 'url' in image_url block")
+
+                if url.startswith(("http://", "https://")):
+                    raise InvalidRequestError(
+                        "Remote image URLs are not supported by the local bridge; "
+                        "please pass images as base64 data URIs (e.g., data:image/png;base64,...)"
+                    )
+                elif url.startswith("data:"):
+                    mime_type, b64_data = _parse_data_uri(url)
+                    parts.append({"inlineData": {"mimeType": mime_type, "data": b64_data}})
+                else:
+                    parts.append({"inlineData": {"mimeType": "image/png", "data": url.strip()}})
+            elif item_type == "image":
+                source = item.get("source")
+                if isinstance(source, dict):
+                    src_type = source.get("type")
+                    if src_type == "base64":
+                        b64_data = str(source.get("data") or "")
+                        mime = str(source.get("media_type") or "image/png")
+                        if not b64_data:
+                            raise InvalidRequestError("Missing base64 data in image source")
+                        parts.append({"inlineData": {"mimeType": mime, "data": b64_data.strip()}})
+                    elif src_type == "url":
+                        raise InvalidRequestError(
+                            "Remote image URLs are not supported by the local bridge; "
+                            "please pass images as base64 data URIs (e.g., data:image/png;base64,...)"
+                        )
+                    else:
+                        raise InvalidRequestError(f"Unsupported image source type: {src_type}")
+                else:
+                    img_data = item.get("image") or item.get("data")
+                    if not img_data or not isinstance(img_data, str):
+                        raise InvalidRequestError("Missing or invalid image data in image block")
+                    if img_data.startswith("data:"):
+                        mime, b64_data = _parse_data_uri(img_data)
+                        parts.append({"inlineData": {"mimeType": mime, "data": b64_data}})
+                    else:
+                        mime = str(item.get("mime_type") or item.get("mimeType") or "image/png")
+                        parts.append({"inlineData": {"mimeType": mime, "data": img_data.strip()}})
+            elif item_type == "input_image":
+                img_data = item.get("image_url") or item.get("input_image") or item.get("data")
+                if isinstance(img_data, str):
+                    if img_data.startswith("data:"):
+                        mime, b64_data = _parse_data_uri(img_data)
+                        parts.append({"inlineData": {"mimeType": mime, "data": b64_data}})
+                    elif img_data.startswith(("http://", "https://")):
+                        raise InvalidRequestError(
+                            "Remote image URLs are not supported by the local bridge; "
+                            "please pass images as base64 data URIs (e.g., data:image/png;base64,...)"
+                        )
+                    else:
+                        parts.append({"inlineData": {"mimeType": "image/png", "data": img_data.strip()}})
+                elif isinstance(img_data, dict) and "url" in img_data:
+                    url = img_data["url"]
+                    if isinstance(url, str) and url.startswith("data:"):
+                        mime, b64_data = _parse_data_uri(url)
+                        parts.append({"inlineData": {"mimeType": mime, "data": b64_data}})
+                    else:
+                        raise InvalidRequestError(
+                            "Remote image URLs are not supported by the local bridge; "
+                            "please pass images as base64 data URIs (e.g., data:image/png;base64,...)"
+                        )
+        elif item is not None:
+            parts.append({"text": str(item)})
+
     if isinstance(raw_content, list):
-        parts_str: list[str] = []
-        for item in raw_content:
-            if isinstance(item, dict):
-                item_type = item.get("type")
-                if item_type in ("image_url", "image") or "image_url" in item:
-                    raise InvalidRequestError("Multimodal image content is not supported by agy-model-bridge")
-                if item_type == "text" or "text" in item:
-                    parts_str.append(str(item.get("text") or ""))
-            elif isinstance(item, str):
-                parts_str.append(item)
-        return "".join(parts_str)
-    elif isinstance(raw_content, dict):
-        item_type = raw_content.get("type")
-        if item_type in ("image_url", "image") or "image_url" in raw_content:
-            raise InvalidRequestError("Multimodal image content is not supported by agy-model-bridge")
-        if item_type == "text" or "text" in raw_content:
-            return str(raw_content.get("text") or "")
-        return ""
-    elif raw_content is None:
-        return ""
-    elif isinstance(raw_content, str):
-        return raw_content
-    else:
-        return str(raw_content)
+        for sub in raw_content:
+            process_item(sub)
+    elif raw_content is not None:
+        process_item(raw_content)
+
+    # Compact consecutive text parts while preserving non-text parts
+    compacted: list[dict[str, Any]] = []
+    for p in parts:
+        if "text" in p and compacted and "text" in compacted[-1]:
+            compacted[-1]["text"] += p["text"]
+        else:
+            compacted.append(p)
+    return compacted
+
+
+def _extract_text_and_parts_from_content(raw_content: Any) -> str:
+    """Extracts plain text content from raw message content."""
+    parts = extract_message_parts(raw_content)
+    return "".join(p["text"] for p in parts if "text" in p)
 
 
 def openai_to_cloudcode_request(
@@ -632,13 +729,17 @@ def openai_to_cloudcode_request(
         turn_parts: list[dict[str, Any]]
         if role == "user":
             turn_role = "user"
-            part_text = content if content and content.strip() else " "
-            turn_parts = [{"text": part_text}]
+            raw_parts = extract_message_parts(raw_content)
+            if not raw_parts:
+                turn_parts = [{"text": " "}]
+            elif len(raw_parts) == 1 and "text" in raw_parts[0] and not raw_parts[0]["text"].strip():
+                turn_parts = [{"text": " "}]
+            else:
+                turn_parts = raw_parts
         elif role == "assistant":
             turn_role = "model"
-            turn_parts = []
-            if content and content.strip():
-                turn_parts.append({"text": content})
+            raw_parts = extract_message_parts(raw_content)
+            turn_parts = [p for p in raw_parts if not ("text" in p and not p["text"].strip())]
             tool_calls = msg.get("tool_calls")
             if tool_calls and isinstance(tool_calls, list):
                 for tc in tool_calls:

@@ -232,7 +232,56 @@ class TestOpenAIToCloudCodeRequest(unittest.TestCase):
             [{"role": "user", "parts": [{"text": "Hello world!"}]}],
         )
 
-    def test_multimodal_content_list_with_image_rejected(self):
+    def test_multimodal_content_list_with_base64_data_url(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "Describe this image."},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="},
+                        },
+                    ],
+                }
+            ],
+        }
+        _, contents, _, _, _ = openai_to_cloudcode_request(payload, project="test-project")
+        self.assertEqual(len(contents), 1)
+        self.assertEqual(contents[0]["role"], "user")
+        self.assertEqual(len(contents[0]["parts"]), 2)
+        self.assertEqual(contents[0]["parts"][0], {"text": "Describe this image."})
+        self.assertEqual(
+            contents[0]["parts"][1],
+            {
+                "inlineData": {
+                    "mimeType": "image/png",
+                    "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+                }
+            },
+        )
+
+    def test_multimodal_content_list_with_image_type_accepted(self):
+        payload = {
+            "model": "gemini-2.5-pro",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image", "image": "base64data", "mime_type": "image/jpeg"},
+                    ],
+                }
+            ],
+        }
+        _, contents, _, _, _ = openai_to_cloudcode_request(payload, project="test-project")
+        self.assertEqual(
+            contents,
+            [{"role": "user", "parts": [{"inlineData": {"mimeType": "image/jpeg", "data": "base64data"}}]}],
+        )
+
+    def test_multimodal_content_list_with_remote_url_rejected(self):
         payload = {
             "model": "gemini-2.5-pro",
             "messages": [
@@ -247,23 +296,7 @@ class TestOpenAIToCloudCodeRequest(unittest.TestCase):
         }
         with self.assertRaises(InvalidRequestError) as ctx:
             openai_to_cloudcode_request(payload, project="test-project")
-        self.assertIn("Multimodal image content is not supported by agy-model-bridge", str(ctx.exception))
-
-    def test_multimodal_content_list_with_image_type_rejected(self):
-        payload = {
-            "model": "gemini-2.5-pro",
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "image", "image": "base64data"},
-                    ],
-                }
-            ],
-        }
-        with self.assertRaises(InvalidRequestError) as ctx:
-            openai_to_cloudcode_request(payload, project="test-project")
-        self.assertIn("Multimodal image content is not supported by agy-model-bridge", str(ctx.exception))
+        self.assertIn("Remote image URLs are not supported", str(ctx.exception))
 
     def test_temperature_invalid_type_raises_invalid_request_error(self):
         for bad_temp in (True, False, "0.5", [0.5], {"temp": 0.5}):
