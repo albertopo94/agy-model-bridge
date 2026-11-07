@@ -1129,7 +1129,7 @@ class TestServerEndpoints(unittest.TestCase):
         status, headers, body = self._http_get_raw("/")
         self.assertEqual(status, 200)
         self.assertIn("text/html", headers.get_content_type())
-        self.assertIn("AGY Model Bridge", body)
+        self.assertIn("Abridge", body)
         self.assertIn("Claude Code", body)
         self.assertIn("Codex CLI", body)
         self.assertIn("Hermes Agent", body)

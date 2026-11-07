@@ -99,10 +99,10 @@ def parse_accept_language(header: str | None) -> str:
 TRANSLATIONS: dict[str, dict[str, str]] = {
     "en": {
         # Daemon lifecycle
-        "daemon_running_bg": "✔ AGY Model Bridge running in background (PID {pid})",
+        "daemon_running_bg": "✔ Abridge running in background (PID {pid})",
         "daemon_dashboard_url": "➜ Dashboard: {url}{browser_hint}",
         "daemon_stop_hint": "➜ To stop the service: {prog_base} stop",
-        "daemon_already_running": "AGY Model Bridge is already running{pid_str}",
+        "daemon_already_running": "Abridge is already running{pid_str}",
         "daemon_start_failed": "Failed to start daemon",
         "daemon_auth_expired": (
             "Your Antigravity session expired, so the bridge cannot reach Google.\n"
@@ -114,9 +114,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Open the Antigravity app and sign in, then run start once more.\n"
             "(If you only need the dashboard, start with an explicit --project to skip project discovery.)"
         ),
-        "daemon_stopped": "✔ AGY Model Bridge stopped{pid_str}",
-        "daemon_restarted": "✔ AGY Model Bridge restarted (PID {pid})",
-        "daemon_not_running": "AGY Model Bridge is not running.",
+        "daemon_stopped": "✔ Abridge stopped{pid_str}",
+        "daemon_restarted": "✔ Abridge restarted (PID {pid})",
+        "daemon_not_running": "Abridge is not running.",
         "daemon_browser_opened": " (opened in browser)",
         "status_active": "✔ Status: Active{pid_str}",
         "status_address": "➜ Address: {url}",
@@ -229,10 +229,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     },
     "es": {
         # Daemon lifecycle
-        "daemon_running_bg": "✔ AGY Model Bridge corriendo en segundo plano (PID {pid})",
+        "daemon_running_bg": "✔ Abridge corriendo en segundo plano (PID {pid})",
         "daemon_dashboard_url": "➜ Dashboard: {url}{browser_hint}",
         "daemon_stop_hint": "➜ Para detener el servicio: {prog_base} stop",
-        "daemon_already_running": "AGY Model Bridge ya está corriendo{pid_str}",
+        "daemon_already_running": "Abridge ya está corriendo{pid_str}",
         "daemon_start_failed": "Fallo al iniciar el daemon",
         "daemon_auth_expired": (
             "Tu sesión de Antigravity venció, así que el bridge no puede llegar a Google.\n"
@@ -244,9 +244,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Abrí la app de Antigravity e iniciá sesión, después ejecutá start otra vez.\n"
             "(Si solo necesitás el dashboard, iniciá con --project explícito para saltear el descubrimiento del proyecto.)"
         ),
-        "daemon_stopped": "✔ AGY Model Bridge detenido{pid_str}",
-        "daemon_restarted": "✔ AGY Model Bridge reiniciado (PID {pid})",
-        "daemon_not_running": "AGY Model Bridge no está corriendo.",
+        "daemon_stopped": "✔ Abridge detenido{pid_str}",
+        "daemon_restarted": "✔ Abridge reiniciado (PID {pid})",
+        "daemon_not_running": "Abridge no está corriendo.",
         "daemon_browser_opened": " (abierto en el navegador)",
         "status_active": "✔ Estado: Activo{pid_str}",
         "status_address": "➜ Dirección: {url}",

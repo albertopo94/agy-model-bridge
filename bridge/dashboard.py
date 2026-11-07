@@ -680,9 +680,9 @@ def render_dashboard(
     message = auth_status.get("message", "")
 
     subtitle_text = (
-        "Gateway multiprotocolo sin dependencias para Google Cloud Code Assist"
+        "Gateway multiprotocolo sin dependencias para agentes de código"
         if is_es
-        else "Zero-dependency multi-protocol gateway to Google Cloud Code Assist"
+        else "Zero-dependency multi-protocol gateway for AI coding agents"
     )
 
     if status_name == "Valid":
@@ -888,7 +888,7 @@ def render_dashboard(
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AGY Model Bridge — Local AI Gateway</title>
+  <title>Abridge — Local AI Gateway</title>
   <style>
     :root {{
       color-scheme: dark;
@@ -1486,7 +1486,7 @@ def render_dashboard(
     <header>
       <div class="header-top">
         <div>
-          <h1>AGY Model Bridge</h1>
+          <h1>Abridge</h1>
           <p class="subtitle" data-i18n="subtitle">{subtitle_text}</p>
         </div>
         <div class="header-actions">
@@ -1607,7 +1607,7 @@ def render_dashboard(
 
     var I18N = {{
       en: {{
-        subtitle: "Zero-dependency multi-protocol gateway to Google Cloud Code Assist",
+        subtitle: "Zero-dependency multi-protocol gateway for AI coding agents",
         models: "{{count}} Models Discovered",
         auth_valid: "Valid",
         auth_expired: "Expired — Open Antigravity to refresh",
@@ -1674,7 +1674,7 @@ def render_dashboard(
         cursor_group_ondemand: "On-demand"
       }},
       es: {{
-        subtitle: "Gateway multiprotocolo sin dependencias para Google Cloud Code Assist",
+        subtitle: "Gateway multiprotocolo sin dependencias para agentes de código",
         models: "{{count}} Modelos Descubiertos",
         auth_valid: "V\u00e1lido",
         auth_expired: "Expirado \u2014 Abr\u00ed Antigravity para renovar",
