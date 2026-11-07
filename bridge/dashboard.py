@@ -295,6 +295,7 @@ def _make_client_providers(
     docs_url: str,
     cursor_snippet: Any = None,
     opencode_snippet: Any = None,
+    extra_providers: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     providers: list[dict[str, Any]] = [
         {
@@ -343,6 +344,9 @@ def _make_client_providers(
             }
         )
 
+    if extra_providers:
+        providers.extend(extra_providers)
+
     providers.append(
         {
             "id": "all",
@@ -388,19 +392,20 @@ CLIENT_CARDS: list[dict[str, Any]] = [
             lambda addr, api_key='$(cat ~/.abridge/api_key 2>/dev/null || cat ~/.agy-bridge/api_key)': f'BASE_URL=http://{addr}/v1\nAPI_KEY="{api_key}"',
             lambda addr: "abridge restore-gentle-shell",
             "https://github.com/Gentleman-Programming/gentle-shell",
-        ) + [
-            {
-                "id": "freellmapi",
-                "label_en": "FreeLLMAPI",
-                "label_es": "FreeLLMAPI",
-                "warning_tip_en": "Requires FreeLLMAPI gateway running on http://127.0.0.1:31415",
-                "warning_tip_es": "Requiere el gateway de FreeLLMAPI corriendo en http://127.0.0.1:31415",
-                "auto_cmd": lambda addr: 'abridge setup-gentle-shell --provider freellmapi --api-key "<YOUR_KEY>"',
-                "manual_snippet": lambda addr, api_key=None: 'BASE_URL=http://127.0.0.1:31415/v1\nAPI_KEY="<YOUR_KEY>"',
-                "restore_cmd": lambda addr: "abridge restore-gentle-shell",
-                "docs_url": "https://github.com/tashfeenahmed/freellmapi",
-            },
-        ],
+            extra_providers=[
+                {
+                    "id": "freellmapi",
+                    "label_en": "FreeLLMAPI",
+                    "label_es": "FreeLLMAPI",
+                    "warning_tip_en": "Requires FreeLLMAPI gateway running on http://127.0.0.1:31415",
+                    "warning_tip_es": "Requiere el gateway de FreeLLMAPI corriendo en http://127.0.0.1:31415",
+                    "auto_cmd": lambda addr: 'abridge setup-gentle-shell --provider freellmapi --api-key "<YOUR_KEY>"',
+                    "manual_snippet": lambda addr, api_key=None: 'BASE_URL=http://127.0.0.1:31415/v1\nAPI_KEY="<YOUR_KEY>"',
+                    "restore_cmd": lambda addr: "abridge restore-gentle-shell",
+                    "docs_url": "https://github.com/tashfeenahmed/freellmapi",
+                },
+            ],
+        ),
     },
     {
         "id": "pi",
