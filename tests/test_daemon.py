@@ -697,7 +697,7 @@ class TestHealthCheck(unittest.TestCase):
     def test_check_server_healthy_matches_valid_service_identity(self, mock_urlopen):
         resp = MagicMock()
         resp.status = 200
-        resp.read.return_value = b'{"status": "ok", "service": "abridge", "version": "0.35.1"}'
+        resp.read.return_value = b'{"status": "ok", "service": "abridge", "version": "0.36.0"}'
         resp.__enter__.return_value = resp
         mock_urlopen.return_value = resp
 

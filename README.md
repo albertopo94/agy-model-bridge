@@ -23,6 +23,7 @@ Zero-dependency, pure Python 3 local AI gateway that bridges **Google Cloud Code
   - **OpenCode Free Tier**: Exposes the free-tier models discovered from `opencode models` (ids ending in `-free`, e.g. `opencode/pulse-alpha-free`) with `[OpenCode]` display-name tags, executed through a pre-warmed `opencode acp` process with an `opencode run` fallback. Upstream region blocks (free pools run on third-party clouds) are reported as clear 403 errors naming the model instead of silent stream interruptions.
 - **Built-in Setup CLI**: Native subcommands (`setup-claude`, `setup-codex`, `setup-hermes`, `setup-opencode`, `setup-openclaw`, `setup-cursor`, `setup-pi`, `setup-gentle-shell`) that surgically configure client environments with atomic writes, file permissions `0o600`, automatic timestamped backups, and multi-provider selection (`--provider agy|cursor|opencode|all`).
 - **Automatic Local API Key Security**: Automatically generates a persistent random API key stored at `~/.abridge/api_key` (`0600` permissions; automatically adopts existing keys from `~/.agy-bridge/api_key`) to protect `/v1/*` gateway endpoints against cross-origin access.
+- **Multimodal Vision & Image Support**: Full end-to-end multimodal image translation across OpenAI (`image_url` base64 data URIs), Anthropic (`{"type": "image", "source": {"type": "base64", ...}}`), and Responses APIs directly to Google Cloud Code Assist `inlineData` parts and Cursor ACP prompt blocks. Vision-capable models (Gemini, Claude Sonnet/Opus, Cursor models) can inspect images and screenshots natively without 400 errors or text loss.
 - **macOS Keychain OAuth Integration**: Seamlessly extracts Google OAuth credentials (`service="gemini"`, `account="antigravity"`) and Cursor session JWTs (`service="cursor-access-token"`, `account="cursor-user"`) directly from macOS Keychain with thread-safe TTL caching.
 - **Antigravity & Cursor Model Quota Tracking**: Real-time quota monitoring on the dashboard and JSON endpoints (`GET /api/quota` and `GET /api/cursor/quota`). Displays visual usage bars and reset countdowns for Antigravity pools (Gemini and 3P) and Cursor buckets (`Cursor Models`, `Other Models`, `Plan`). `GET /api/opencode/status` reports OpenCode CLI availability, version, and exposed free model count (OpenCode exposes no provider quota API, so no limit bars are shown).
 - **Extended 300s HTTP Timeout & Deep Reasoning**: 300-second upstream timeout allows models with deep reasoning chains (`gemini-4-argon-high`, `gemini-3.8-flash-high`, `claude-opus-5-5-high`) to complete complex thinking steps without connection resets.
@@ -448,7 +449,7 @@ Execute the complete test suite:
 python3 -m unittest discover -s tests -v
 ```
 
-All 1161 tests run in ~3-4 seconds locally with zero external dependencies and zero network access.
+All 1165 tests run in ~3-4 seconds locally with zero external dependencies and zero network access.
 
 ### End-to-End Smoke Test
 
