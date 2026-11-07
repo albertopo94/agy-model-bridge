@@ -1,6 +1,8 @@
-# AGY Model Bridge
+# Abridge
 
-Zero-dependency, pure Python 3 local AI gateway that bridges the Google Cloud Code Assist backend (`daily-cloudcode-pa.googleapis.com`) to standard client protocols, providing native model access for **Claude Code**, **Codex CLI**, **Hermes Agent**, **OpenCode**, **OpenClaw**, **Cursor**, **Pi**, **Gentle Shell**, and **FreeLLMAPI**.
+Zero-dependency, pure Python 3 local AI gateway that bridges **Google Cloud Code Assist** (`daily-cloudcode-pa.googleapis.com`), local **Cursor CLI** (`agent`), and local **OpenCode CLI** to standard client protocols, providing native model access for **Claude Code**, **Codex CLI**, **Hermes Agent**, **OpenCode**, **OpenClaw**, **Cursor**, **Pi**, **Gentle Shell**, and **FreeLLMAPI**.
+
+> **Note on backwards compatibility:** Formerly known as `agy-model-bridge`. The `agy-bridge` command and `~/.agy-bridge` state directory remain fully functional as backwards-compatible aliases. Existing setups and running agents continue working seamlessly with zero downtime.
 
 ---
 
@@ -20,7 +22,7 @@ Zero-dependency, pure Python 3 local AI gateway that bridges the Google Cloud Co
   - On Cursor Free tier, defaults to `cursor/auto` with clear notices, while supporting named models on Pro/Business tiers.
   - **OpenCode Free Tier**: Exposes the free-tier models discovered from `opencode models` (ids ending in `-free`, e.g. `opencode/pulse-alpha-free`) with `[OpenCode]` display-name tags, executed through a pre-warmed `opencode acp` process with an `opencode run` fallback. Upstream region blocks (free pools run on third-party clouds) are reported as clear 403 errors naming the model instead of silent stream interruptions.
 - **Built-in Setup CLI**: Native subcommands (`setup-claude`, `setup-codex`, `setup-hermes`, `setup-opencode`, `setup-openclaw`, `setup-cursor`, `setup-pi`, `setup-gentle-shell`) that surgically configure client environments with atomic writes, file permissions `0o600`, automatic timestamped backups, and multi-provider selection (`--provider agy|cursor|opencode|all`).
-- **Automatic Local API Key Security**: Automatically generates a persistent random API key stored at `~/.agy-bridge/api_key` (`0600` permissions) to protect `/v1/*` gateway endpoints against cross-origin access.
+- **Automatic Local API Key Security**: Automatically generates a persistent random API key stored at `~/.abridge/api_key` (`0600` permissions; automatically adopts existing keys from `~/.agy-bridge/api_key`) to protect `/v1/*` gateway endpoints against cross-origin access.
 - **macOS Keychain OAuth Integration**: Seamlessly extracts Google OAuth credentials (`service="gemini"`, `account="antigravity"`) and Cursor session JWTs (`service="cursor-access-token"`, `account="cursor-user"`) directly from macOS Keychain with thread-safe TTL caching.
 - **Antigravity & Cursor Model Quota Tracking**: Real-time quota monitoring on the dashboard and JSON endpoints (`GET /api/quota` and `GET /api/cursor/quota`). Displays visual usage bars and reset countdowns for Antigravity pools (Gemini and 3P) and Cursor buckets (`Cursor Models`, `Other Models`, `Plan`). `GET /api/opencode/status` reports OpenCode CLI availability, version, and exposed free model count (OpenCode exposes no provider quota API, so no limit bars are shown).
 - **Extended 300s HTTP Timeout & Deep Reasoning**: 300-second upstream timeout allows models with deep reasoning chains (`gemini-4-argon-high`, `gemini-3.8-flash-high`, `claude-opus-5-5-high`) to complete complex thinking steps without connection resets.
@@ -44,7 +46,7 @@ The first time the bridge accesses the Keychain item stored by Antigravity, macO
 Click **"Always Allow"** (or enter your Mac login password) so the bridge can read the active Antigravity session without prompting on every restart.
 
 ### 2. Session & Token Freshness
-The bridge reads the active OAuth token managed by Antigravity. The dashboard and `agy-bridge status` report what Google actually accepts, not merely what is stored on disk: every status check reuses the model-catalog request as a credential probe, so an accurate verdict costs no extra round trip.
+The bridge reads the active OAuth token managed by Antigravity. The dashboard and `abridge status` report what Google actually accepts, not merely what is stored on disk: every status check reuses the model-catalog request as a credential probe, so an accurate verdict costs no extra round trip.
 
 | Badge (color) | What it proves | What to do |
 |---|---|---|
@@ -57,9 +59,9 @@ The bridge reads the active OAuth token managed by Antigravity. The dashboard an
 A verdict is cached for 60 seconds; a failed one is retried after 15 seconds so a refreshed credential shows up quickly.
 
 ### 3. Local API Key Authentication
-The bridge protects all `/v1/*` endpoints with a persistent random token stored in `~/.agy-bridge/api_key` (permissions `0600`).
-- **Automated client setups** (`agy-bridge setup-*`) read and inject this persistent key automatically.
-- **Manual sessions or environment variables**: read the key directly with `cat ~/.agy-bridge/api_key`.
+The bridge protects all `/v1/*` endpoints with a persistent random token stored in `~/.abridge/api_key` (permissions `0600`; adopts `~/.agy-bridge/api_key` if migrating).
+- **Automated client setups** (`abridge setup-*`) read and inject this persistent key automatically.
+- **Manual sessions or environment variables**: read the key directly with `cat ~/.abridge/api_key` (or `cat ~/.agy-bridge/api_key`).
 
 ---
 
@@ -67,7 +69,7 @@ The bridge protects all `/v1/*` endpoints with a persistent random token stored 
 
 ### Option A: One-line install (Recommended)
 
-Run directly in your terminal to install `agy-bridge` into `~/.local/bin` without manual Git cloning:
+Run directly in your terminal to install `abridge` (and `agy-bridge` alias) into `~/.local/bin` without manual Git cloning:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/albertopo94/agy-model-bridge/main/install.sh | bash
@@ -88,7 +90,7 @@ pip install -e .
 ### 1. Start the Bridge in the Background
 
 ```bash
-agy-bridge start
+abridge start
 ```
 
 This launches the gateway detached in the background, waits for health check confirmation, and automatically opens the local dashboard in your default web browser (`http://127.0.0.1:24980/`).
@@ -101,7 +103,7 @@ If the gateway cannot come up, `start` exits with `1` and reports which of the t
 |---|---|---|
 | `Antigravity is not available…` | Antigravity is one optional upstream. When its Google credential is missing or expired the gateway still starts: the dashboard, Cursor models, and OpenCode models keep working, and AGY model requests return a clear 503. The dashboard shows an `AGY unavailable` badge. | Open the Antigravity app and sign in to re-enable AGY models. |
 | `Bridge server exited before it became healthy…` | The process died while starting, so nothing is listening on the port. The last log lines are printed inline (most often an authentication or project-discovery error). | Fix the reported error (usually re-authenticate in Antigravity) and run `start` again. |
-| `Timeout waiting for bridge server to respond…` | The process was still running when the health window closed. | Check `~/.agy-bridge/bridge.log` and the port/host for conflicts. |
+| `Timeout waiting for bridge server to respond…` | The process was still running when the health window closed. | Check `~/.abridge/bridge.log` and the port/host for conflicts. |
 
 ### 2. Configure Your Terminal Coding Agents
 
@@ -109,10 +111,10 @@ Configure your tools with a single command (with automated ISO backups and atomi
 
 ```bash
 # Configure Claude Code CLI (~/.claude/settings.json)
-agy-bridge setup-claude
+abridge setup-claude
 
 # Configure Codex CLI (~/.codex/config.toml)
-agy-bridge setup-codex
+abridge setup-codex
 ```
 
 #### Multi-Provider Selection ("All" / "Todos" tab)
@@ -127,23 +129,23 @@ Each client setup card on the web dashboard provides tabs for one-click configur
 
 ```bash
 # Check daemon status, active port, and discovered models
-agy-bridge status
+abridge status
 
 # Open or re-open the web dashboard at any time
 # (exits with 1 and opens nothing if the bridge is not running)
-agy-bridge dashboard
+abridge dashboard
 
-# Update agy-bridge in-place to the latest version (and auto-reload daemon)
-agy-bridge update
+# Update abridge in-place to the latest version (and auto-reload daemon)
+abridge update
 
 # Check installed version
-agy-bridge --version
+abridge --version
 
 # Restart the background daemon (preserving active port and configuration)
-agy-bridge restart
+abridge restart
 
 # Stop the running background service
-agy-bridge stop
+abridge stop
 ```
 
 ---
@@ -154,7 +156,7 @@ agy-bridge stop
 
 Run the automated setup:
 ```bash
-agy-bridge setup-claude
+abridge setup-claude
 ```
 This automatically configures `~/.claude/settings.json` with:
 - Model: `gemini-3.8-flash-high` (aliased to upstream `gemini-3.8-flash-tiered` with high thinking)
@@ -184,14 +186,14 @@ Typing `/model` inside Claude Code displays curated models ready to use:
 
 *(Alternative: set environment variables manually for a single session:)*
 ```bash
-export ANTHROPIC_BASE_URL="http://127.0.0.1:24980" ANTHROPIC_AUTH_TOKEN="$(cat ~/.agy-bridge/api_key)" ANTHROPIC_MODEL="gemini-3.8-flash-high" CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1 && claude
+export ANTHROPIC_BASE_URL="http://127.0.0.1:24980" ANTHROPIC_AUTH_TOKEN="$(cat ~/.abridge/api_key)" ANTHROPIC_MODEL="gemini-3.8-flash-high" CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1 && claude
 ```
 
 ### 🎴 Codex CLI
 
 Run the automated setup:
 ```bash
-agy-bridge setup-codex
+abridge setup-codex
 ```
 This surgically adds an `[model_providers.agy]` block to `~/.codex/config.toml` using `wire_api = "responses"` and `model = "gemini-3.8-flash-high"`.
 
@@ -204,20 +206,20 @@ codex
 
 Run the automated setup:
 ```bash
-agy-bridge setup-hermes
+abridge setup-hermes
 ```
 This surgically configures `~/.hermes/config.yaml` with the local gateway endpoint and active API key.
 
 *(Alternative: set environment variables manually for a single session:)*
 ```bash
-export OPENAI_BASE_URL="http://127.0.0.1:24980/v1" OPENAI_API_KEY="$(cat ~/.agy-bridge/api_key)" && hermes
+export OPENAI_BASE_URL="http://127.0.0.1:24980/v1" OPENAI_API_KEY="$(cat ~/.abridge/api_key)" && hermes
 ```
 
 ### 🎴 OpenCode
 
 Run the automated setup:
 ```bash
-agy-bridge setup-opencode
+abridge setup-opencode
 ```
 This surgically configures `~/.config/opencode/opencode.json` (or `opencode.jsonc`) with:
 - Provider: `agy` configured with `@ai-sdk/openai-compatible`
@@ -233,7 +235,7 @@ opencode
 
 Run the automated setup:
 ```bash
-agy-bridge setup-openclaw
+abridge setup-openclaw
 ```
 This surgically configures `~/.openclaw/openclaw.json` with:
 - Provider: `agy` configured with OpenAI completions API
@@ -251,27 +253,27 @@ Cursor routes AI requests through its cloud servers, so localhost requires an HT
 
 Run the setup guide:
 ```bash
-agy-bridge setup-cursor
+abridge setup-cursor
 ```
 Follow the on-screen guide to:
 1. Open Cursor **Settings** -> **Models** -> enable **Override OpenAI Base URL**.
 2. Enter your bridge endpoint (e.g., `http://127.0.0.1:24980/v1` or public HTTPS tunnel URL).
-3. Set API Key to your local key (read from `cat ~/.agy-bridge/api_key`).
+3. Set API Key to your local key (read from `cat ~/.abridge/api_key`).
 4. Add models: `gemini-3.8-flash-high`, `claude-sonnet-5-5-high`, `claude-opus-5-5-high`, `gemini-2.5-pro`, `gemini-2.5-flash`.
 
 ### 🎴 Pi Coding Agent
 
 Run the automated setup for AGY:
 ```bash
-agy-bridge setup-pi
+abridge setup-pi
 ```
 Or configure Pi for Cursor models or both providers:
 ```bash
 # Configure Cursor models (defaults to cursor/auto on Free plans)
-agy-bridge setup-pi --provider cursor --set-default
+abridge setup-pi --provider cursor --set-default
 
 # Configure both AGY and Cursor side-by-side
-agy-bridge setup-pi --provider all
+abridge setup-pi --provider all
 ```
 This surgically configures `~/.pi/agent/models.json` with:
 - Providers: `agy` and/or `cursor` configured with OpenAI completions API
@@ -299,23 +301,23 @@ Or switch models inside Pi using `/model`.
 
 ### 🎴 Gentle Shell
 
-Run the automated setup for AGY Bridge:
+Run the automated setup for Abridge:
 ```bash
-agy-bridge setup-gentle-shell
+abridge setup-gentle-shell
 ```
 
 Configure Gentle Shell for Cursor models or both providers:
 ```bash
 # Configure Cursor models
-agy-bridge setup-gentle-shell --provider cursor --set-default
+abridge setup-gentle-shell --provider cursor --set-default
 
 # Configure both AGY and Cursor simultaneously
-agy-bridge setup-gentle-shell --provider all
+abridge setup-gentle-shell --provider all
 ```
 
 Or configure Gentle Shell to use FreeLLMAPI with automatic sandbox isolation and backup tracking:
 ```bash
-agy-bridge setup-gentle-shell --provider freellmapi --api-key "<YOUR_KEY>"
+abridge setup-gentle-shell --provider freellmapi --api-key "<YOUR_KEY>"
 ```
 
 This surgically configures `~/.gentle-shell/agent/models.json` with:
@@ -338,32 +340,32 @@ Or switch models inside Gentle Shell using `/model`.
 ### 🎴 FreeLLMAPI
 Register this bridge as an OpenAI-compatible Custom Provider in FreeLLMAPI:
 - **Base URL**: `http://127.0.0.1:24980/v1`
-- **API Key**: Your local key (from `cat ~/.agy-bridge/api_key`)
+- **API Key**: Your local key (from `cat ~/.abridge/api_key`)
 
 ---
 
 ## Restoring Configuration Backups
 
-Before modifying any configuration files, `agy-bridge` creates timestamped backups. You can restore previous configurations at any time with automated provenance detection:
+Before modifying any configuration files, `abridge` creates timestamped backups. You can restore previous configurations at any time with automated provenance detection:
 
 ```bash
 # Restore Claude Code configuration
-agy-bridge restore-claude
+abridge restore-claude
 
 # Restore Codex CLI configuration
-agy-bridge restore-codex
+abridge restore-codex
 
 # Restore OpenCode configuration
-agy-bridge restore-opencode
+abridge restore-opencode
 
 # Restore OpenClaw configuration
-agy-bridge restore-openclaw
+abridge restore-openclaw
 
 # Restore Pi Coding Agent configuration
-agy-bridge restore-pi
+abridge restore-pi
 
 # Restore Gentle Shell configuration
-agy-bridge restore-gentle-shell
+abridge restore-gentle-shell
 ```
 
 The interactive selector classifies each backup so you know exactly what you are restoring:
@@ -385,12 +387,12 @@ Flags:
 
 ## Uninstallation
 
-To completely uninstall AGY Model Bridge, stop the running background daemon, remove the CLI binaries and daemon directory (`~/.agy-bridge`), and restore Claude Code, Codex CLI, OpenCode, OpenClaw, Pi, and Gentle Shell configurations to their original state:
+To completely uninstall Abridge, stop the running background daemon, remove the CLI binaries and daemon directory (`~/.abridge` and `~/.agy-bridge`), and restore Claude Code, Codex CLI, OpenCode, OpenClaw, Pi, and Gentle Shell configurations to their original state:
 
 ### Option A: Via the installed CLI
 
 ```bash
-agy-bridge uninstall
+abridge uninstall
 ```
 
 Options:
@@ -410,29 +412,29 @@ curl -fsSL https://raw.githubusercontent.com/albertopo94/agy-model-bridge/main/u
 
 | Command | Description |
 |---|---|
-| `agy-bridge start` | Starts background daemon and opens web dashboard automatically |
-| `agy-bridge stop` | Stops the running background daemon |
-| `agy-bridge restart` | Restarts background daemon, preserving active port and flags |
-| `agy-bridge status` | Checks daemon status, port, models count, and upstream-verified Google auth |
-| `agy-bridge dashboard` (or `open`) | Opens the local dashboard in the default browser; exits with `1` if the bridge is not running |
-| `agy-bridge update` (or `upgrade`) | Updates installation in-place via git pull and reloads daemon |
-| `agy-bridge --version` (or `-v`) | Prints the bridge version |
-| `agy-bridge setup-claude` | Surgically configures Claude Code (`~/.claude/settings.json`) |
-| `agy-bridge restore-claude` | Interactively restores a Claude Code configuration backup |
-| `agy-bridge setup-codex` | Surgically configures Codex CLI (`~/.codex/config.toml`) |
-| `agy-bridge restore-codex` | Interactively restores a Codex CLI configuration backup |
-| `agy-bridge setup-opencode` | Surgically configures OpenCode (`~/.config/opencode/opencode.json`) |
-| `agy-bridge restore-opencode` | Interactively restores an OpenCode configuration backup |
-| `agy-bridge setup-openclaw` | Surgically configures OpenClaw (`~/.openclaw/openclaw.json`) |
-| `agy-bridge restore-openclaw` | Interactively restores an OpenClaw configuration backup |
-| `agy-bridge setup-cursor` | Setup guide for Cursor AI editor |
-| `agy-bridge setup-pi` | Surgically configures Pi Coding Agent (`~/.pi/agent/models.json`) |
-| `agy-bridge restore-pi` | Interactively restores a Pi configuration backup |
-| `agy-bridge setup-gentle-shell` | Surgically configures Gentle Shell (`~/.gentle-shell/agent/models.json`; supports `--provider freellmapi --api-key`) |
-| `agy-bridge restore-gentle-shell` | Interactively restores a Gentle Shell configuration backup |
-| `agy-bridge setup-hermes` | Surgically configures Hermes Agent (`~/.hermes/config.yaml`) |
-| `agy-bridge restore-hermes` | Interactively restores a Hermes Agent configuration backup |
-| `agy-bridge uninstall` | Uninstalls bridge, terminates daemon, and restores client configs |
+| `abridge start` (or `agy-bridge start`) | Starts background daemon and opens web dashboard automatically |
+| `abridge stop` | Stops the running background daemon |
+| `abridge restart` | Restarts background daemon, preserving active port and flags |
+| `abridge status` | Checks daemon status, port, models count, and upstream-verified Google auth |
+| `abridge dashboard` (or `open`) | Opens the local dashboard in the default browser; exits with `1` if the bridge is not running |
+| `abridge update` (or `upgrade`) | Updates installation in-place via git pull and reloads daemon |
+| `abridge --version` (or `-v`) | Prints the bridge version |
+| `abridge setup-claude` | Surgically configures Claude Code (`~/.claude/settings.json`) |
+| `abridge restore-claude` | Interactively restores a Claude Code configuration backup |
+| `abridge setup-codex` | Surgically configures Codex CLI (`~/.codex/config.toml`) |
+| `abridge restore-codex` | Interactively restores a Codex CLI configuration backup |
+| `abridge setup-opencode` | Surgically configures OpenCode (`~/.config/opencode/opencode.json`) |
+| `abridge restore-opencode` | Interactively restores an OpenCode configuration backup |
+| `abridge setup-openclaw` | Surgically configures OpenClaw (`~/.openclaw/openclaw.json`) |
+| `abridge restore-openclaw` | Interactively restores an OpenClaw configuration backup |
+| `abridge setup-cursor` | Setup guide for Cursor AI editor |
+| `abridge setup-pi` | Surgically configures Pi Coding Agent (`~/.pi/agent/models.json`) |
+| `abridge restore-pi` | Interactively restores a Pi configuration backup |
+| `abridge setup-gentle-shell` | Surgically configures Gentle Shell (`~/.gentle-shell/agent/models.json`; supports `--provider freellmapi --api-key`) |
+| `abridge restore-gentle-shell` | Interactively restores a Gentle Shell configuration backup |
+| `abridge setup-hermes` | Surgically configures Hermes Agent (`~/.hermes/config.yaml`) |
+| `abridge restore-hermes` | Interactively restores a Hermes Agent configuration backup |
+| `abridge uninstall` | Uninstalls bridge, terminates daemon, and restores client configs |
 
 ---
 
@@ -446,7 +448,7 @@ Execute the complete test suite:
 python3 -m unittest discover -s tests -v
 ```
 
-All 1155 tests run in ~3-4 seconds locally with zero external dependencies and zero network access.
+All 1161 tests run in ~3-4 seconds locally with zero external dependencies and zero network access.
 
 ### End-to-End Smoke Test
 

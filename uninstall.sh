@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# AGY Model Bridge - Zero-dependency uninstaller for macOS & Linux
+# Abridge - Zero-dependency uninstaller for macOS & Linux
 # Usage: curl -fsSL https://raw.githubusercontent.com/albertopo94/agy-model-bridge/main/uninstall.sh | bash
 
 set -e
 
-STATE_DIR="${AGY_BRIDGE_STATE_DIR:-$HOME/.agy-bridge}"
-CORE_DIR="${AGY_BRIDGE_CORE_DIR:-${AGY_BRIDGE_DIR:-$STATE_DIR/core}}"
-BIN_DIR="${AGY_BRIDGE_BIN:-$HOME/.local/bin}"
+STATE_DIR="${ABRIDGE_STATE_DIR:-${AGY_BRIDGE_STATE_DIR:-$HOME/.abridge}}"
+CORE_DIR="${ABRIDGE_CORE_DIR:-${AGY_BRIDGE_CORE_DIR:-${AGY_BRIDGE_DIR:-$STATE_DIR/core}}}"
+BIN_DIR="${ABRIDGE_BIN:-${AGY_BRIDGE_BIN:-$HOME/.local/bin}}"
 
 BOLD="\033[1m"
 GREEN="\033[32m"
@@ -30,20 +30,30 @@ for arg in "$@"; do
 done
 
 if [ "$IS_ES" = "1" ]; then
-    echo -e "${BOLD}${BLUE}==> Desinstalando AGY Model Bridge...${RESET}"
+    echo -e "${BOLD}${BLUE}==> Desinstalando Abridge...${RESET}"
 else
-    echo -e "${BOLD}${BLUE}==> Uninstalling AGY Model Bridge...${RESET}"
+    echo -e "${BOLD}${BLUE}==> Uninstalling Abridge...${RESET}"
 fi
 
 UNINSTALL_EXECUTED=0
 RESTORED_CONFIGS=0
 
 # 1. First, invoke Python uninstaller to safely stop daemon with PID verification and restore configs
-if command -v agy-bridge >/dev/null 2>&1; then
+if command -v abridge >/dev/null 2>&1; then
     if [ "$IS_ES" = "1" ]; then
-        echo -e "Ejecutando desinstalador seguro de AGY Model Bridge..."
+        echo -e "Ejecutando desinstalador seguro de Abridge..."
     else
-        echo -e "Running safe AGY Model Bridge uninstaller..."
+        echo -e "Running safe Abridge uninstaller..."
+    fi
+    if abridge uninstall --yes "$@"; then
+        UNINSTALL_EXECUTED=1
+        RESTORED_CONFIGS=1
+    fi
+elif command -v agy-bridge >/dev/null 2>&1; then
+    if [ "$IS_ES" = "1" ]; then
+        echo -e "Ejecutando desinstalador seguro de Abridge (alias)..."
+    else
+        echo -e "Running safe Abridge uninstaller (alias)..."
     fi
     if agy-bridge uninstall --yes "$@"; then
         UNINSTALL_EXECUTED=1
@@ -79,11 +89,11 @@ if [ "$UNINSTALL_EXECUTED" = "0" ]; then
         if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
             CMDLINE=$(ps -p "$PID" -o command= 2>/dev/null || true)
             case "$CMDLINE" in
-                *" -m bridge"|*" -m bridge "*|*"/agy-bridge"|*"/agy-bridge "*|*"/agy-model-bridge"|*"/agy-model-bridge "*|"agy-bridge"|"agy-bridge "*|"agy-model-bridge"|"agy-model-bridge "*)
+                *" -m bridge"|*" -m bridge "*|*"/abridge"|*"/abridge "*|*"/agy-bridge"|*"/agy-bridge "*|*"/agy-model-bridge"|*"/agy-model-bridge "*|"abridge"|"abridge "*|"agy-bridge"|"agy-bridge "*|"agy-model-bridge"|"agy-model-bridge "*)
                     if [ "$IS_ES" = "1" ]; then
-                        echo -e "Deteniendo el daemon de AGY Model Bridge (PID $PID)..."
+                        echo -e "Deteniendo el daemon de Abridge (PID $PID)..."
                     else
-                        echo -e "Stopping AGY Model Bridge daemon (PID $PID)..."
+                        echo -e "Stopping Abridge daemon (PID $PID)..."
                     fi
                     kill "$PID" 2>/dev/null || true
                     for _ in {1..30}; do
@@ -95,7 +105,7 @@ if [ "$UNINSTALL_EXECUTED" = "0" ]; then
                     if kill -0 "$PID" 2>/dev/null; then
                         CURRENT_CMD="$(ps -p "$PID" -o command= 2>/dev/null || true)"
                         case "$CURRENT_CMD" in
-                            *" -m bridge"|*" -m bridge "*|*"/agy-bridge"|*"/agy-bridge "*|*"/agy-model-bridge"|*"/agy-model-bridge "*|"agy-bridge"|"agy-bridge "*|"agy-model-bridge"|"agy-model-bridge "*)
+                            *" -m bridge"|*" -m bridge "*|*"/abridge"|*"/abridge "*|*"/agy-bridge"|*"/agy-bridge "*|*"/agy-model-bridge"|*"/agy-model-bridge "*|"abridge"|"abridge "*|"agy-bridge"|"agy-bridge "*|"agy-model-bridge"|"agy-model-bridge "*)
                                 kill -9 "$PID" 2>/dev/null || true
                                 ;;
                         esac
@@ -103,9 +113,9 @@ if [ "$UNINSTALL_EXECUTED" = "0" ]; then
                     ;;
                 *)
                     if [ "$IS_ES" = "1" ]; then
-                        echo -e "${YELLOW}Advertencia: El proceso PID $PID no corresponde a AGY Bridge. Omitiendo kill.${RESET}"
+                        echo -e "${YELLOW}Advertencia: El proceso PID $PID no corresponde a Abridge. Omitiendo kill.${RESET}"
                     else
-                        echo -e "${YELLOW}Warning: Process PID $PID does not match AGY Bridge. Skipping kill.${RESET}"
+                        echo -e "${YELLOW}Warning: Process PID $PID does not match Abridge. Skipping kill.${RESET}"
                     fi
                     ;;
             esac
@@ -115,6 +125,7 @@ if [ "$UNINSTALL_EXECUTED" = "0" ]; then
     rm -f "$STATE_DIR/bridge.json" "$STATE_DIR/bridge.lock"
 
     # Remove launcher scripts
+    rm -f "$BIN_DIR/abridge"
     rm -f "$BIN_DIR/agy-bridge"
     rm -f "$BIN_DIR/agy-model-bridge"
 
@@ -138,14 +149,14 @@ fi
 
 echo ""
 if [ "$IS_ES" = "1" ]; then
-    echo -e "${GREEN}${BOLD}✔ AGY Model Bridge desinstalado correctamente!${RESET}"
+    echo -e "${GREEN}${BOLD}✔ Abridge desinstalado correctamente!${RESET}"
     if [ "$RESTORED_CONFIGS" = "1" ]; then
         echo -e "  Configuraciones de clientes restauradas a su estado previo."
     fi
     echo -e "  Binarios en ${BIN_DIR} y directorio ${STATE_DIR} eliminados."
     echo ""
 else
-    echo -e "${GREEN}${BOLD}✔ AGY Model Bridge uninstalled successfully!${RESET}"
+    echo -e "${GREEN}${BOLD}✔ Abridge uninstalled successfully!${RESET}"
     if [ "$RESTORED_CONFIGS" = "1" ]; then
         echo -e "  Client configurations restored to their previous state."
     fi

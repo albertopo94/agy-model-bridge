@@ -465,7 +465,7 @@ class TestMainRootHelp(unittest.TestCase):
         with redirect_stdout(buf):
             code = main(["--version"])
         self.assertEqual(code, 0)
-        self.assertIn("v0.34.1", buf.getvalue())
+        self.assertIn("v0.35.0", buf.getvalue())
 
     def test_prog_base_resolution(self):
         from io import StringIO

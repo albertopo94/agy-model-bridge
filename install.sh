@@ -69,8 +69,8 @@ fi
 
 # 3. Clone or update repository
 mkdir -p "$(dirname "$INSTALL_DIR")"
-PINNED_VERSION="v0.34.1"
-TARGET_REF="${AGY_BRIDGE_VERSION:-$PINNED_VERSION}"
+PINNED_VERSION="v0.35.0"
+TARGET_REF="${ABRIDGE_VERSION:-${AGY_BRIDGE_VERSION:-$PINNED_VERSION}}"
 
 if [ -d "$INSTALL_DIR/.git" ]; then
     if [ "$IS_ES" = "1" ]; then
@@ -139,21 +139,22 @@ else
 fi
 
 mkdir -p "$BIN_DIR"
-LAUNCHER="$BIN_DIR/agy-bridge"
+LAUNCHER="$BIN_DIR/abridge"
 
 cat <<'EOF' > "$LAUNCHER"
 #!/usr/bin/env bash
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-STATE_DIR="${AGY_BRIDGE_STATE_DIR:-$HOME/.agy-bridge}"
-if [ -z "$AGY_BRIDGE_CORE_DIR" ] && [ -f "$STATE_DIR/.core_dir" ]; then
-    AGY_BRIDGE_CORE_DIR="$(cat "$STATE_DIR/.core_dir")"
+STATE_DIR="${ABRIDGE_STATE_DIR:-${AGY_BRIDGE_STATE_DIR:-$HOME/.abridge}}"
+if [ -z "$ABRIDGE_CORE_DIR" ] && [ -z "$AGY_BRIDGE_CORE_DIR" ] && [ -f "$STATE_DIR/.core_dir" ]; then
+    ABRIDGE_CORE_DIR="$(cat "$STATE_DIR/.core_dir")"
 fi
-CORE_DIR="${AGY_BRIDGE_CORE_DIR:-${AGY_BRIDGE_DIR:-$STATE_DIR/core}}"
+CORE_DIR="${ABRIDGE_CORE_DIR:-${AGY_BRIDGE_CORE_DIR:-${AGY_BRIDGE_DIR:-$STATE_DIR/core}}}"
 export PYTHONPATH="$CORE_DIR:$PYTHONPATH"
 exec python3 -u -c "import sys, os; core = sys.argv.pop(1); cwd = os.getcwd(); sys.path = [p for p in sys.path if p not in ('', cwd)]; sys.path.insert(0, core); from bridge.__main__ import main; sys.exit(main())" "$CORE_DIR" "$@"
 EOF
 
 chmod 755 "$LAUNCHER"
+ln -sf "$LAUNCHER" "$BIN_DIR/agy-bridge"
 ln -sf "$LAUNCHER" "$BIN_DIR/agy-model-bridge"
 
 # 5. Check PATH
@@ -167,7 +168,7 @@ esac
 
 echo ""
 if [ "$IS_ES" = "1" ]; then
-    echo -e "${GREEN}${BOLD}✔ AGY Model Bridge instalado correctamente!${RESET}"
+    echo -e "${GREEN}${BOLD}✔ Abridge instalado correctamente!${RESET}"
     echo -e "  Binario disponible en: ${BOLD}$LAUNCHER${RESET}"
 
     if [ -n "$PATH_NOTICE" ]; then
@@ -179,22 +180,22 @@ if [ "$IS_ES" = "1" ]; then
 
     echo ""
     echo -e "${BOLD}Comandos para empezar:${RESET}"
-    echo -e "  1. Arrancar el bridge en segundo plano:"
-    echo -e "     ${GREEN}agy-bridge start${RESET}"
+    echo -e "  1. Arrancar el gateway en segundo plano:"
+    echo -e "     ${GREEN}abridge start${RESET}"
     echo ""
     echo -e "  2. Configurar tu cliente favorito:"
-    echo -e "     ${BLUE}agy-bridge setup-claude${RESET}   # para Claude Code"
-    echo -e "     ${BLUE}agy-bridge setup-codex${RESET}    # para Codex CLI"
+    echo -e "     ${BLUE}abridge setup-claude${RESET}   # para Claude Code"
+    echo -e "     ${BLUE}abridge setup-codex${RESET}    # para Codex CLI"
     echo ""
     echo -e "  3. Ver estado o abrir el dashboard:"
-    echo -e "     ${BLUE}agy-bridge status${RESET}"
-    echo -e "     ${BLUE}agy-bridge dashboard${RESET}"
+    echo -e "     ${BLUE}abridge status${RESET}"
+    echo -e "     ${BLUE}abridge dashboard${RESET}"
     echo ""
     echo -e "  4. Detener el servicio cuando termines:"
-    echo -e "     ${YELLOW}agy-bridge stop${RESET}"
+    echo -e "     ${YELLOW}abridge stop${RESET}"
     echo ""
 else
-    echo -e "${GREEN}${BOLD}✔ AGY Model Bridge installed successfully!${RESET}"
+    echo -e "${GREEN}${BOLD}✔ Abridge installed successfully!${RESET}"
     echo -e "  Binary available at: ${BOLD}$LAUNCHER${RESET}"
 
     if [ -n "$PATH_NOTICE" ]; then
@@ -206,18 +207,18 @@ else
 
     echo ""
     echo -e "${BOLD}Commands to get started:${RESET}"
-    echo -e "  1. Start the bridge in the background:"
-    echo -e "     ${GREEN}agy-bridge start${RESET}"
+    echo -e "  1. Start the gateway in the background:"
+    echo -e "     ${GREEN}abridge start${RESET}"
     echo ""
     echo -e "  2. Configure your favorite client:"
-    echo -e "     ${BLUE}agy-bridge setup-claude${RESET}   # for Claude Code"
-    echo -e "     ${BLUE}agy-bridge setup-codex${RESET}    # for Codex CLI"
+    echo -e "     ${BLUE}abridge setup-claude${RESET}   # for Claude Code"
+    echo -e "     ${BLUE}abridge setup-codex${RESET}    # for Codex CLI"
     echo ""
     echo -e "  3. Check status or open the dashboard:"
-    echo -e "     ${BLUE}agy-bridge status${RESET}"
-    echo -e "     ${BLUE}agy-bridge dashboard${RESET}"
+    echo -e "     ${BLUE}abridge status${RESET}"
+    echo -e "     ${BLUE}abridge dashboard${RESET}"
     echo ""
     echo -e "  4. Stop the service when done:"
-    echo -e "     ${YELLOW}agy-bridge stop${RESET}"
+    echo -e "     ${YELLOW}abridge stop${RESET}"
     echo ""
 fi
