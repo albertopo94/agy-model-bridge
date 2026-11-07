@@ -2051,6 +2051,7 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
         self.assertIn("git pull failed", output)
 
     def test_cli_version_flags(self):
+        from bridge import __version__
         from bridge.__main__ import main
         import io
         from contextlib import redirect_stdout
@@ -2060,9 +2061,10 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main([flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.34.1")
+            self.assertEqual(f.getvalue().strip(), f"abridge v{__version__}")
 
     def test_cli_subcommand_version_flags(self):
+        from bridge import __version__
         from bridge.__main__ import main
         import io
         from contextlib import redirect_stdout
@@ -2072,7 +2074,7 @@ class TestCLIUpdateAndVersion(unittest.TestCase):
             with redirect_stdout(f):
                 exit_code = main(["update", flag])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(f.getvalue().strip(), "agy-bridge v0.34.1")
+            self.assertEqual(f.getvalue().strip(), f"abridge v{__version__}")
 
     def test_cli_restart_dispatch(self):
         from bridge.__main__ import main

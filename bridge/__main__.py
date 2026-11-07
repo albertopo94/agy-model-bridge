@@ -74,12 +74,16 @@ def main(argv: list[str] | None = None) -> int:
     if lang_flag is not None:
         set_locale(lang_flag)
 
-    prog_base = Path(sys.argv[0]).name if sys.argv and sys.argv[0] else "agy-bridge"
-    if prog_base.endswith(".py"):
+    raw_prog = Path(sys.argv[0]).name if sys.argv and sys.argv[0] else "abridge"
+    if raw_prog in ("abridge", "agy-bridge", "agy-model-bridge"):
+        prog_base = raw_prog
+    elif raw_prog.endswith(".py"):
         prog_base = "python3 -m bridge"
+    else:
+        prog_base = "abridge"
 
     if argv and any(a in ("--version", "-v") for a in argv):
-        print(f"agy-bridge v{__version__}")
+        print(f"{prog_base} v{__version__}")
         return 0
 
     # Root help must list the real subcommands, not just the foreground-server

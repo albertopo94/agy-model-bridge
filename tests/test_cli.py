@@ -466,3 +466,24 @@ class TestMainRootHelp(unittest.TestCase):
             code = main(["--version"])
         self.assertEqual(code, 0)
         self.assertIn("v0.34.1", buf.getvalue())
+
+    def test_prog_base_resolution(self):
+        from io import StringIO
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+        from bridge import __version__
+
+        cases = [
+            ("abridge", f"abridge v{__version__}"),
+            ("agy-bridge", f"agy-bridge v{__version__}"),
+            ("agy-model-bridge", f"agy-model-bridge v{__version__}"),
+            ("my_script.py", f"python3 -m bridge v{__version__}"),
+            ("", f"abridge v{__version__}"),
+        ]
+        for arg0, expected in cases:
+            with patch("sys.argv", [arg0]):
+                buf = StringIO()
+                with redirect_stdout(buf):
+                    code = main(["--version"])
+                self.assertEqual(code, 0)
+                self.assertEqual(buf.getvalue().strip(), expected)

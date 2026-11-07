@@ -224,7 +224,7 @@ class TestServerEndpoints(unittest.TestCase):
         status, headers, body = self._http_get("/healthz")
         self.assertEqual(status, 200)
         self.assertEqual(body.get("status"), "ok")
-        self.assertEqual(body.get("service"), "agy-model-bridge")
+        self.assertEqual(body.get("service"), "abridge")
         self.assertIn("version", body)
         self.assertEqual(headers.get_content_type(), "application/json")
 
@@ -1021,7 +1021,7 @@ class TestServerEndpoints(unittest.TestCase):
         status, _, body = self._http_get("/healthz/")
         self.assertEqual(status, 200)
         self.assertEqual(body.get("status"), "ok")
-        self.assertEqual(body.get("service"), "agy-model-bridge")
+        self.assertEqual(body.get("service"), "abridge")
 
         status, _, body = self._http_get("/v1/models/")
         self.assertEqual(status, 200)

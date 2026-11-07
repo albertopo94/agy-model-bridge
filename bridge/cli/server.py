@@ -20,7 +20,7 @@ def handle_server(argv: list[str], prog_base: str, run_server_fn: Any = None) ->
         "-v",
         "--version",
         action="version",
-        version=f"agy-bridge v{__version__}",
+        version=f"{prog_base} v{__version__}",
     )
     parser.add_argument(
         "--host",
