@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Abridge - Zero-dependency uninstaller for macOS & Linux
-# Usage: curl -fsSL https://raw.githubusercontent.com/albertopo94/agy-model-bridge/main/uninstall.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/albertopo94/abridge/main/uninstall.sh | bash
 
 set -e
 

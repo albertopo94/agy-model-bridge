@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # AGY Model Bridge - Zero-dependency installer for macOS & Linux
-# Usage: curl -fsSL https://raw.githubusercontent.com/albertopo94/agy-model-bridge/main/install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/albertopo94/abridge/main/install.sh | bash
 
 set -e
 
-REPO_URL="https://github.com/albertopo94/agy-model-bridge.git"
+REPO_URL="https://github.com/albertopo94/abridge.git"
 STATE_DIR="${AGY_BRIDGE_STATE_DIR:-$HOME/.agy-bridge}"
 INSTALL_DIR="${AGY_BRIDGE_CORE_DIR:-${AGY_BRIDGE_DIR:-$STATE_DIR/core}}"
 BIN_DIR="${AGY_BRIDGE_BIN:-$HOME/.local/bin}"

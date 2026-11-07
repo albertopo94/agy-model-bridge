@@ -1508,7 +1508,7 @@ def render_dashboard(
             <span class="lang-divider">|</span>
             <button type="button" id="btn-lang-es" class="lang-btn{active_es}" onclick="setLanguage('es')">ES</button>
           </div>
-          <a href="https://github.com/albertopo94/agy-model-bridge" target="_blank" rel="noopener noreferrer" class="github-link" title="GitHub Repository">
+          <a href="https://github.com/albertopo94/abridge" target="_blank" rel="noopener noreferrer" class="github-link" title="GitHub Repository">
             {GITHUB_ICON_SVG}
           </a>
         </div>

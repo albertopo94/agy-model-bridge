@@ -315,7 +315,7 @@ class TestDashboardRendering(unittest.TestCase):
         auth_status = {"status": "Valid", "email": "user@google.com", "message": "Authenticated"}
         html = render_dashboard("127.0.0.1", 24980, auth_status, models_count=27)
 
-        self.assertIn("https://github.com/albertopo94/agy-model-bridge", html)
+        self.assertIn("https://github.com/albertopo94/abridge", html)
         self.assertIn('class="github-link"', html)
         self.assertIn('class="github-icon"', html)
         self.assertIn('target="_blank"', html)

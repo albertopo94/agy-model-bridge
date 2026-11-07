@@ -72,14 +72,14 @@ The bridge protects all `/v1/*` endpoints with a persistent random token stored 
 Run directly in your terminal to install `abridge` (and `agy-bridge` alias) into `~/.local/bin` without manual Git cloning:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/albertopo94/agy-model-bridge/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/albertopo94/abridge/main/install.sh | bash
 ```
 
 ### Option B: Local development or pip
 
 ```bash
-git clone https://github.com/albertopo94/agy-model-bridge.git
-cd agy-model-bridge
+git clone https://github.com/albertopo94/abridge.git
+cd abridge
 pip install -e .
 ```
 
@@ -403,7 +403,7 @@ Options:
 ### Option B: One-line uninstaller (Remote / Script)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/albertopo94/agy-model-bridge/main/uninstall.sh | bash
+curl -fsSL https://raw.githubusercontent.com/albertopo94/abridge/main/uninstall.sh | bash
 ```
 
 ---
