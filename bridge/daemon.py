@@ -109,6 +109,8 @@ def read_pid(pid_file: Path | None = None) -> int | None:
     """Reads and parses the PID from the PID file. Returns None if invalid or missing."""
     if pid_file is not None:
         targets = [Path(pid_file)]
+        if targets[0] == get_default_pid_file():
+            targets.append(get_legacy_daemon_dir() / "bridge.pid")
     else:
         targets = [get_default_pid_file(), get_legacy_daemon_dir() / "bridge.pid"]
     for target in targets:
@@ -164,6 +166,8 @@ def read_daemon_info(info_file: Path | None = None) -> dict[str, Any] | None:
     """Reads and parses daemon info from bridge.json. Returns None if invalid or missing."""
     if info_file is not None:
         targets = [Path(info_file)]
+        if targets[0] == get_default_info_file():
+            targets.append(get_legacy_daemon_dir() / "bridge.json")
     else:
         targets = [get_default_info_file(), get_legacy_daemon_dir() / "bridge.json"]
     for target in targets:
@@ -522,11 +526,26 @@ def stop_daemon(
     if not pid or not is_pid_alive(pid):
         remove_pid(pid_file=target_pid_file)
         remove_daemon_info(info_file=target_info_file)
-        return {"status": "not_running", "pid": pid}
+        if target_pid_file == get_default_pid_file():
+            legacy_pid = read_pid(pid_file=get_legacy_daemon_dir() / "bridge.pid")
+            if legacy_pid and is_pid_alive(legacy_pid) and is_bridge_process(legacy_pid):
+                pid = legacy_pid
+                target_pid_file = get_legacy_daemon_dir() / "bridge.pid"
+                target_info_file = get_legacy_daemon_dir() / "bridge.json"
+            else:
+                remove_pid(pid_file=get_legacy_daemon_dir() / "bridge.pid")
+                remove_daemon_info(info_file=get_legacy_daemon_dir() / "bridge.json")
+                return {"status": "not_running", "pid": pid}
+        else:
+            return {"status": "not_running", "pid": pid}
 
     if not is_bridge_process(pid):
         remove_pid(pid_file=target_pid_file)
         remove_daemon_info(info_file=target_info_file)
+        if target_pid_file == get_default_pid_file():
+            remove_pid(pid_file=get_legacy_daemon_dir() / "bridge.pid")
+        if target_info_file == get_default_info_file():
+            remove_daemon_info(info_file=get_legacy_daemon_dir() / "bridge.json")
         return {"status": "not_running", "pid": None}
 
     info = read_daemon_info(info_file=target_info_file)
@@ -567,6 +586,10 @@ def stop_daemon(
 
     remove_pid(pid_file=target_pid_file)
     remove_daemon_info(info_file=target_info_file)
+    if target_pid_file == get_default_pid_file():
+        remove_pid(pid_file=get_legacy_daemon_dir() / "bridge.pid")
+    if target_info_file == get_default_info_file():
+        remove_daemon_info(info_file=get_legacy_daemon_dir() / "bridge.json")
     return {"status": "stopped", "pid": pid}
 
 
