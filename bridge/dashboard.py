@@ -1266,6 +1266,14 @@ def render_dashboard(
       margin-top: 0.25rem;
       opacity: 0.8;
     }}
+    .quota-auth-footer {{
+      margin-top: 0.5rem;
+      padding-top: 0.75rem;
+      border-top: 1px solid var(--card-border);
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+    }}
     .quota-skeleton {{
       display: flex;
       flex-direction: column;
@@ -1507,10 +1515,6 @@ def render_dashboard(
       </div>
       <div class="badges">
         <span class="badge">🌐 {address}</span>
-        <span class="badge {agy_badge_class}" data-i18n="agy_available">⚛️ {html.escape(agy_label)}</span>
-        <span class="badge {auth_badge_class}" data-i18n="auth" data-status="{html.escape(status_name)}" data-email="{html.escape(email or '')}">🛡️ {html.escape(auth_label)}</span>
-        <span class="badge {api_key_badge_class}" data-i18n="api_key_badge" data-configured="{str(has_api_key).lower()}">🔑 {html.escape(api_key_label)}</span>
-        <span class="badge badge-models" data-i18n="models" data-count="{models_count}">⚡ {models_label}</span>
       </div>
     </header>
 
@@ -1545,6 +1549,9 @@ def render_dashboard(
           </div>
           <div id="quota-notice" style="display: none;"></div>
           <div id="quota-footnote" class="quota-footnote" style="display: none;"></div>
+          <div class="quota-auth-footer">
+            <span class="badge {auth_badge_class}" data-i18n="auth" data-status="{html.escape(status_name)}" data-email="{html.escape(email or '')}">🛡️ {html.escape(auth_label)}</span>
+          </div>
         </div>
 
         <div id="cursor-quota-card" class="quota-card" style="display: none;">

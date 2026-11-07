@@ -306,11 +306,10 @@ class TestDashboardRendering(unittest.TestCase):
 
         # Address badge
         self.assertIn("127.0.0.1:24980", html)
-        # Keychain Auth badge
+        # Keychain Auth badge inside quota card footer
+        self.assertIn("quota-auth-footer", html)
         self.assertIn("Valid", html)
         self.assertIn("user@google.com", html)
-        # Models count badge
-        self.assertIn("27 Models Discovered", html)
 
     def test_github_header_link(self):
         auth_status = {"status": "Valid", "email": "user@google.com", "message": "Authenticated"}
@@ -884,7 +883,6 @@ class TestDashboardBilingual(unittest.TestCase):
         self.assertIn("Automatic configuration", html)
         self.assertIn("Manual connection", html)
         self.assertIn("Restore configuration", html)
-        self.assertIn("10 Models Discovered", html)
         self.assertIn(f"Abridge &bull; v{__version__} &bull; Local Gateway", html)
 
     def test_render_dashboard_spanish(self):
@@ -896,7 +894,6 @@ class TestDashboardBilingual(unittest.TestCase):
         self.assertIn("Configuración automática", html)
         self.assertIn("Conexión manual", html)
         self.assertIn("Restaurar configuración", html)
-        self.assertIn("10 Modelos Descubiertos", html)
         self.assertIn(f"Abridge &bull; v{__version__} &bull; Gateway local", html)
 
     def test_render_dashboard_client_side_i18n_script(self):
@@ -1120,23 +1117,23 @@ class TestOpencodeQuotaTab(unittest.TestCase):
 
 
 class TestAgyAvailabilityBadge(unittest.TestCase):
-    """The AGY badge must mirror the live auth verdict, so it reflects a
-    refreshed credential without a restart (the routing guard and the badge
-    are independent)."""
+    """The Antigravity auth badge in the quota card mirrors the live auth verdict,
+    so it reflects a refreshed credential without a restart."""
 
     def test_badge_green_when_auth_valid(self):
         auth = {"status": "Valid", "email": "d@e.com", "message": "ok"}
         html = render_dashboard("127.0.0.1", 24980, auth, 10)
-        self.assertIn("AGY available", html)
-        self.assertNotIn("AGY unavailable", html)
+        self.assertIn("quota-auth-footer", html)
+        self.assertIn("Valid (d@e.com)", html)
+        self.assertIn("badge-success", html)
 
     def test_badge_red_when_auth_not_valid(self):
         for stale in ("Expired", "Missing", "Rejected", "Unknown"):
             with self.subTest(stale=stale):
                 auth = {"status": stale, "message": "gone"}
                 html = render_dashboard("127.0.0.1", 24980, auth, 10)
-                self.assertIn("AGY unavailable", html)
-                self.assertNotIn("AGY available", html)
+                self.assertIn("quota-auth-footer", html)
+                self.assertIn(stale, html)
 
 
 class TestOpencodeProviderTabOnClientCards(unittest.TestCase):
