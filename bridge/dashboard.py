@@ -668,10 +668,6 @@ def render_dashboard(
     active_en = " active" if not is_es else ""
     active_es = " active" if is_es else ""
     active_key = '$(cat ~/.abridge/api_key 2>/dev/null || cat ~/.agy-bridge/api_key)'
-    has_api_key = bool(api_key and str(api_key).strip())
-    api_key_badge_class = "badge-success" if has_api_key else "badge-warning"
-    api_key_word = ("Configurada" if is_es else "Configured") if has_api_key else ("No requerida" if is_es else "Not required")
-    api_key_label = f"API Key: {api_key_word}"
 
     safe_host = html.escape(str(host))
     safe_port = html.escape(str(port))
@@ -709,14 +705,6 @@ def render_dashboard(
         auth_badge_class = "badge-danger"
         auth_label = "Faltante — Abrí Antigravity para renovar" if is_es else f"Missing — {message}"
 
-    models_label = f"{models_count} Modelos Descubiertos" if is_es else f"{models_count} Models Discovered"
-
-    # AGY availability mirrors the live auth verdict (the same probe that
-    # licenses the auth badge), so it cannot go stale between boots.
-    agy_badge_class = "badge-success" if status_name == "Valid" else "badge-danger"
-    agy_label = "AGY disponible" if is_es else "AGY available"
-    if status_name != "Valid":
-        agy_label = "AGY no disponible" if is_es else "AGY unavailable"
     setup_auto_title = "Configuración automática" if is_es else "Automatic configuration"
     setup_manual_title = "Conexión manual" if is_es else "Manual connection"
     setup_restore_title = "Restaurar configuración" if is_es else "Restore configuration"
