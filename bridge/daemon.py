@@ -663,7 +663,7 @@ def get_daemon_status(
         }
     else:
         unbound_status = fetch_status_json(effective_host, effective_port, timeout=0.5)
-        if unbound_status and unbound_status.get("service") == "agy-model-bridge":
+        if unbound_status and unbound_status.get("service") in ("abridge", "abridge-ai", "agy-model-bridge"):
             return {
                 "running": True,
                 "pid": None,
